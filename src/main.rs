@@ -10,6 +10,7 @@
 //! the length of each line it echos and the total size of data sent when the connection is closed.
 mod config_build;
 mod ab_client;
+mod handler;
 
 use tokio::net::TcpListener;
 use tokio::prelude::*;
@@ -24,6 +25,7 @@ use crate::ab_client::State::{Dead, Busy, Ready};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use tokio::time::Duration;
+use crate::handler::{Handle, TestHandler};
 
 fn del_client(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize)
 {
@@ -103,6 +105,7 @@ fn handle_request<'a>(reading:&mut bool,data:&mut Vec<u8>,buf_rest:&mut [u8],buf
     }
 }
 
+
 const TOKEN_BEGIN:u8 = 7u8;
 const TOKEN_END:u8 = 9u8;
 
@@ -121,6 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut logic_id_ = Arc::new(Mutex::new(0usize));
     let mut ab_clients = Arc::new(Mutex::new(HashMap::<usize,Box<AbClient>>::new()));
+    let mut handler = TestHandler{};
 
     let listener = TcpListener::bind(config.addr).await?;
 
@@ -182,16 +186,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 /// handle request
                 //dbg!(&buf_rest);
-                handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,&|d|{
-                    dbg!(d);
+
+                handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,& |d|{
+                     dbg!(&d);
+                     let respose = handler.handle(d);
+                    let mut write_bit:usize = 0;
+                    loop {
+                        match socket.try_write(respose.as_slice()) {
+                            Ok(n) => {
+                                write_bit += n;
+                                if write_bit == respose.len() {
+                                    break;
+                                }
+                            }
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                continue;
+                            }
+                            Err(e) => {
+                                eprintln!("write error = {}", e);
+                                break;
+                            }
+                        }
+                    }
+
                 });
                 //println!("{} handle the request....", logic_id);
                 //println!("{} check the write_buf....", logic_id);
+
                 if let Some(w_buf) = get_client_write_buf(&mut ab_clients_cp,logic_id)
                 {
                     socket.write(w_buf.as_slice()).await;
                 }else {
-                    async_std::task::sleep(Duration::from_millis(10));
+                    async_std::task::sleep(Duration::from_millis(10)).await;
                 }
                 set_client_st(&mut ab_clients_cp,logic_id,Ready);
             }
