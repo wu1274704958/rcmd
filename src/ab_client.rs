@@ -20,20 +20,20 @@ pub struct AbClient
     pub addr: SocketAddr,
     pub logic_id:usize,
     pub form_thread:ThreadId,
-    pub socket:TcpStream,
-    pub state:State
+    pub state:State,
+    pub write_buf:Option<Vec<u8>>
 }
 
 impl AbClient {
-    pub fn new(local_addr: SocketAddr,addr:SocketAddr,logic_id:usize,form_thread:ThreadId,socket:TcpStream)->AbClient
+    pub fn new(local_addr: SocketAddr,addr:SocketAddr,logic_id:usize,form_thread:ThreadId)->AbClient
     {
         AbClient{
             local_addr,
             addr,
             logic_id,
             form_thread,
-            socket,
-            state:Ready
+            state:Ready,
+            write_buf:None
         }
     }
 }

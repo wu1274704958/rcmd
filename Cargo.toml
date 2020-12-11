@@ -8,7 +8,12 @@ edition = "2018"
 
 [dependencies]
 tokio = { version="0.3.5", features = ["full"]}
+async-std = "1.8.0"
 
 [[example]]
 name = "client"
 path = "src/client.rs"
+
+[[example]]
+name = "learn_async"
+path = "src/learn_async.rs"

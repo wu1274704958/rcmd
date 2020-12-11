@@ -3,6 +3,7 @@ use std::net::{SocketAddr, SocketAddrV4, IpAddr, Ipv4Addr};
 use tokio::io;
 use tokio::prelude::*;
 use std::ffi::{CString, CStr};
+use async_std::net::Shutdown;
 
 #[tokio::main]
 async fn main() ->  io::Result<()>
@@ -13,16 +14,9 @@ async fn main() ->  io::Result<()>
 
     if let Ok(()) = stream.writable().await
     {
-        stream.try_write("hello".as_bytes());
-    }
-
-    if let Ok(()) = stream.readable().await
-    {
-        let mut buf = [0u8;100];
-        let n = stream.read(&mut buf).await?;
-        dbg!(buf);
-        let msg = unsafe {CStr::from_bytes_with_nul_unchecked(&buf)};
-        println!("msg = {:?} len = {}",msg,n);
+        let n = [7u8,97,98,9,67,9,6,7,56,45,90,87,7,9];
+        println!("write .............");
+        stream.write(&n).await?;
     }
 
     Ok(())
