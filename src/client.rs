@@ -6,57 +6,11 @@ use std::ffi::{CString, CStr};
 use async_std::net::Shutdown;
 use tokio::time::Duration;
 
-
-fn read_form_buf(reading:&mut bool,buf:&[u8],n:usize,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:&mut usize)->bool{
-    let mut has_rest = false;
-    let mut end_idx = 0usize;
-    for i in 0..n{
-        if !(*reading){
-            if buf[i] == TOKEN_BEGIN{
-                *reading = true;
-                continue;
-            }
-        }else{
-            if buf[i] == TOKEN_END{
-                *reading = false;
-                has_rest = true;
-                end_idx = i;
-                break;
-            }else{
-                data.push(buf[i]);
-            }
-        }
-    }
-    if has_rest && end_idx < n
-    {
-        let mut j = 0;
-        for i in end_idx..n {
-            buf_rest[j] = buf[i];
-            j += 1;
-        }
-        *buf_rest_len = j;
-    }
-
-    has_rest && end_idx < n
-}
-
-fn handle_request<'a>(reading:&mut bool,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:usize,f:&'a dyn Fn(&mut Vec<u8>))
-{
-    if !(*reading) && !data.is_empty(){
-        // handle
-        f(data);
-        data.clear();
-        if buf_rest_len > 0{
-            let mut rest = [0u8;1024];
-            let mut rest_len = 0usize;
-            read_form_buf(reading,&buf_rest,buf_rest_len,data,&mut rest,&mut rest_len);
-            handle_request(reading,data,&mut rest,rest_len,f);
-        }
-    }
-}
-
-const TOKEN_BEGIN:u8 = 7u8;
-const TOKEN_END:u8 = 9u8;
+mod config_build;
+mod ab_client;
+mod handler;
+mod tools;
+use tools::*;
 
 #[tokio::main]
 async fn main() ->  io::Result<()>
