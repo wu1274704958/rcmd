@@ -10,6 +10,7 @@ mod config_build;
 mod ab_client;
 mod handler;
 mod tools;
+mod agreement;
 use tools::*;
 
 #[tokio::main]
@@ -51,8 +52,11 @@ async fn main() ->  io::Result<()>
         /// handle request
         //dbg!(&buf_rest);
 
-        handle_request(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &|d| {
+        handle_request(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &mut |d| {
             dbg!(&d);
+            let a = u32::from_be_bytes([0u8,0,0,1]);
+
+            dbg!(a);
         });
     }
 

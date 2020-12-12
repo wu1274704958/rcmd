@@ -2,6 +2,16 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use crate::ab_client::{AbClient, State};
 
+
+pub const TOKEN_BEGIN:u8 = 7u8;
+pub const TOKEN_END:u8 = 9u8;
+
+#[cfg(target_endian = "little")]
+pub const BigEndian:bool = false;
+
+#[cfg(target_endian = "big")]
+pub const BigEndian:bool = true;
+
 pub fn del_client(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>, id:usize)
 {
     let mut cs_ = cs.lock().unwrap();
@@ -65,7 +75,7 @@ pub fn read_form_buf(reading:&mut bool,buf:&[u8],n:usize,data:&mut Vec<u8>,buf_r
     has_rest && end_idx < n
 }
 
-pub fn handle_request<'a>(reading:&mut bool,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:usize,f:&'a dyn Fn(&mut Vec<u8>))
+pub fn handle_request<'a>(reading:&mut bool,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:usize,f:&'a mut dyn FnMut(&mut Vec<u8>))
 {
     if !(*reading) && !data.is_empty(){
         // handle
@@ -80,6 +90,24 @@ pub fn handle_request<'a>(reading:&mut bool,data:&mut Vec<u8>,buf_rest:&mut [u8]
     }
 }
 
+pub fn u32_form_bytes(b:&[u8])->u32
+{
+    if b.len() < 4{ return 0; }
+    let mut a = [0u8;4];
+    a.copy_from_slice(b);
+    u32::from_be_bytes(a)
+}
 
-pub const TOKEN_BEGIN:u8 = 7u8;
-pub const TOKEN_END:u8 = 9u8;
+pub fn set_slices_form_u32(b:&mut [u8],v:u32)
+{
+    if b.len() < 4{ return; }
+    let a = v.to_be_bytes();
+    for i in 0..4{
+        b[i] = a[i];
+    }
+}
+
+
+
+
+

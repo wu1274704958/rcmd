@@ -3,6 +3,7 @@ mod config_build;
 mod ab_client;
 mod handler;
 mod tools;
+mod agreement;
 
 use tokio::net::TcpListener;
 use tokio::prelude::*;
@@ -19,6 +20,7 @@ use std::collections::HashMap;
 use tokio::time::Duration;
 use crate::handler::{Handle, TestHandler};
 use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request};
+use crate::agreement::{DefParser, Agreement};
 
 
 #[tokio::main]
@@ -37,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut logic_id_ = Arc::new(Mutex::new(0usize));
     let mut ab_clients = Arc::new(Mutex::new(HashMap::<usize,Box<AbClient>>::new()));
     let mut handler = TestHandler{};
+    let parser = DefParser{};
 
     let listener = TcpListener::bind(config.addr).await?;
 
@@ -99,28 +102,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 /// handle request
                 //dbg!(&buf_rest);
 
-                handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,& |d|{
+                handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,&mut |d|{
                      dbg!(&d);
-                     let respose = handler.handle(d);
-                    let mut write_bit:usize = 0;
-                    loop {
-                        match socket.try_write(respose.as_slice()) {
-                            Ok(n) => {
-                                write_bit += n;
-                                if write_bit == respose.len() {
+                    let msg = parser.parse(d);
+                    if let Some(ref m) = msg {
+                        let respose = handler.handle(m, &mut ab_clients_cp, logic_id);
+                        let mut write_bit: usize = 0;
+                        loop {
+                            match socket.try_write(respose.as_slice()) {
+                                Ok(n) => {
+                                    write_bit += n;
+                                    if write_bit == respose.len() {
+                                        break;
+                                    }
+                                }
+                                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                    continue;
+                                }
+                                Err(e) => {
+                                    eprintln!("write error = {}", e);
                                     break;
                                 }
                             }
-                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                                continue;
-                            }
-                            Err(e) => {
-                                eprintln!("write error = {}", e);
-                                break;
-                            }
                         }
                     }
-
                 });
                 //println!("{} handle the request....", logic_id);
                 //println!("{} check the write_buf....", logic_id);
