@@ -23,7 +23,7 @@ impl<'a> Handle<'a> for TestHandler {
     type Data = Message<'a>;
 
     fn handle(&self, data: &'a Message<'a>, clients: &'a mut Arc<Mutex<HashMap<usize, Box<Self::ABClient>>>>,id:Self::Id) -> Vec<u8> {
-        return vec![7,b'{',b'"',b'r',b'e',b't',b'"',b':',b'0',b'}',9];
+        return vec![b'{',b'"',b'r',b'e',b't',b'"',b':',b'0',b'}'];
     }
 }
 

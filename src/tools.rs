@@ -94,7 +94,7 @@ pub fn u32_form_bytes(b:&[u8])->u32
 {
     if b.len() < 4{ return 0; }
     let mut a = [0u8;4];
-    a.copy_from_slice(b);
+    a.copy_from_slice(&b[0..4]);
     u32::from_be_bytes(a)
 }
 

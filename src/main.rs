@@ -70,7 +70,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             socket.readable().await;
 
             let mut reading = false;
-            let mut data_len = 0usize;
             let mut data = Vec::new();
             let mut buf_rest = [0u8;1024];
             let mut buf_rest_len = 0usize;
@@ -107,12 +106,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let msg = parser.parse(d);
                     if let Some(ref m) = msg {
                         let respose = handler.handle(m, &mut ab_clients_cp, logic_id);
+                        let pkg = parser.package(respose,0);
                         let mut write_bit: usize = 0;
+                        let max_bit = pkg.len();
                         loop {
-                            match socket.try_write(respose.as_slice()) {
+                            match socket.try_write(pkg.as_slice()) {
                                 Ok(n) => {
                                     write_bit += n;
-                                    if write_bit == respose.len() {
+                                    if write_bit == max_bit {
                                         break;
                                     }
                                 }

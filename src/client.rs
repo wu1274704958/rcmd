@@ -12,6 +12,7 @@ mod handler;
 mod tools;
 mod agreement;
 use tools::*;
+use agreement::{DefParser,Agreement};
 
 #[tokio::main]
 async fn main() ->  io::Result<()>
@@ -26,7 +27,11 @@ async fn main() ->  io::Result<()>
     let mut buf_rest_len = 0usize;
     // In a loop, read data from the socket and write the data back.
 
-    stream.write(&[7,67,89,0,9,12,3,7,67,89,0,9]).await;
+    let pakager = DefParser{};
+
+    let pkg = pakager.package("hello".as_bytes().to_vec(),1);
+    dbg!(&pkg);
+    stream.write(pkg.as_slice()).await;
 
     loop {
         /// read request
@@ -54,9 +59,6 @@ async fn main() ->  io::Result<()>
 
         handle_request(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &mut |d| {
             dbg!(&d);
-            let a = u32::from_be_bytes([0u8,0,0,1]);
-
-            dbg!(a);
         });
     }
 
