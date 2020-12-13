@@ -12,7 +12,8 @@ mod handler;
 mod tools;
 mod agreement;
 use tools::*;
-use agreement::{DefParser,Agreement};
+use agreement::*;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() ->  io::Result<()>
@@ -27,11 +28,14 @@ async fn main() ->  io::Result<()>
     let mut buf_rest_len = 0usize;
     // In a loop, read data from the socket and write the data back.
 
-    let pakager = DefParser{};
+    let mut pakager = DefParser::new();
+    pakager.add_transform(Arc::new(TestDataTransform{}));
+    pakager.add_transform(Arc::new(Test2DataTransform{}));
 
-    let pkg = pakager.package("hello".as_bytes().to_vec(),1);
-    dbg!(&pkg);
-    stream.write(pkg.as_slice()).await;
+    let pkg = pakager.package_tf("gello".as_bytes().to_vec(),1);
+    dbg!("gello".as_bytes());
+    let real_pkg = real_package(pkg);
+    stream.write(real_pkg.as_slice()).await;
 
     loop {
         /// read request

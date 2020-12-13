@@ -107,6 +107,15 @@ pub fn set_slices_form_u32(b:&mut [u8],v:u32)
     }
 }
 
+pub fn real_package(mut pkg:Vec<u8>)->Vec<u8>
+{
+    let mut real_pkg = Vec::new();
+    real_pkg.push(TOKEN_BEGIN);
+    real_pkg.append(&mut pkg);
+    real_pkg.push(TOKEN_END);
+    real_pkg
+}
+
 
 
 

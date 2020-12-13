@@ -19,8 +19,8 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use tokio::time::Duration;
 use crate::handler::{Handle, TestHandler};
-use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request};
-use crate::agreement::{DefParser, Agreement};
+use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request, TOKEN_BEGIN, TOKEN_END, real_package};
+use crate::agreement::{DefParser, Agreement,TestDataTransform,Test2DataTransform};
 
 
 #[tokio::main]
@@ -39,7 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut logic_id_ = Arc::new(Mutex::new(0usize));
     let mut ab_clients = Arc::new(Mutex::new(HashMap::<usize,Box<AbClient>>::new()));
     let mut handler = TestHandler{};
-    let parser = DefParser{};
+    let mut parser = DefParser::new();
+    parser.add_transform(Arc::new(TestDataTransform{}));
+    parser.add_transform(Arc::new(Test2DataTransform{}));
 
     let listener = TcpListener::bind(config.addr).await?;
 
@@ -47,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut logic_id_cp = logic_id_.clone();
         let mut ab_clients_cp = ab_clients.clone();
         let (mut socket, _) = listener.accept().await?;
-
+        let parser_cp = parser.clone();
         rt.spawn(async move {
             let mut logic_id = 0usize;
             {
@@ -102,15 +104,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //dbg!(&buf_rest);
 
                 handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,&mut |d|{
-                     dbg!(&d);
-                    let msg = parser.parse(d);
+
+                    let msg = parser_cp.parse_tf(d);
+                    dbg!(&msg);
                     if let Some(ref m) = msg {
                         let respose = handler.handle(m, &mut ab_clients_cp, logic_id);
-                        let pkg = parser.package(respose,0);
+                        let mut pkg = parser_cp.package_tf(respose,0);
+                        let mut real_pkg = real_package(pkg);
                         let mut write_bit: usize = 0;
-                        let max_bit = pkg.len();
+                        let max_bit = real_pkg.len();
                         loop {
-                            match socket.try_write(pkg.as_slice()) {
+                            match socket.try_write(real_pkg.as_slice()) {
                                 Ok(n) => {
                                     write_bit += n;
                                     if write_bit == max_bit {
