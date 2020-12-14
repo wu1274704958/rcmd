@@ -29,11 +29,10 @@ async fn main() ->  io::Result<()>
     // In a loop, read data from the socket and write the data back.
 
     let mut pakager = DefParser::new();
-    pakager.add_transform(Arc::new(TestDataTransform{}));
-    pakager.add_transform(Arc::new(Test2DataTransform{}));
+    //pakager.add_transform(Arc::new(TestDataTransform{}));
+    //pakager.add_transform(Arc::new(Test2DataTransform{}));
 
     let pkg = pakager.package_tf("gello".as_bytes().to_vec(),1);
-    dbg!("gello".as_bytes());
     let real_pkg = real_package(pkg);
     stream.write(real_pkg.as_slice()).await;
 
@@ -62,7 +61,9 @@ async fn main() ->  io::Result<()>
         //dbg!(&buf_rest);
 
         handle_request(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &mut |d| {
-            dbg!(&d);
+            let msg = pakager.parse_tf(d);
+            dbg!(&msg);
+            dbg!(String::from_utf8_lossy( msg.unwrap().msg));
         });
     }
 

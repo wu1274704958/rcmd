@@ -1,4 +1,4 @@
-
+#![allow(unused_imports)]
 mod config_build;
 mod ab_client;
 mod handler;
@@ -18,7 +18,7 @@ use crate::ab_client::State::{Dead, Busy, Ready};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use tokio::time::Duration;
-use crate::handler::{Handle, TestHandler};
+use crate::handler::{Handle, TestHandler, DefHandler};
 use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request, TOKEN_BEGIN, TOKEN_END, real_package};
 use crate::agreement::{DefParser, Agreement,TestDataTransform,Test2DataTransform};
 
@@ -38,16 +38,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut logic_id_ = Arc::new(Mutex::new(0usize));
     let mut ab_clients = Arc::new(Mutex::new(HashMap::<usize,Box<AbClient>>::new()));
-    let mut handler = TestHandler{};
+    let mut handler = DefHandler::<'_>::new();
     let mut parser = DefParser::new();
-    parser.add_transform(Arc::new(TestDataTransform{}));
-    parser.add_transform(Arc::new(Test2DataTransform{}));
+    //parser.add_transform(Arc::new(TestDataTransform{}));
+    //parser.add_transform(Arc::new(Test2DataTransform{}));
 
     let listener = TcpListener::bind(config.addr).await?;
 
     loop {
         let mut logic_id_cp = logic_id_.clone();
         let mut ab_clients_cp = ab_clients.clone();
+        let mut handler_cp = handler.clone();
         let (mut socket, _) = listener.accept().await?;
         let parser_cp = parser.clone();
         rt.spawn(async move {
@@ -108,25 +109,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let msg = parser_cp.parse_tf(d);
                     dbg!(&msg);
                     if let Some(ref m) = msg {
-                        let respose = handler.handle(m, &mut ab_clients_cp, logic_id);
-                        let mut pkg = parser_cp.package_tf(respose,0);
-                        let mut real_pkg = real_package(pkg);
-                        let mut write_bit: usize = 0;
-                        let max_bit = real_pkg.len();
-                        loop {
-                            match socket.try_write(real_pkg.as_slice()) {
-                                Ok(n) => {
-                                    write_bit += n;
-                                    if write_bit == max_bit {
+                        let respose = handler_cp.handle_ex(m, &ab_clients_cp, logic_id);
+                        if let Some(respose) = respose {
+                            let mut pkg = parser_cp.package_tf(respose, 0);
+                            let mut real_pkg = real_package(pkg);
+                            let mut write_bit: usize = 0;
+                            let max_bit = real_pkg.len();
+                            loop {
+                                match socket.try_write(real_pkg.as_slice()) {
+                                    Ok(n) => {
+                                        write_bit += n;
+                                        if write_bit == max_bit {
+                                            break;
+                                        }
+                                    }
+                                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        eprintln!("write error = {}", e);
                                         break;
                                     }
-                                }
-                                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                                    continue;
-                                }
-                                Err(e) => {
-                                    eprintln!("write error = {}", e);
-                                    break;
                                 }
                             }
                         }
