@@ -9,13 +9,19 @@ use async_std::task::Context;
 use tokio::macros::support::{Pin, Poll};
 
 
-pub trait SubHandle<'a,ABClient,Id,Data> :Send + Sync {
-    fn handle(&self,data:&'a Data,clients:&'a Arc<Mutex<HashMap<Id,Box<ABClient>>>>,id:Id)-> Option<Vec<u8>> where Id:Copy;
+pub trait SubHandle :Send + Sync  {
+    type ABClient;
+    type Id;
+    type Data;
+    fn handle(&self,data:&Self::Data,clients:&Arc<Mutex<HashMap<Self::Id,Box<Self::ABClient>>>>,id:Self::Id)-> Option<Vec<u8>>
+        where Self::Id :Copy;
 }
 
-pub trait Handle<'a>
+pub trait Handle<T> where T:SubHandle
 {
-    fn handle_ex(&self,data:&'a Message<'a>,clients:&'a Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize)-> Option<Vec<u8>>
+    fn handle_ex(&self,data:&<T as SubHandle>::Data,
+                 clients:&Arc<Mutex<HashMap<<T as SubHandle>::Id,Box<<T as SubHandle>::ABClient>>>>,
+                 id:<T as SubHandle>::Id)-> Option<Vec<u8>> where <T as SubHandle>::Id:Copy
     {
         for i in 0..self.handler_count()
         {
@@ -28,28 +34,28 @@ pub trait Handle<'a>
         None
     }
 
-    fn add_handler(&mut self,h:Arc<dyn SubHandle<'a,AbClient,usize,Message<'a>>>);
+    fn add_handler(&mut self,h:Arc<dyn SubHandle<ABClient = <T as SubHandle>::ABClient, Id = <T as SubHandle>::Id, Data = <T as SubHandle>::Data>>);
     fn handler_count(&self)->usize;
-    fn get_handler(&self,i:usize)->&dyn SubHandle<'a,AbClient,usize,Message<'a>>;
+    fn get_handler(&self,i:usize)->&dyn SubHandle<ABClient = <T as SubHandle>::ABClient, Id = <T as SubHandle>::Id, Data = <T as SubHandle>::Data>;
 }
 
 #[derive(Clone)]
-pub struct DefHandler<'a>{
-    handlers : Vec<Arc<dyn SubHandle<'a,AbClient,usize,Message<'a>>>>
+pub struct DefHandler<T> where T:SubHandle {
+    handlers : Vec<Arc<dyn SubHandle<ABClient = <T as SubHandle>::ABClient, Id = <T as SubHandle>::Id, Data = <T as SubHandle>::Data>>>
 }
 
-impl<'a> DefHandler<'a>   {
-    pub fn new()->DefHandler<'a>
+impl<T> DefHandler<T>  where T:SubHandle {
+    pub fn new()->DefHandler<T>
     {
-        DefHandler::<'a>{
+        DefHandler::<T>{
             handlers:Vec::new()
         }
     }
 }
 
-impl <'a> Handle<'a> for DefHandler<'a> {
+impl<T> Handle<T> for DefHandler<T> where T:SubHandle{
 
-    fn add_handler(&mut self, h: Arc<dyn SubHandle<'a, AbClient, usize, Message<'a>>>) {
+    fn add_handler(&mut self, h: Arc<dyn SubHandle<ABClient = <T as SubHandle>::ABClient, Id = <T as SubHandle>::Id, Data = <T as SubHandle>::Data>>) {
         self.handlers.push(h);
     }
 
@@ -57,7 +63,7 @@ impl <'a> Handle<'a> for DefHandler<'a> {
         self.handlers.len()
     }
 
-    fn get_handler(&self, i: usize) -> &dyn SubHandle<'a, AbClient, usize, Message<'a>> {
+    fn get_handler(&self, i: usize) -> &dyn SubHandle<ABClient = <T as SubHandle>::ABClient, Id = <T as SubHandle>::Id, Data = <T as SubHandle>::Data> {
         self.handlers[i].as_ref()
     }
 
@@ -67,9 +73,12 @@ pub struct TestHandler{
 
 }
 
-impl<'a> SubHandle<'a,AbClient,usize,Message<'a>> for TestHandler  {
+impl SubHandle for TestHandler  {
+    type ABClient = AbClient;
+    type Id = usize;
+    type Data = Message<'_>;
 
-    fn handle(&self, data: &'a Message<'a>, clients: &'a Arc<Mutex<HashMap<usize, Box<AbClient>>>>,id:usize) -> Option<Vec<u8>> {
+    fn handle(&self, data: & Message<'_>, clients: &Arc<Mutex<HashMap<usize, Box<AbClient>>>>,id:usize) -> Option<Vec<u8>> {
         return Some(vec![b'{',b'"',b'r',b'e',b't',b'"',b':',b'0',b'}']);
     }
 }

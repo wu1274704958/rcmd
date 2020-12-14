@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut logic_id_ = Arc::new(Mutex::new(0usize));
     let mut ab_clients = Arc::new(Mutex::new(HashMap::<usize,Box<AbClient>>::new()));
-    let mut handler = DefHandler::<'_>::new();
+    let mut handler = DefHandler::<TestHandler>::new();
     let mut parser = DefParser::new();
     //parser.add_transform(Arc::new(TestDataTransform{}));
     //parser.add_transform(Arc::new(Test2DataTransform{}));
