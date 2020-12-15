@@ -75,17 +75,32 @@ pub fn read_form_buf(reading:&mut bool,buf:&[u8],n:usize,data:&mut Vec<u8>,buf_r
     has_rest && end_idx < n
 }
 
-pub fn handle_request<'a>(reading:&mut bool,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:usize,f:&'a mut dyn FnMut(&mut Vec<u8>))
+pub fn handle_request(reading:&mut bool,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:usize,result:&mut Vec<Vec<u8>>)
 {
     if !(*reading) && !data.is_empty(){
         // handle
-        f(data);
+        result.push(data.clone());
         data.clear();
         if buf_rest_len > 0{
             let mut rest = [0u8;1024];
             let mut rest_len = 0usize;
             read_form_buf(reading,&buf_rest,buf_rest_len,data,&mut rest,&mut rest_len);
-            handle_request(reading,data,&mut rest,rest_len,f);
+            handle_request(reading,data,&mut rest,rest_len,result);
+        }
+    }
+}
+
+pub fn handle_request_ex<'a>(reading:&mut bool,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:usize,f:&'a mut dyn FnMut(&mut Vec<u8>))
+{
+    if !(*reading) && !data.is_empty(){
+        // handle
+       f(data);
+        data.clear();
+        if buf_rest_len > 0{
+            let mut rest = [0u8;1024];
+            let mut rest_len = 0usize;
+            read_form_buf(reading,&buf_rest,buf_rest_len,data,&mut rest,&mut rest_len);
+            handle_request_ex(reading,data,&mut rest,rest_len,f);
         }
     }
 }

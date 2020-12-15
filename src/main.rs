@@ -23,6 +23,7 @@ use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_bu
 use crate::agreement::{DefParser, Agreement,TestDataTransform,Test2DataTransform};
 
 
+//fn main(){}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -40,17 +41,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ab_clients = Arc::new(Mutex::new(HashMap::<usize,Box<AbClient>>::new()));
     let mut handler = DefHandler::<TestHandler>::new();
     let mut parser = DefParser::new();
-    //parser.add_transform(Arc::new(TestDataTransform{}));
-    //parser.add_transform(Arc::new(Test2DataTransform{}));
+
+    {
+        handler.add_handler(Arc::new(TestHandler{}));
+    }
+
+    let handler_cp:Arc<_> = handler.into();
+    let parser_cp:Arc<_> = parser.into();
 
     let listener = TcpListener::bind(config.addr).await?;
 
     loop {
         let mut logic_id_cp = logic_id_.clone();
         let mut ab_clients_cp = ab_clients.clone();
-        let mut handler_cp = handler.clone();
+        let handler_cp = handler_cp.clone();
+        let parser_cp = parser_cp.clone();
         let (mut socket, _) = listener.accept().await?;
-        let parser_cp = parser.clone();
+
         rt.spawn(async move {
             let mut logic_id = 0usize;
             {
@@ -79,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // In a loop, read data from the socket and write the data back.
             loop {
                 let mut st = Ready;
-                /// read request
+                // read request
                 //println!("{} read the request....",logic_id);
                 match socket.try_read(&mut buf) {
                     Ok(0) => {
@@ -101,14 +108,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                 };
-                /// handle request
+                // handle request
                 //dbg!(&buf_rest);
-
-                handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,&mut |d|{
-
+                let mut requests = Vec::<Vec<u8>>::new();
+                handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,&mut requests);
+                for d in requests.iter_mut(){
                     let msg = parser_cp.parse_tf(d);
                     dbg!(&msg);
-                    if let Some(ref m) = msg {
+                    if let Some(m) = msg {
                         let respose = handler_cp.handle_ex(m, &ab_clients_cp, logic_id);
                         if let Some(respose) = respose {
                             let mut pkg = parser_cp.package_tf(respose, 0);
@@ -134,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
-                });
+                };
                 //println!("{} handle the request....", logic_id);
                 //println!("{} check the write_buf....", logic_id);
 

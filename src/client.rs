@@ -60,7 +60,7 @@ async fn main() ->  io::Result<()>
         /// handle request
         //dbg!(&buf_rest);
 
-        handle_request(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &mut |d| {
+        handle_request_ex(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &mut |d| {
             let msg = pakager.parse_tf(d);
             dbg!(&msg);
             dbg!(String::from_utf8_lossy( msg.unwrap().msg));

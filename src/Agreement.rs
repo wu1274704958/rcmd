@@ -50,7 +50,7 @@ pub trait Agreement<'a> {
     }
 }
 
-#[derive(Clone)]
+
 pub struct DefParser {
     tfs:Vec<Arc<dyn DataTransform<Vec<u8>,Vec<u8>>>>
 }
