@@ -42,6 +42,16 @@ pub fn get_client_write_buf(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id
     None
 }
 
+pub fn get_client_st(cs:&Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize)->Option<State>
+{
+    let mut cs_ = cs.lock().unwrap();
+    if let Some(c) = cs_.get(&id)
+    {
+        return Some(c.state);
+    }
+    None
+}
+
 pub fn read_form_buf(reading:&mut bool,buf:&[u8],n:usize,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:&mut usize)->bool{
     let mut has_rest = false;
     let mut end_idx = 0usize;

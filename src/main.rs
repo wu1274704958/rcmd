@@ -14,12 +14,12 @@ use crate::ab_client::{AbClient, State};
 use std::sync::{Arc, Mutex};
 use std::cell::RefCell;
 use std::ops::AddAssign;
-use crate::ab_client::State::{Dead, Busy, Ready};
+use crate::ab_client::State::{Dead, Busy, Ready, WaitKill};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use tokio::time::Duration;
 use crate::handler::{Handle, TestHandler, DefHandler};
-use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request, TOKEN_BEGIN, TOKEN_END, real_package};
+use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request, TOKEN_BEGIN, TOKEN_END, real_package, get_client_st};
 use crate::agreement::{DefParser, Agreement,TestDataTransform,Test2DataTransform};
 
 
@@ -85,7 +85,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut buf_rest_len = 0usize;
             // In a loop, read data from the socket and write the data back.
             loop {
-                let mut st = Ready;
+
+                {
+                    let st = get_client_st(&ab_clients_cp,logic_id);
+                    if st.is_none() { return; }
+                    match st{
+                        Some(WaitKill) => {
+                            del_client(&mut ab_clients_cp,logic_id);
+                            return;
+                        }
+                        _ => {}
+                    };
+                }
                 // read request
                 //println!("{} read the request....",logic_id);
                 match socket.try_read(&mut buf) {
@@ -120,25 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(respose) = respose {
                             let mut pkg = parser_cp.package_tf(respose, 0);
                             let mut real_pkg = real_package(pkg);
-                            let mut write_bit: usize = 0;
-                            let max_bit = real_pkg.len();
-                            loop {
-                                match socket.try_write(real_pkg.as_slice()) {
-                                    Ok(n) => {
-                                        write_bit += n;
-                                        if write_bit == max_bit {
-                                            break;
-                                        }
-                                    }
-                                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                                        continue;
-                                    }
-                                    Err(e) => {
-                                        eprintln!("write error = {}", e);
-                                        break;
-                                    }
-                                }
-                            }
+                            socket.write(real_pkg.as_slice()).await;
                         }
                     }
                 };
@@ -149,7 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     socket.write(w_buf.as_slice()).await;
                 }else {
-                    async_std::task::sleep(Duration::from_millis(10)).await;
+                    async_std::task::sleep(config.min_sleep_dur).await;
                 }
                 set_client_st(&mut ab_clients_cp,logic_id,Ready);
             }

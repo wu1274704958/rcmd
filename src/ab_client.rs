@@ -3,6 +3,7 @@ use std::thread::ThreadId;
 use tokio::net::TcpStream;
 use std::cell::RefCell;
 use crate::ab_client::State::Ready;
+use std::time::SystemTime;
 
 #[derive(Debug)]
 pub enum State
@@ -11,7 +12,8 @@ pub enum State
     Alive,
     Wait,
     Busy,
-    Dead
+    Dead,
+    WaitKill
 }
 #[derive(Debug)]
 pub struct AbClient
@@ -21,7 +23,8 @@ pub struct AbClient
     pub logic_id:usize,
     pub form_thread:ThreadId,
     pub state:State,
-    pub write_buf:Option<Vec<u8>>
+    pub write_buf:Option<Vec<u8>>,
+    pub heartbeat_time:SystemTime
 }
 
 impl AbClient {
@@ -33,7 +36,8 @@ impl AbClient {
             logic_id,
             form_thread,
             state:Ready,
-            write_buf:None
+            write_buf:None,
+            heartbeat_time:SystemTime::now()
         }
     }
 }
