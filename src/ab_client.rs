@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use crate::ab_client::State::Ready;
 use std::time::SystemTime;
 
-#[derive(Debug)]
+#[derive(Debug,Copy, Clone)]
 pub enum State
 {
     Ready,
