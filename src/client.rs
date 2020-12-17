@@ -14,6 +14,7 @@ mod agreement;
 use tools::*;
 use agreement::*;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 #[tokio::main]
 async fn main() ->  io::Result<()>
@@ -27,6 +28,7 @@ async fn main() ->  io::Result<()>
     let mut buf_rest = [0u8;1024];
     let mut buf_rest_len = 0usize;
     // In a loop, read data from the socket and write the data back.
+    let mut heartbeat_t = SystemTime::now();
 
     let mut pakager = DefParser::new();
     //pakager.add_transform(Arc::new(TestDataTransform{}));
@@ -65,10 +67,16 @@ async fn main() ->  io::Result<()>
             dbg!(&msg);
             dbg!(String::from_utf8_lossy( msg.unwrap().msg));
         });
-
-        let pkg = real_package( pakager.package_tf(vec![9],9));
-        dbg!(&pkg);
-        stream.write(pkg.as_slice()).await;
+        if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
+        {
+            if n > Duration::from_secs_f32(4.7)
+            {
+                let pkg = real_package( pakager.package_tf(vec![9],9));
+                dbg!(&pkg);
+                stream.write(pkg.as_slice()).await;
+                heartbeat_t = SystemTime::now();
+            }
+        }
     }
 
     Ok(())

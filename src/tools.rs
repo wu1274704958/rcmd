@@ -61,20 +61,30 @@ pub fn get_client_st(cs:&Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize)->Opt
 pub fn read_form_buf(reading:&mut bool,buf:&[u8],n:usize,data:&mut Vec<u8>,buf_rest:&mut [u8],buf_rest_len:&mut usize)->bool{
     let mut has_rest = false;
     let mut end_idx = 0usize;
+    let mut len = 0u32;
     for i in 0..n{
         if !(*reading){
             if buf[i] == TOKEN_BEGIN{
+                len = u32_form_bytes(&buf[i+1..]);
+                if len == 0 {continue;}
                 *reading = true;
                 continue;
             }
         }else{
-            if buf[i] == TOKEN_END{
-                *reading = false;
-                has_rest = true;
-                end_idx = i;
-                break;
-            }else{
+            if data.len() < len as usize
+            {
                 data.push(buf[i]);
+            }else{
+                if buf[i] == TOKEN_END {
+                     *reading = false;
+                     has_rest = true;
+                     end_idx = i;
+                     break;
+                }else {
+                    *reading = false;
+                    data.clear();
+                    continue;
+                }
             }
         }
     }
