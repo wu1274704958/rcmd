@@ -15,12 +15,30 @@ use tools::*;
 use agreement::*;
 use std::sync::Arc;
 use std::time::SystemTime;
+use std::env;
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() ->  io::Result<()>
 {
+    let args = env::args();
+    let mut ip = Ipv4Addr::new(127, 0, 0, 1);
+    if args.len() > 1
+    {
+        args.enumerate().for_each(|it|
+        {
+            if it.0 == 1
+            {
+                if let Ok(i) = Ipv4Addr::from_str(it.1.as_str())
+                {
+                    ip = i;
+                }
+            }
+        });
+    }
+    dbg!(ip);
     let sock = TcpSocket::new_v4().unwrap();
-    let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)).await?;
+    let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), 8080)).await?;
     let mut buf=[0u8;1024];
     let mut reading = false;
     let mut data_len = 0usize;
