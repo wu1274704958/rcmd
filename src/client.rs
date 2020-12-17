@@ -65,6 +65,10 @@ async fn main() ->  io::Result<()>
             dbg!(&msg);
             dbg!(String::from_utf8_lossy( msg.unwrap().msg));
         });
+
+        let pkg = real_package( pakager.package_tf(vec![9],9));
+        dbg!(&pkg);
+        stream.write(pkg.as_slice()).await;
     }
 
     Ok(())

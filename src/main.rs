@@ -6,6 +6,8 @@ mod tools;
 mod agreement;
 mod plug;
 mod plugs;
+mod handlers;
+
 
 use tokio::net::TcpListener;
 use tokio::prelude::*;
@@ -48,6 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut plugs = DefPlugMgr::<HeartBeat>::new();
 
     {
+        handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
         handler.add_handler(Arc::new(TestHandler{}));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
@@ -137,8 +140,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     dbg!(&msg);
                     if let Some(m) = msg {
                         let respose = handler_cp.handle_ex(m, &ab_clients_cp, logic_id);
-                        if let Some(respose) = respose {
-                            let mut pkg = parser_cp.package_tf(respose, 0);
+                        if let Some((respose,ext)) = respose {
+                            let mut pkg = parser_cp.package_tf(respose, ext);
                             let mut real_pkg = real_package(pkg);
                             socket.write(real_pkg.as_slice()).await;
                         }
