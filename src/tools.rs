@@ -22,6 +22,7 @@ pub fn del_client(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>, id:usize)
     let mut cs_ = cs.lock().unwrap();
     if cs_.contains_key(&id)
     {
+        println!("del client {} -=-=-=-=-",id);
         cs_.remove(&id).unwrap();
     }
 }

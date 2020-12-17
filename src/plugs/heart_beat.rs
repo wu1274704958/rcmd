@@ -6,6 +6,8 @@ use std::sync::Mutex;
 use crate::ab_client::AbClient;
 use crate::config_build::Config;
 use std::time::SystemTime;
+use crate::tools::set_client_st;
+use crate::ab_client::State::WaitKill;
 
 pub struct HeartBeat{
 
@@ -29,6 +31,12 @@ impl Plug for HeartBeat
             }
         }
         let now = SystemTime::now();
-        //if
+        if let Ok(n) = now.duration_since(time)
+        {
+            if n > config.heartbeat_dur {
+                println!("heartbeat check failed will del client {}",id);
+                set_client_st(clients,id,WaitKill);
+            }
+        }
     }
 }

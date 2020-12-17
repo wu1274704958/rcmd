@@ -23,6 +23,8 @@ use tokio::time::Duration;
 use crate::handler::{Handle, TestHandler, DefHandler};
 use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request, TOKEN_BEGIN, TOKEN_END, real_package, get_client_st};
 use crate::agreement::{DefParser, Agreement,TestDataTransform,Test2DataTransform};
+use crate::plug::{DefPlugMgr, PlugMgr};
+use crate::plugs::heart_beat::HeartBeat;
 
 
 //fn main(){}
@@ -43,13 +45,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ab_clients = Arc::new(Mutex::new(HashMap::<usize,Box<AbClient>>::new()));
     let mut handler = DefHandler::<TestHandler>::new();
     let mut parser = DefParser::new();
+    let mut plugs = DefPlugMgr::<HeartBeat>::new();
 
     {
         handler.add_handler(Arc::new(TestHandler{}));
+
+        plugs.add_plug(Arc::new(HeartBeat{}));
     }
 
     let handler_cp:Arc<_> = handler.into();
     let parser_cp:Arc<_> = parser.into();
+    let plugs_cp:Arc<_> = plugs.into();
 
     let listener = TcpListener::bind(config.addr).await?;
 
@@ -58,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut ab_clients_cp = ab_clients.clone();
         let handler_cp = handler_cp.clone();
         let parser_cp = parser_cp.clone();
+        let plugs_cp = plugs_cp.clone();
         let (mut socket, _) = listener.accept().await?;
 
         rt.spawn(async move {
@@ -147,6 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     async_std::task::sleep(config.min_sleep_dur).await;
                 }
                 set_client_st(&mut ab_clients_cp,logic_id,Ready);
+                plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
             }
         });
     }
