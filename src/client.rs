@@ -23,6 +23,7 @@ async fn main() ->  io::Result<()>
 {
     let args = env::args();
     let mut ip = Ipv4Addr::new(127, 0, 0, 1);
+    let mut port = 8080u16;
     if args.len() > 1
     {
         args.enumerate().for_each(|it|
@@ -34,11 +35,18 @@ async fn main() ->  io::Result<()>
                     ip = i;
                 }
             }
+            if it.0 == 2
+            {
+                if let Ok(p) = u16::from_str(it.1.as_str())
+                {
+                    port = p;
+                }
+            }
         });
     }
     dbg!(ip);
     let sock = TcpSocket::new_v4().unwrap();
-    let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), 8080)).await?;
+    let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), port)).await?;
     let mut buf=[0u8;1024];
     let mut reading = false;
     let mut data_len = 0usize;

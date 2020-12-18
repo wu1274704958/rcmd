@@ -27,15 +27,43 @@ use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_bu
 use crate::agreement::{DefParser, Agreement,TestDataTransform,Test2DataTransform};
 use crate::plug::{DefPlugMgr, PlugMgr};
 use crate::plugs::heart_beat::HeartBeat;
+use std::env;
+use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 
 //fn main(){}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
+    let args = env::args();
+    let mut ip = Ipv4Addr::new(127, 0, 0, 1);
+    let mut port = 8080u16;
+    if args.len() > 1
+    {
+        args.enumerate().for_each(|it|
+            {
+                if it.0 == 1
+                {
+                    if let Ok(i) = Ipv4Addr::from_str(it.1.as_str())
+                    {
+                        ip = i;
+                    }
+                }
+                if it.0 == 2
+                {
+                    if let Ok(p) = u16::from_str(it.1.as_str())
+                    {
+                        port = p;
+                    }
+                }
+            });
+    }
+    println!("{}:{}",ip,port);
+
     let config = ConfigBuilder::new()
         .thread_count(4)
-        .addr_s("127.0.0.1:8080")
+        .addr_s(format!("{}:{}",ip,port).as_str())
         .build();
 
     let rt = runtime::Builder::new_multi_thread()
