@@ -12,6 +12,11 @@ pub enum EncryptRes {
 }
 
 pub trait AsyCry{
+    fn build_pub_key(&mut self)->(Vec<u8>,u32)
+    {
+
+        (vec![0],0)
+    }
 
     fn try_decrypt(&mut self, d:&[u8],ext:u32) -> EncryptRes {
         EncryptRes::NotChange
@@ -19,6 +24,11 @@ pub trait AsyCry{
 
     fn encrypt(&self,d:&Vec<u8>,ext:u32) -> EncryptRes {
         EncryptRes::NotChange
+    }
+
+    fn can_encrypt(&self)->bool
+    {
+        false
     }
 }
 
@@ -28,7 +38,7 @@ pub struct DefAsyCry{
 
 impl DefAsyCry
 {
-    pub(crate) fn new() ->DefAsyCry
+    pub fn  new() ->DefAsyCry
     {
         DefAsyCry{}
     }

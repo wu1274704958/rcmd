@@ -174,8 +174,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             m.msg = v.as_slice();
                         }
                         let respose = handler_cp.handle_ex(m, &ab_clients_cp, logic_id);
-                        if let Some((respose,ext)) = respose {
+                        if let Some((mut respose,mut ext)) = respose {
                             //---------------------------------
+                            match asy.encrypt(&respose,ext) {
+                                EncryptRes::EncryptSucc(d) => {
+                                    respose = d;
+                                }
+                                _ => {}
+                            };
                             let mut real_pkg = real_package(parser_cp.package_tf(respose, ext));
                             socket.write(real_pkg.as_slice()).await;
                         }
@@ -184,9 +190,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //println!("{} handle the request....", logic_id);
                 //println!("{} check the write_buf....", logic_id);
 
-                if let Some(w_buf) = get_client_write_buf(&mut ab_clients_cp,logic_id)
+                if let Some(mut w_buf) = get_client_write_buf(&mut ab_clients_cp,logic_id)
                 {
                     //------------------------------------------------
+                    match asy.encrypt(&w_buf.0,w_buf.1) {
+                        EncryptRes::EncryptSucc(d) => {
+                            w_buf.0 = d;
+                        }
+                        _ => {}
+                    };
                     let real_pkg = real_package(parser_cp.package_tf(w_buf.0,w_buf.1));
                     socket.write(real_pkg.as_slice()).await;
                 }else {

@@ -11,12 +11,16 @@ mod ab_client;
 mod handler;
 mod tools;
 mod agreement;
+mod asy_cry;
+
 use tools::*;
 use agreement::*;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::env;
 use std::str::FromStr;
+
+use asy_cry::*;
 
 #[tokio::main]
 async fn main() ->  io::Result<()>
@@ -57,11 +61,13 @@ async fn main() ->  io::Result<()>
     let mut heartbeat_t = SystemTime::now();
 
     let mut pakager = DefParser::new();
+    let mut asy = DefAsyCry::new();
+
     //pakager.add_transform(Arc::new(TestDataTransform{}));
     //pakager.add_transform(Arc::new(Test2DataTransform{}));
 
-    let pkg = pakager.package_tf("gello".as_bytes().to_vec(),1);
-    let real_pkg = real_package(pkg);
+    let pub_key_data = asy.build_pub_key();
+    let real_pkg = real_package(pakager.package_tf(pub_key_data.0,pub_key_data.1));
     stream.write(real_pkg.as_slice()).await;
 
     loop {
@@ -88,11 +94,45 @@ async fn main() ->  io::Result<()>
         /// handle request
         //dbg!(&buf_rest);
 
-        handle_request_ex(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &mut |d| {
+        let mut requests = Vec::<Vec<u8>>::new();
+        handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,&mut requests);
+        for d in requests.iter_mut(){
             let msg = pakager.parse_tf(d);
             dbg!(&msg);
-            dbg!(String::from_utf8_lossy( msg.unwrap().msg));
-        });
+            if let Some(mut m) = msg {
+                //----------------------------------
+                let mut immediate_send = None;
+                let mut override_msg = None;
+                match asy.try_decrypt(m.msg,m.ext)
+                {
+                    EncryptRes::EncryptSucc(d) => {
+                        override_msg = Some(d);
+                    }
+                    EncryptRes::RPubKey(d) => {
+                        immediate_send = Some(d.0);
+                        m.ext = d.1;
+                    }
+                    EncryptRes::ErrMsg((d)) => {
+                        immediate_send = Some(d.0);
+                    }
+                    EncryptRes::NotChange => {}
+                };
+                if let Some(v) = immediate_send
+                {
+                    let mut real_pkg = real_package(pakager.package_tf(v, m.ext));
+                    stream.write(real_pkg.as_slice()).await;
+                    continue;
+                }
+                if let Some(ref v) = override_msg
+                {
+                    m.msg = v.as_slice();
+                }
+                dbg!(m);
+
+            }
+        };
+
+
         if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
         {
             if n > Duration::from_secs_f32(4.7)
