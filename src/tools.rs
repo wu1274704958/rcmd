@@ -6,6 +6,10 @@ use crate::handler::{Handle, SubHandle, DefHandler};
 use crate::agreement::{Agreement, Message};
 use crate::config_build::Config;
 use std::error::Error;
+use std::env;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::str::FromStr;
+use async_std::net::SocketAddrV4;
 
 
 pub const TOKEN_BEGIN:u8 = 7u8;
@@ -157,6 +161,34 @@ pub fn real_package(mut pkg:Vec<u8>)->Vec<u8>
     real_pkg
 }
 
+
+pub fn parse_args(mut p0: Config) ->Config {
+    let args = env::args();
+    let mut ip = Ipv4Addr::new(127, 0, 0, 1);
+    let mut port = 8080u16;
+    if args.len() > 1
+    {
+        args.enumerate().for_each(|it|
+            {
+                if it.0 == 1
+                {
+                    if let Ok(i) = Ipv4Addr::from_str(it.1.as_str())
+                    {
+                        ip = i;
+                    }
+                }
+                if it.0 == 2
+                {
+                    if let Ok(p) = u16::from_str(it.1.as_str())
+                    {
+                        port = p;
+                    }
+                }
+            });
+        p0.addr = SocketAddr::V4(SocketAddrV4::new(ip,port));
+    }
+    p0
+}
 
 
 

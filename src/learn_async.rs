@@ -10,7 +10,6 @@ async fn say_hi() {
 
 fn main() {
 
-
     let a = SystemTime::now();
     sleep(Duration::from_millis(2));
     let b = SystemTime::now();

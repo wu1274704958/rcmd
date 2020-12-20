@@ -36,35 +36,11 @@ use std::str::FromStr;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let args = env::args();
-    let mut ip = Ipv4Addr::new(127, 0, 0, 1);
-    let mut port = 8080u16;
-    if args.len() > 1
-    {
-        args.enumerate().for_each(|it|
-            {
-                if it.0 == 1
-                {
-                    if let Ok(i) = Ipv4Addr::from_str(it.1.as_str())
-                    {
-                        ip = i;
-                    }
-                }
-                if it.0 == 2
-                {
-                    if let Ok(p) = u16::from_str(it.1.as_str())
-                    {
-                        port = p;
-                    }
-                }
-            });
-    }
-    println!("{}:{}",ip,port);
-
     let config = ConfigBuilder::new()
         .thread_count(4)
-        .addr_s(format!("{}:{}",ip,port).as_str())
         .build();
+
+    let config = tools::parse_args(config);
 
     let rt = runtime::Builder::new_multi_thread()
         .worker_threads(config.thread_count)
