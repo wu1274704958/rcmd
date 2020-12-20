@@ -7,6 +7,7 @@ mod agreement;
 mod plug;
 mod plugs;
 mod handlers;
+mod asy_cry;
 
 
 use tokio::net::TcpListener;
@@ -30,6 +31,7 @@ use crate::plugs::heart_beat::HeartBeat;
 use std::env;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
+use crate::asy_cry::{DefAsyCry, AsyCry, EncryptRes};
 
 
 //fn main(){}
@@ -99,6 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut data = Vec::new();
             let mut buf_rest = [0u8;1024];
             let mut buf_rest_len = 0usize;
+            let mut asy = DefAsyCry::new();
             // In a loop, read data from the socket and write the data back.
             loop {
 
@@ -142,11 +145,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for d in requests.iter_mut(){
                     let msg = parser_cp.parse_tf(d);
                     dbg!(&msg);
-                    if let Some(m) = msg {
+                    if let Some(mut m) = msg {
+                        //----------------------------------
+                        let mut immediate_send = None;
+                        let mut override_msg = None;
+                        match asy.try_decrypt(m.msg,m.ext)
+                        {
+                            EncryptRes::EncryptSucc(d) => {
+                                override_msg = Some(d);
+                            }
+                            EncryptRes::RPubKey(d) => {
+                                immediate_send = Some(d.0);
+                                m.ext = d.1;
+                            }
+                            EncryptRes::ErrMsg((d)) => {
+                                immediate_send = Some(d.0);
+                            }
+                            EncryptRes::NotChange => {}
+                        };
+                        if let Some(v) = immediate_send
+                        {
+                            let mut real_pkg = real_package(parser_cp.package_tf(v, m.ext));
+                            socket.write(real_pkg.as_slice()).await;
+                            continue;
+                        }
+                        if let Some(ref v) = override_msg
+                        {
+                            m.msg = v.as_slice();
+                        }
                         let respose = handler_cp.handle_ex(m, &ab_clients_cp, logic_id);
                         if let Some((respose,ext)) = respose {
-                            let mut pkg = parser_cp.package_tf(respose, ext);
-                            let mut real_pkg = real_package(pkg);
+                            //---------------------------------
+                            let mut real_pkg = real_package(parser_cp.package_tf(respose, ext));
                             socket.write(real_pkg.as_slice()).await;
                         }
                     }
@@ -156,7 +186,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if let Some(w_buf) = get_client_write_buf(&mut ab_clients_cp,logic_id)
                 {
-                    socket.write(w_buf.as_slice()).await;
+                    //------------------------------------------------
+                    let real_pkg = real_package(parser_cp.package_tf(w_buf.0,w_buf.1));
+                    socket.write(real_pkg.as_slice()).await;
                 }else {
                     async_std::task::sleep(config.min_sleep_dur).await;
                 }

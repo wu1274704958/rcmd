@@ -23,7 +23,7 @@ pub struct AbClient
     pub logic_id:usize,
     pub form_thread:ThreadId,
     pub state:State,
-    pub write_buf:Option<Vec<u8>>,
+    pub write_buf:Option<(Vec<u8>,u32)>,
     pub heartbeat_time:SystemTime
 }
 

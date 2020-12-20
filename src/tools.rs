@@ -40,7 +40,7 @@ pub fn set_client_st(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize,
     }
 }
 
-pub fn get_client_write_buf(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize)->Option<Vec<u8>>
+pub fn get_client_write_buf(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize)->Option<(Vec<u8>,u32)>
 {
     let mut cs_ = cs.lock().unwrap();
     if let Some(c) = cs_.get_mut(&id)
