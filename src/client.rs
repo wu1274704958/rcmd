@@ -127,7 +127,8 @@ async fn main() ->  io::Result<()>
                 {
                     m.msg = v.as_slice();
                 }
-                dbg!(m);
+
+                dbg!(String::from_utf8_lossy(m.msg));
 
             }
         };
