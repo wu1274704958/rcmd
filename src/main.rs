@@ -39,7 +39,7 @@ use crate::asy_cry::{DefAsyCry, AsyCry, EncryptRes};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = ConfigBuilder::new()
-        .thread_count(4)
+        .thread_count(8)
         .build();
 
     let config = tools::parse_args(config);
@@ -144,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,&mut requests);
                 for d in requests.iter_mut(){
                     let msg = parser_cp.parse_tf(d);
-                    dbg!(&msg);
+                    //dbg!(&msg);
                     if let Some(mut m) = msg {
                         //----------------------------------
                         let mut immediate_send = None;
@@ -158,10 +158,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 immediate_send = Some(d.0);
                                 m.ext = d.1;
                             }
-                            EncryptRes::ErrMsg((d)) => {
+                            EncryptRes::ErrMsg(d) => {
                                 immediate_send = Some(d.0);
+                                m.ext = d.1;
                             }
                             EncryptRes::NotChange => {}
+                            EncryptRes::Break => {continue;}
                         };
                         if let Some(v) = immediate_send
                         {

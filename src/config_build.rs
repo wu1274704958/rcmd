@@ -29,7 +29,7 @@ impl ConfigBuilder
                 min_sleep_dur: Duration::from_micros(100),
                 max_sleep_dur: Duration::from_millis(1),
                 big_msg_limit: 1024 * 128,
-                heartbeat_dur: Duration::from_secs(5)
+                heartbeat_dur: Duration::from_secs(36)
             }
         }
     }

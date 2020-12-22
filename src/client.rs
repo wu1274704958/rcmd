@@ -66,9 +66,11 @@ async fn main() ->  io::Result<()>
     //pakager.add_transform(Arc::new(TestDataTransform{}));
     //pakager.add_transform(Arc::new(Test2DataTransform{}));
 
-    let pub_key_data = asy.build_pub_key();
-    let real_pkg = real_package(pakager.package_tf(pub_key_data.0,pub_key_data.1));
+    let pub_key_data = asy.build_pub_key().unwrap();
+    let real_pkg = real_package(pakager.package_tf(pub_key_data,10));
     stream.write(real_pkg.as_slice()).await;
+
+    let mut a = false;
 
     loop {
         /// read request
@@ -114,8 +116,10 @@ async fn main() ->  io::Result<()>
                     }
                     EncryptRes::ErrMsg((d)) => {
                         immediate_send = Some(d.0);
+                        m.ext = d.1;
                     }
                     EncryptRes::NotChange => {}
+                    EncryptRes::Break => {continue;}
                 };
                 if let Some(v) = immediate_send
                 {
@@ -136,7 +140,7 @@ async fn main() ->  io::Result<()>
 
         if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
         {
-            if n > Duration::from_secs_f32(4.7)
+            if n > Duration::from_secs_f32(17f32)
             {
                 let pkg = real_package( pakager.package_tf(vec![9],9));
                 dbg!(&pkg);
@@ -144,6 +148,19 @@ async fn main() ->  io::Result<()>
                 heartbeat_t = SystemTime::now();
             }
         }
+
+        if !a && asy.can_encrypt() {
+            a = true;
+            match asy.encrypt(&("hello".into()),0) {
+                EncryptRes::EncryptSucc(d) => {
+                    let pkg = real_package( pakager.package_tf(d,0));
+                    stream.write(pkg.as_slice()).await;
+                }
+                _ => {}
+            };
+
+        }
+
     }
 
     Ok(())
