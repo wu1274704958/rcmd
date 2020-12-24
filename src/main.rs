@@ -8,6 +8,7 @@ mod plug;
 mod plugs;
 mod handlers;
 mod asy_cry;
+mod data_transform;
 
 
 use tokio::net::TcpListener;
@@ -32,6 +33,7 @@ use std::env;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 use crate::asy_cry::{DefAsyCry, AsyCry, EncryptRes};
+use crate::data_transform::def_compress::DefCompress;
 
 
 //fn main(){}
@@ -58,6 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
         handler.add_handler(Arc::new(TestHandler{}));
+
+        parser.add_transform(Arc::new(DefCompress{}));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
     }

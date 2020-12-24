@@ -1,4 +1,4 @@
-use crate::tools::{u32_form_bytes, TOKEN_BEGIN, TOKEN_END};
+use crate::tools::{u32_form_bytes,set_slices_form_u32, TOKEN_BEGIN, TOKEN_END};
 use std::mem::size_of;
 use async_std::sync::Arc;
 use std::sync::Mutex;
@@ -20,7 +20,12 @@ pub trait Agreement<'a> {
         if self.transform_count() > 0
         {
             let mut i:usize = self.transform_count() - 1;
-            let mut tf_data = data.clone();
+            let mut l:[u8;4] = [0,0,0,0];
+            let mut e:[u8;4] = [0,0,0,0];
+            e.copy_from_slice(&data[(data.len() - 4)..data.len()]);
+            //dbg!(e);
+            let mut tf_data:Vec<u8> = data[4..(data.len() - 4)].into();
+            //println!("decompress before = {:?} len = {} ",&tf_data,tf_data.len());
             let mut res_data;
             loop{
                 let tf = self.get_transform(i);
@@ -30,23 +35,32 @@ pub trait Agreement<'a> {
                 i -= 1;
             }
             *data = tf_data;
+            //println!("decompress after = {:?} len = {} ",&data,data.len());
+            set_slices_form_u32(&mut l,(data.len() + 8) as u32);
+            for i in l.iter().enumerate() {
+                data.insert(i.0,*i.1);
+            }
+            for i in e.iter() {
+                data.push(*i);
+            }
             self.parse(data)
         }else {
             self.parse(data)
         }
     }
 
-    fn package_tf(&self,data:Vec<u8>,ext:u32)->Vec<u8>
+    fn package_tf(&self,mut data:Vec<u8>,ext:u32)->Vec<u8>
     {
-        let mut res = self.package(data,ext);
+        //println!("compress before = {:?} len = {}",&data,data.len());
         let mut res_tf;
         for i in 0..self.transform_count()
         {
             let tf = self.get_transform(i);
-            res_tf = tf.to(&res);
-            res = res_tf;
+            res_tf = tf.to(&data);
+            data = res_tf;
         }
-        res
+        //println!("compress after = {:?} len = {}",&data,data.len());
+        self.package(data,ext)
     }
 }
 

@@ -12,6 +12,7 @@ mod handler;
 mod tools;
 mod agreement;
 mod asy_cry;
+mod data_transform;
 
 use tools::*;
 use agreement::*;
@@ -21,6 +22,7 @@ use std::env;
 use std::str::FromStr;
 
 use asy_cry::*;
+use data_transform::def_compress::DefCompress;
 
 #[tokio::main]
 async fn main() ->  io::Result<()>
@@ -66,8 +68,11 @@ async fn main() ->  io::Result<()>
     //pakager.add_transform(Arc::new(TestDataTransform{}));
     //pakager.add_transform(Arc::new(Test2DataTransform{}));
 
+    pakager.add_transform(Arc::new(DefCompress{}));
+
     let pub_key_data = asy.build_pub_key().unwrap();
     let real_pkg = real_package(pakager.package_tf(pub_key_data,10));
+    //dbg!(&real_pkg);
     stream.write(real_pkg.as_slice()).await;
 
     let mut a = false;

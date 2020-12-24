@@ -11,6 +11,7 @@ tokio = { version="0.3.5", features = ["full"]}
 async-std = "1.8.0"
 rsa = "0.3.0"
 rand = { version = "0.7.0", default-features = false }
+flate2 = { version = "1.0.19", features = ["zlib"], default-features = false }
 
 [[example]]
 name = "client"
