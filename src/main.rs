@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
         handler.add_handler(Arc::new(TestHandler{}));
 
-        parser.add_transform(Arc::new(DefCompress{}));
+        //parser.add_transform(Arc::new(DefCompress{}));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
     }

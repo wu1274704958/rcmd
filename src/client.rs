@@ -68,7 +68,7 @@ async fn main() ->  io::Result<()>
     //pakager.add_transform(Arc::new(TestDataTransform{}));
     //pakager.add_transform(Arc::new(Test2DataTransform{}));
 
-    pakager.add_transform(Arc::new(DefCompress{}));
+    //pakager.add_transform(Arc::new(DefCompress{}));
 
     let pub_key_data = asy.build_pub_key().unwrap();
     let real_pkg = real_package(pakager.package_tf(pub_key_data,10));
