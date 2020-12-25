@@ -77,7 +77,6 @@ async fn main() -> io::Result<()>
                 } else {
                     break;
                 }
-                async_std::task::sleep(Duration::from_millis(10)).await;
             }
         });
     }
@@ -143,7 +142,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
         handle_request(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &mut requests);
         for d in requests.iter_mut() {
             let msg = pakager.parse_tf(d);
-            dbg!(&msg);
+            //dbg!(&msg);
             if let Some(mut m) = msg {
                 //----------------------------------
                 let mut immediate_send = None;
@@ -175,7 +174,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                     m.msg = v.as_slice();
                 }
 
-                dbg!(String::from_utf8_lossy(m.msg));
+                //dbg!(String::from_utf8_lossy(m.msg));
             }
         };
 
@@ -184,7 +183,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
             if n > Duration::from_secs_f32(17f32)
             {
                 let pkg = real_package(pakager.package_tf(vec![9], 9));
-                dbg!(&pkg);
+                //dbg!(&pkg);
                 stream.write(pkg.as_slice()).await;
                 heartbeat_t = SystemTime::now();
             }
