@@ -67,7 +67,7 @@ async fn main() -> io::Result<()>
     {
         let msg_queue = msg_queue.clone();
         let is_runing = is_runing.clone();
-        rt.spawn(async move {
+        rt.spawn(async move{
             loop {
                 if let Ok(v) = is_runing.lock()
                 {
@@ -77,6 +77,29 @@ async fn main() -> io::Result<()>
                 } else {
                     break;
                 }
+                let mut cmd = String::new();
+                let mut vec = vec![];
+                let mut in_ = tokio::io::stdin();
+                let mut c = b'\0';
+                loop {
+                    if let Ok(c) = in_.read_u8().await {
+                        if c != b'\n'
+                        {
+                            vec.push(c);
+                        }else { break; }
+                    }
+                }
+                cmd = String::from_utf8_lossy(vec.as_slice()).to_string();
+                let cmds:Vec<&str> = cmd.split(" ").collect();
+
+                match cmds[0] {
+                    "0" => {
+                        if cmds.len() < 2 {continue;}
+                        send(&msg_queue,cmds[1].into(),0);
+                    },
+                    _ => {}
+                }
+
             }
         });
     }
@@ -88,6 +111,13 @@ async fn main() -> io::Result<()>
         run(ip,port,msg_queue, is_runing).await?
     }
     Ok(())
+}
+
+fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
+    if let Ok(mut a) = queue.lock()
+    {
+        a.push_back((data,ext));
+    }
 }
 
 async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc<Mutex<bool>>) -> io::Result<()>
@@ -123,7 +153,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 break;
             }
             Ok(n) => {
-                println!("n = {}", n);
+                //println!("n = {}", n);
                 read_form_buf(&mut reading, &buf, n, &mut data, &mut buf_rest, &mut buf_rest_len);
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {

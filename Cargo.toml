@@ -13,6 +13,7 @@ rsa = "0.3.0"
 rand = { version = "0.7.0", default-features = false }
 flate2 = { version = "1.0.19", features = ["zlib"], default-features = false }
 terminal = { version = "0.2" , features = ["crossterm-backend"] }
+mysql = "20.1.0"
 
 [[example]]
 name = "client"
@@ -30,3 +31,7 @@ path = "src/test/test_rsa.rs"
 [[example]]
 name = "test_terminal"
 path = "src/test/test_terminal.rs"
+
+[[example]]
+name = "test_mysql"
+path = "src/test/test_mysql.rs"
