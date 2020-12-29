@@ -194,6 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             match asy.encrypt(&respose,ext) {
                                 EncryptRes::EncryptSucc(d) => {
                                     respose = d;
+                                    println!("send ext {}",ext);
                                 }
                                 _ => {}
                             };

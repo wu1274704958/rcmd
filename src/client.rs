@@ -28,8 +28,8 @@ use data_transform::def_compress::DefCompress;
 use std::env::consts::OS;
 use std::collections::VecDeque;
 use tokio::runtime::Runtime;
-use tokio::fs::OpenOptions;
-use tokio::io::*;
+use std::fs::OpenOptions;
+use std::io::*;
 use ext_code::*;
 use subpackage::{DefSubpackage,Subpackage};
 
@@ -107,7 +107,7 @@ async fn main() -> io::Result<()>
                     },
                     "1" => {
                         if cmds.len() < 3 {continue;}
-                        match OpenOptions::new().read(true).open(cmds[1]).await
+                        match OpenOptions::new().read(true).open(cmds[1])
                         {
                             Ok(mut f) => {
                                 let mut head_v = vec![];
@@ -119,7 +119,7 @@ async fn main() -> io::Result<()>
                                 let mut is_first = true;
                                 loop {
                                     let mut d = head_v.clone();
-                                    match f.read(&mut buf).await{
+                                    match f.read(&mut buf){
                                         Ok(n) => {
                                             //println!("==== {} ====",n);
                                             if n <= 0
@@ -277,12 +277,12 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
 
                 match asy.encrypt(&v.0, v.1) {
                     EncryptRes::EncryptSucc(d) => {
-                        //dbg!((&v.0, v.1));
+                        //println!("{:?} ext: {}",&v.0, v.1);
                         let pkg = pakager.package_tf(d, v.1);
                         stream.write(pkg.as_slice()).await;
                     }
                     EncryptRes::NotChange => {
-                        println!("{:?} ext: {}",&v.0, v.1);
+                        //println!("{:?} ext: {}",&v.0, v.1);
                         let pkg = pakager.package_tf(v.0, v.1);
                         stream.write(pkg.as_slice()).await;
                     }
