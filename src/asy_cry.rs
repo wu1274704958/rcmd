@@ -3,6 +3,7 @@
 // ext 0        default
 // ext 10 .. 20  asymmetric cryptographic
 // ext 20 .. 40  asymmetric cryptographic err
+// ext 40 41      upload file
 
 use rsa::{PublicKey, RSAPrivateKey, PaddingScheme, RSAPublicKey, PublicKeyParts, BigUint};
 use rsa::errors::Error;
@@ -39,7 +40,7 @@ pub trait AsyCry{
 
     fn can_encrypt(&self)->bool
     {
-        false
+        true
     }
 }
 

@@ -9,6 +9,7 @@ use async_std::task::Context;
 use tokio::macros::support::{Pin, Poll};
 use std::marker::PhantomData;
 use std::ops::{DerefMut, Deref};
+use std::time::SystemTime;
 
 
 pub trait SubHandle:Send + Sync {
@@ -80,7 +81,12 @@ impl  SubHandle for TestHandler  {
     fn handle(&self, data: &[u8], len: u32, ext: u32,
               clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>>>>,
               id: Self::Id) -> Option<(Vec<u8>,u32)> where Self::Id: Copy {
-        return Some((vec![b'{',b'"',b'r',b'e',b't',b'"',b':',b'0',b'}'],0));
+        let mut a = clients.lock().unwrap();
+        if let Some(c) = a.get_mut(&id)
+        {
+            c.heartbeat_time = SystemTime::now();
+        }
+        return None;
     }
 
 }

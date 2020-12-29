@@ -1,4 +1,4 @@
-use crate::tools::{u32_form_bytes,set_slices_form_u32, TOKEN_BEGIN, TOKEN_END};
+use crate::tools::{u32_form_bytes, set_slices_form_u32, TOKEN_BEGIN, TOKEN_END, TOKEN_MID};
 use std::mem::size_of;
 use async_std::sync::Arc;
 use std::sync::Mutex;
@@ -160,25 +160,28 @@ impl <'a>Agreement<'a> for DefParser
         //dbg!(&m_d);
         let ext = u32_form_bytes(m_d.1);
         //dbg!(ext);
-        Some(Message::new(len,m_d.0,ext))
+        Some(Message::new(len,&m_d.0[0..(m_d.0.len() - 1)],ext))
     }
 
     fn package(&self, mut data:Vec<u8>,ext:u32) -> Vec<u8> {
         let mut res = Vec::new();
-        let len = data.len() as u32 + size_of::<u32>() as u32 * 2;
+        let len = data.len() as u32 + size_of::<u32>() as u32 * 2 + size_of::<u8>() as u32;
         //dbg!(len);
         let len_buf = len.to_be_bytes();
         let ext_buf = ext.to_be_bytes();
+
+        res.push(TOKEN_BEGIN);
 
         for i in len_buf.iter(){
             //dbg!(i);
             res.push(*i);
         }
         res.append(&mut data);
+        res.push(TOKEN_MID);
         for i in ext_buf.iter(){
             res.push(*i);
         }
-
+        res.push(TOKEN_END);
         res
     }
 

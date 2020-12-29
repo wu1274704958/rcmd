@@ -1,0 +1,111 @@
+use crate::subpackage::SpState::ExpectBegin;
+use crate::tools::{TOKEN_BEGIN, u32_form_bytes, TOKEN_END, TOKEN_MID};
+use std::mem::size_of;
+use std::time::SystemTime;
+
+pub trait Subpackage{
+    fn subpackage(&mut self,data:&[u8],len:usize) ->Option<Vec<u8>>
+    {
+        None
+    }
+}
+
+pub enum SpState {
+    ExpectBegin,
+    ExpectLen,
+    Content,
+    ExpectMid,
+    ExpectExt,
+    ExpectEnd
+}
+
+pub struct DefSubpackage {
+    temp:Vec<u8>,
+    st:SpState,
+    bp:Option<usize>,
+    idx:usize,
+    len:Option<u32>,
+    ext:Option<u32>
+}
+
+impl DefSubpackage{
+    pub fn new()->DefSubpackage
+    {
+        DefSubpackage{
+            temp:Vec::new(),
+            st:ExpectBegin,
+            bp:None,
+            idx:0,
+            len:None,
+            ext:None,
+        }
+    }
+}
+
+impl Subpackage for DefSubpackage
+{
+    fn subpackage(&mut self,data: &[u8], len: usize) -> Option<Vec<u8>> {
+        for i in 0..len { self.temp.push(data[i]); }
+        if self.temp.is_empty() { return None; }
+        'Out: loop {
+            match self.st {
+                SpState::ExpectBegin => {
+                    assert_eq!(self.idx, 0, "ExpectBegin idx must be eq 0!");
+                    while !self.temp.is_empty() {
+                        if self.temp[self.idx] == TOKEN_BEGIN {
+                            if self.temp.len() < size_of::<u8>() + size_of::<u32>() { return None; }
+                            let len = u32_form_bytes(&self.temp[(self.idx + 1)..]);
+                            if self.temp.len() < size_of::<u8>() * 2 + len as usize { return None; }
+                            if self.temp[self.idx + len as usize + 1] == TOKEN_END {
+                                if self.temp[self.idx + len as usize - 4] == TOKEN_MID {
+                                    self.len = Some(len);
+                                    self.st = SpState::ExpectEnd;
+                                    self.bp = Some(self.idx);
+                                    self.idx = self.idx + len as usize + 1;
+                                    continue 'Out;
+                                } else {
+                                    println!("{:?} i={} len={} bad package not found TOKEN_MID!",self.temp,self.idx,len);
+                                    self.temp.pop();
+                                    return None;
+                                }
+                            } else {
+                                println!("{:?} i={} len={} bad package not found TOKEN_END!",self.temp,self.idx,len);
+                                self.temp.pop();
+                                return None;
+                            }
+                        } else {
+                            self.temp.pop();
+                        }
+                    }
+                    return None;
+                }
+                SpState::ExpectLen => {}
+                SpState::Content => {}
+                SpState::ExpectMid => {}
+                SpState::ExpectExt => {}
+                SpState::ExpectEnd => {
+                    let b = self.bp.unwrap();
+                    let res = self.temp[(b+1)..self.idx].to_vec();
+                    if self.temp.len() - self.idx > 1
+                    {
+                        let mut rest_data = Vec::new();
+                        for i in (self.idx+1)..self.temp.len()
+                        {
+                            rest_data.push(self.temp[i]);
+                        }
+                        self.temp = rest_data;
+                    }else{
+                        self.temp.clear();
+                    }
+                    self.st = SpState::ExpectBegin;
+                    self.len = None;
+                    self.bp = None;
+                    self.idx = 0;
+                    self.ext = None;
+                    return Some(res);
+                }
+            }
+        }
+        None
+    }
+}

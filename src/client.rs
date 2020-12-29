@@ -13,6 +13,8 @@ mod tools;
 mod agreement;
 mod asy_cry;
 mod data_transform;
+mod ext_code;
+mod subpackage;
 
 use tools::*;
 use agreement::*;
@@ -26,6 +28,10 @@ use data_transform::def_compress::DefCompress;
 use std::env::consts::OS;
 use std::collections::VecDeque;
 use tokio::runtime::Runtime;
+use tokio::fs::OpenOptions;
+use tokio::io::*;
+use ext_code::*;
+use subpackage::{DefSubpackage,Subpackage};
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -60,7 +66,7 @@ async fn main() -> io::Result<()>
     let mut is_runing = Arc::new(Mutex::new(true));
 
     let rt = runtime::Builder::new_multi_thread()
-        .worker_threads(1)
+        .worker_threads(2)
         .build()
         .unwrap();
 
@@ -89,7 +95,9 @@ async fn main() -> io::Result<()>
                         }else { break; }
                     }
                 }
+
                 cmd = String::from_utf8_lossy(vec.as_slice()).to_string();
+                println!(">>>{}",cmd);
                 let cmds:Vec<&str> = cmd.split(" ").collect();
 
                 match cmds[0] {
@@ -97,6 +105,44 @@ async fn main() -> io::Result<()>
                         if cmds.len() < 2 {continue;}
                         send(&msg_queue,cmds[1].into(),0);
                     },
+                    "1" => {
+                        if cmds.len() < 3 {continue;}
+                        match OpenOptions::new().read(true).open(cmds[1]).await
+                        {
+                            Ok(mut f) => {
+                                let mut head_v = vec![];
+                                head_v.push(TOKEN_BEGIN);
+                                cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
+                                head_v.push(TOKEN_END);
+
+                                let mut buf = [0u8;128];
+                                let mut is_first = true;
+                                loop {
+                                    let mut d = head_v.clone();
+                                    match f.read(&mut buf).await{
+                                        Ok(n) => {
+                                            //println!("==== {} ====",n);
+                                            if n <= 0
+                                            {
+                                                send(&msg_queue,d,EXT_UPLOAD_FILE_ELF);
+                                                break;
+                                            }else{
+                                                for i in 0..n { d.push(buf[i]);  }
+                                                send(&msg_queue,d,if is_first {EXT_UPLOAD_FILE_CREATE}else{EXT_UPLOAD_FILE});
+                                                is_first = false;
+                                            }
+                                        }
+                                        _=>{
+                                        }
+                                    }
+                                }
+                                //println!("==== end ====");
+                            }
+                            Err(e) => {
+                                eprintln!("{}",e);
+                            }
+                        }
+                    }
                     _ => {}
                 }
 
@@ -114,7 +160,7 @@ async fn main() -> io::Result<()>
 }
 
 fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
-    if let Ok(mut a) = queue.lock()
+    let mut a = queue.lock().unwrap();
     {
         a.push_back((data,ext));
     }
@@ -125,24 +171,24 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
     let sock = TcpSocket::new_v4().unwrap();
     let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), port)).await?;
     let mut buf = [0u8; 1024];
-    let mut reading = false;
-    let mut data = Vec::new();
-    let mut buf_rest = [0u8; 1024];
-    let mut buf_rest_len = 0usize;
     // In a loop, read data from the socket and write the data back.
     let mut heartbeat_t = SystemTime::now();
     let mut pakager = DefParser::new();
     let mut asy = DefAsyCry::new();
+    let mut package = None;
 
     //pakager.add_transform(Arc::new(TestDataTransform{}));
     //pakager.add_transform(Arc::new(Test2DataTransform{}));
 
     //pakager.add_transform(Arc::new(DefCompress{}));
 
-    let pub_key_data = asy.build_pub_key().unwrap();
-    let real_pkg = real_package(pakager.package_tf(pub_key_data, 10));
-    //dbg!(&real_pkg);
-    stream.write(real_pkg.as_slice()).await;
+    if let Ok(pub_key_data) = asy.build_pub_key(){
+        let real_pkg = pakager.package_tf(pub_key_data, 10);
+        //dbg!(&real_pkg);
+        stream.write(real_pkg.as_slice()).await;
+    }
+
+    let mut subpackager = DefSubpackage::new();
 
     loop {
         /// read request
@@ -154,10 +200,10 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
             }
             Ok(n) => {
                 //println!("n = {}", n);
-                read_form_buf(&mut reading, &buf, n, &mut data, &mut buf_rest, &mut buf_rest_len);
+                package = subpackager.subpackage(&buf,n);
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                async_std::task::sleep(Duration::from_millis(10)).await;
+                //async_std::task::sleep(Duration::from_millis(10)).await;
                 //println!("e  WouldBlock -------");
             }
             Err(e) => {
@@ -168,10 +214,9 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
         /// handle request
         //dbg!(&buf_rest);
 
-        let mut requests = Vec::<Vec<u8>>::new();
-        handle_request(&mut reading, &mut data, &mut buf_rest, buf_rest_len, &mut requests);
-        for d in requests.iter_mut() {
-            let msg = pakager.parse_tf(d);
+        if let Some( mut d) = package {
+            package = None;
+            let msg = pakager.parse_tf(&mut d);
             //dbg!(&msg);
             if let Some(mut m) = msg {
                 //----------------------------------
@@ -195,7 +240,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 };
                 if let Some(v) = immediate_send
                 {
-                    let mut real_pkg = real_package(pakager.package_tf(v, m.ext));
+                    let mut real_pkg = pakager.package_tf(v, m.ext);
                     stream.write(real_pkg.as_slice()).await;
                     continue;
                 }
@@ -203,36 +248,47 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 {
                     m.msg = v.as_slice();
                 }
-
+                if m.ext != 9
+                {println!("{:?} {}",&m.msg,m.ext);}
                 //dbg!(String::from_utf8_lossy(m.msg));
             }
-        };
+            package = None;
+        }
 
         if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
         {
             if n > Duration::from_secs_f32(17f32)
             {
-                let pkg = real_package(pakager.package_tf(vec![9], 9));
+                heartbeat_t = SystemTime::now();
+                let pkg = pakager.package_tf(vec![9], 9);
                 //dbg!(&pkg);
                 stream.write(pkg.as_slice()).await;
-                heartbeat_t = SystemTime::now();
+                //println!("send heart beat");
             }
         }
 
         if asy.can_encrypt() {
             let mut data = None;
-            if let Ok(mut queue) = msg_queue.lock()
             {
+                let mut queue = msg_queue.lock().unwrap();
                 data = queue.pop_front();
             }
             if let Some(v) = data {
+
                 match asy.encrypt(&v.0, v.1) {
                     EncryptRes::EncryptSucc(d) => {
-                        let pkg = real_package(pakager.package_tf(d, 0));
+                        //dbg!((&v.0, v.1));
+                        let pkg = pakager.package_tf(d, v.1);
+                        stream.write(pkg.as_slice()).await;
+                    }
+                    EncryptRes::NotChange => {
+                        println!("{:?} ext: {}",&v.0, v.1);
+                        let pkg = pakager.package_tf(v.0, v.1);
                         stream.write(pkg.as_slice()).await;
                     }
                     _ => {}
                 };
+
             }
         }
 

@@ -9,7 +9,8 @@ mod plugs;
 mod handlers;
 mod asy_cry;
 mod data_transform;
-
+mod ext_code;
+mod subpackage;
 
 use tokio::net::TcpListener;
 use tokio::prelude::*;
@@ -25,7 +26,7 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use tokio::time::Duration;
 use crate::handler::{Handle, TestHandler, DefHandler};
-use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request, TOKEN_BEGIN, TOKEN_END, real_package, get_client_st};
+use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request, TOKEN_BEGIN, TOKEN_END, get_client_st};
 use crate::agreement::{DefParser, Agreement,TestDataTransform,Test2DataTransform};
 use crate::plug::{DefPlugMgr, PlugMgr};
 use crate::plugs::heart_beat::HeartBeat;
@@ -34,6 +35,8 @@ use std::net::Ipv4Addr;
 use std::str::FromStr;
 use crate::asy_cry::{DefAsyCry, AsyCry, EncryptRes};
 use crate::data_transform::def_compress::DefCompress;
+use crate::subpackage::{DefSubpackage, Subpackage};
+use std::time::SystemTime;
 
 
 //fn main(){}
@@ -60,6 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
         handler.add_handler(Arc::new(TestHandler{}));
+        handler.add_handler(Arc::new(handlers::upload_file::UploadHandler::new()));
 
         //parser.add_transform(Arc::new(DefCompress{}));
 
@@ -89,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let thread_id = std::thread::current().id();
             println!("thrend id = {:?}",thread_id);
-            let mut buf = [0; 1024];
+
             let local_addr = socket.local_addr().unwrap();
             let addr = socket.peer_addr().unwrap();
 
@@ -101,11 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             socket.readable().await;
 
-            let mut reading = false;
-            let mut data = Vec::new();
-            let mut buf_rest = [0u8;1024];
-            let mut buf_rest_len = 0usize;
+            let mut buf = [0; 1024];
+            let mut subpackager = DefSubpackage::new();
             let mut asy = DefAsyCry::new();
+            let mut package = None;
             // In a loop, read data from the socket and write the data back.
             loop {
 
@@ -124,14 +127,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //println!("{} read the request....",logic_id);
                 match socket.try_read(&mut buf) {
                     Ok(0) => {
-                        println!("ok n == 0 ----");
+                        //println!("ok n == 0 ----");
                         del_client(&mut ab_clients_cp,logic_id);
                         return;
                     },
                     Ok(n) => {
-                        println!("n = {}",n);
+                        //println!("n = {}",n);
                         set_client_st(&mut ab_clients_cp, logic_id, Busy);
-                        read_form_buf(&mut reading,&buf,n,&mut data,&mut buf_rest,&mut buf_rest_len);
+                        let b = SystemTime::now();
+                        package = subpackager.subpackage(&buf,n);
+                        let e = SystemTime::now();
+                        println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
+
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         //println!("e  WouldBlock -------");
@@ -142,12 +149,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                 };
-                // handle request
-                //dbg!(&buf_rest);
-                let mut requests = Vec::<Vec<u8>>::new();
-                handle_request(&mut reading,&mut data,&mut buf_rest,buf_rest_len,&mut requests);
-                for d in requests.iter_mut(){
-                    let msg = parser_cp.parse_tf(d);
+
+                if let Some(mut d) = package
+                {
+                    package = None;
+                    //handle request
+                    let msg = parser_cp.parse_tf(&mut d);
                     //dbg!(&msg);
                     if let Some(mut m) = msg {
                         //----------------------------------
@@ -171,7 +178,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
                         if let Some(v) = immediate_send
                         {
-                            let mut real_pkg = real_package(parser_cp.package_tf(v, m.ext));
+                            let mut real_pkg = parser_cp.package_tf(v, m.ext);
                             socket.write(real_pkg.as_slice()).await;
                             continue;
                         }
@@ -179,7 +186,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             m.msg = v.as_slice();
                         }
+                        let b = SystemTime::now();
                         let respose = handler_cp.handle_ex(m, &ab_clients_cp, logic_id);
+                        println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());
                         if let Some((mut respose,mut ext)) = respose {
                             //---------------------------------
                             match asy.encrypt(&respose,ext) {
@@ -188,11 +197,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 _ => {}
                             };
-                            let mut real_pkg = real_package(parser_cp.package_tf(respose, ext));
+                            let mut real_pkg = parser_cp.package_tf(respose, ext);
                             socket.write(real_pkg.as_slice()).await;
                         }
                     }
-                };
+                }
+
                 //println!("{} handle the request....", logic_id);
                 //println!("{} check the write_buf....", logic_id);
 
@@ -205,7 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         _ => {}
                     };
-                    let real_pkg = real_package(parser_cp.package_tf(w_buf.0,w_buf.1));
+                    let real_pkg = parser_cp.package_tf(w_buf.0,w_buf.1);
                     socket.write(real_pkg.as_slice()).await;
                 }else {
                     async_std::task::sleep(config.min_sleep_dur).await;

@@ -13,6 +13,7 @@ use async_std::net::SocketAddrV4;
 
 
 pub const TOKEN_BEGIN:u8 = 7u8;
+pub const TOKEN_MID:u8 = 31u8;
 pub const TOKEN_END:u8 = 9u8;
 
 #[cfg(target_endian = "little")]
@@ -85,6 +86,7 @@ pub fn read_form_buf(reading:&mut bool,buf:&[u8],n:usize,data:&mut Vec<u8>,buf_r
                      end_idx = i;
                      break;
                 }else {
+                    println!("lost the magic number!!!");
                     *reading = false;
                     data.clear();
                     continue;
