@@ -74,79 +74,7 @@ async fn main() -> io::Result<()>
         let msg_queue = msg_queue.clone();
         let is_runing = is_runing.clone();
         rt.spawn(async move{
-            loop {
-                if let Ok(v) = is_runing.lock()
-                {
-                    if !*v {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-                let mut cmd = String::new();
-                let mut vec = vec![];
-                let mut in_ = tokio::io::stdin();
-                let mut c = b'\0';
-                loop {
-                    if let Ok(c) = in_.read_u8().await {
-                        if c != b'\n'
-                        {
-                            vec.push(c);
-                        }else { break; }
-                    }
-                }
-
-                cmd = String::from_utf8_lossy(vec.as_slice()).to_string();
-                println!(">>>{}",cmd);
-                let cmds:Vec<&str> = cmd.split(" ").collect();
-
-                match cmds[0] {
-                    "0" => {
-                        if cmds.len() < 2 {continue;}
-                        send(&msg_queue,cmds[1].into(),0);
-                    },
-                    "1" => {
-                        if cmds.len() < 3 {continue;}
-                        match OpenOptions::new().read(true).open(cmds[1])
-                        {
-                            Ok(mut f) => {
-                                let mut head_v = vec![];
-                                head_v.push(TOKEN_BEGIN);
-                                cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
-                                head_v.push(TOKEN_END);
-
-                                let mut buf = [0u8;490];
-                                let mut is_first = true;
-                                loop {
-                                    let mut d = head_v.clone();
-                                    match f.read(&mut buf){
-                                        Ok(n) => {
-                                            //println!("==== {} ====",n);
-                                            if n <= 0
-                                            {
-                                                send(&msg_queue,d,EXT_UPLOAD_FILE_ELF);
-                                                break;
-                                            }else{
-                                                for i in 0..n { d.push(buf[i]);  }
-                                                send(&msg_queue,d,if is_first {EXT_UPLOAD_FILE_CREATE}else{EXT_UPLOAD_FILE});
-                                                is_first = false;
-                                            }
-                                        }
-                                        _=>{
-                                        }
-                                    }
-                                }
-                                //println!("==== end ====");
-                            }
-                            Err(e) => {
-                                eprintln!("{}",e);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-
-            }
+            console(msg_queue,is_runing).await;
         });
     }
 
@@ -155,6 +83,84 @@ async fn main() -> io::Result<()>
         let is_runing = is_runing.clone();
 
         run(ip,port,msg_queue, is_runing).await?
+    }
+    Ok(())
+}
+
+async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc<Mutex<bool>>) -> io::Result<()>
+{
+    loop {
+        if let Ok(v) = is_runing.lock()
+        {
+            if !*v {
+                break;
+            }
+        } else {
+            break;
+        }
+        let mut cmd = String::new();
+        let mut vec = vec![];
+        let mut in_ = tokio::io::stdin();
+        let mut c = b'\0';
+        loop {
+            if let Ok(c) = in_.read_u8().await {
+                if c != b'\n'
+                {
+                    vec.push(c);
+                }else { break; }
+            }
+        }
+
+        cmd = String::from_utf8_lossy(vec.as_slice()).to_string();
+        println!(">>>{}",cmd);
+        let cmds:Vec<&str> = cmd.split(" ").collect();
+
+        match cmds[0] {
+            "0" => {
+                if cmds.len() < 2 {continue;}
+                send(&msg_queue,cmds[1].into(),0);
+            },
+            "1" => {
+                if cmds.len() < 3 {continue;}
+                match OpenOptions::new().read(true).open(cmds[1])
+                {
+                    Ok(mut f) => {
+                        let mut head_v = vec![];
+                        head_v.push(TOKEN_BEGIN);
+                        cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
+                        head_v.push(TOKEN_END);
+
+                        let mut buf = [0u8;490];
+                        let mut is_first = true;
+                        loop {
+                            let mut d = head_v.clone();
+                            match f.read(&mut buf){
+                                Ok(n) => {
+                                    //println!("==== {} ====",n);
+                                    if n <= 0
+                                    {
+                                        send(&msg_queue,d,EXT_UPLOAD_FILE_ELF);
+                                        break;
+                                    }else{
+                                        for i in 0..n { d.push(buf[i]);  }
+                                        send(&msg_queue,d,if is_first {EXT_UPLOAD_FILE_CREATE}else{EXT_UPLOAD_FILE});
+                                        is_first = false;
+                                    }
+                                }
+                                _=>{
+                                }
+                            }
+                        }
+                        //println!("==== end ====");
+                    }
+                    Err(e) => {
+                        eprintln!("{}",e);
+                    }
+                }
+            }
+            _ => {}
+        }
+
     }
     Ok(())
 }

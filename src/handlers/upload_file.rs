@@ -55,6 +55,8 @@ impl SubHandle for UploadHandler
             return Some((vec![],EXT_ERR_FILE_NAME_EMPTY));
         }
 
+        let mut rd = name.as_bytes().to_vec();
+
         if ext == EXT_UPLOAD_FILE_CREATE{
 
             if let Ok(m) = self.file_map.lock(){
@@ -62,34 +64,33 @@ impl SubHandle for UploadHandler
                 {
                     if v.0 != id
                     {
-                        return Some((vec![], EXT_ERR_NO_ACCESS_PERMISSION));
+                        return Some((rd, EXT_ERR_NO_ACCESS_PERMISSION));
                     }else{
-                        return Some((vec![], EXT_ERR_ALREADY_CREATED));
+                        return Some((rd, EXT_ERR_ALREADY_CREATED));
                     }
                 }
             }else{
-                return Some((vec![], EXT_LOCK_ERR_CODE));
+                return Some((rd, EXT_LOCK_ERR_CODE));
             }
 
             if let Ok(mut f) = OpenOptions::new().create(true).append(false).write(true).open(name.clone())
             {
                 if let Ok(l) = f.write(&data[(name_e+1)..])
                 {
-                    let b = l.to_be_bytes();
-                    let mut res = vec![];
-                    b.iter().for_each(|it|{res.push(*it)});
+                    let b = (l as u32).to_be_bytes();
+                    b.iter().for_each(|it|{rd.push(*it)});
                     return if let Ok(mut fm) = self.file_map.lock()
                     {
                         fm.insert(name.clone(), (id,f));
-                        Some((res, EXT_UPLOAD_FILE_CREATE))
+                        Some((rd, EXT_UPLOAD_FILE_CREATE))
                     } else {
-                        Some((vec![], EXT_LOCK_ERR_CODE))
+                        Some((rd, EXT_LOCK_ERR_CODE))
                     }
                 }else{
-                    return Some((vec![],EXT_ERR_WRITE_FILE_FAILED));
+                    return Some((rd,EXT_ERR_WRITE_FILE_FAILED));
                 }
             }else{
-                return Some((vec![],EXT_ERR_CREATE_FILE_FAILED));
+                return Some((rd,EXT_ERR_CREATE_FILE_FAILED));
             }
         } else if ext == EXT_UPLOAD_FILE{
 
@@ -99,22 +100,21 @@ impl SubHandle for UploadHandler
                 {
                     if f.0 != id
                     {
-                        return Some((vec![], EXT_ERR_NO_ACCESS_PERMISSION));
+                        return Some((rd, EXT_ERR_NO_ACCESS_PERMISSION));
                     }
                     let file_data = &data[(name_e.clone()+1)..];
                     if let Ok(l) = f.1.write(file_data)
                     {
-                        let b = l.to_be_bytes();
-                        let mut res = vec![];
-                        b.iter().for_each(|it|{res.push(*it)});
+                        let b = (l as u32).to_be_bytes();
+                        b.iter().for_each(|it|{rd.push(*it)});
                         //f.1.sync_all().unwrap();
-                        return Some((res,EXT_UPLOAD_FILE));
+                        return Some((rd,EXT_UPLOAD_FILE));
                     }else{
-                        return Some((vec![],EXT_ERR_WRITE_FILE_FAILED));
+                        return Some((rd,EXT_ERR_WRITE_FILE_FAILED));
                     }
-                }else { return Some((vec![],EXT_ERR_FILE_NAME_NOT_EXITS)); }
+                }else { return Some((rd,EXT_ERR_FILE_NAME_NOT_EXITS)); }
             }else{
-                return Some((vec![],EXT_LOCK_ERR_CODE));
+                return Some((rd,EXT_LOCK_ERR_CODE));
             }
 
         }else if ext == EXT_UPLOAD_FILE_ELF{
@@ -124,21 +124,21 @@ impl SubHandle for UploadHandler
                 {
                     if f.0 != id
                     {
-                        return Some((vec![], EXT_ERR_NO_ACCESS_PERMISSION));
+                        return Some((rd, EXT_ERR_NO_ACCESS_PERMISSION));
                     }
                     f.1.sync_all().unwrap();
                 }else{
-                    return Some((vec![],EXT_ERR_FILE_NAME_NOT_EXITS));
+                    return Some((rd,EXT_ERR_FILE_NAME_NOT_EXITS));
                 }
 
                 if let Some(k) = fm.remove(&name)
                 {
-                    return Some((vec![],EXT_UPLOAD_FILE_ELF));
+                    return Some((rd,EXT_UPLOAD_FILE_ELF));
                 }
             }else{
-                return Some((vec![],EXT_LOCK_ERR_CODE));
+                return Some((rd,EXT_LOCK_ERR_CODE));
             }
         }
-        Some((vec![],EXT_DEFAULT_ERR_CODE))
+        Some((rd,EXT_DEFAULT_ERR_CODE))
     }
 }
