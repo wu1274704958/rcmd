@@ -115,7 +115,7 @@ async fn main() -> io::Result<()>
                                 cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
                                 head_v.push(TOKEN_END);
 
-                                let mut buf = [0u8;128];
+                                let mut buf = [0u8;490];
                                 let mut is_first = true;
                                 loop {
                                     let mut d = head_v.clone();

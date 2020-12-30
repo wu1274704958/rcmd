@@ -1,5 +1,6 @@
 use mysql::*;
 use mysql::prelude::*;
+use std::env::args;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Payment {
@@ -9,8 +10,15 @@ struct Payment {
 }
 fn main()
 {
-    let url = "mysql://root:as147258369@localhost:3306/sql_test";
+    let mut pwd = "as147258369".to_string();
 
+    args().enumerate().for_each(|it|{
+        if it.0 == 1{
+            pwd = it.1;
+        }
+    });
+
+    let url = format!("mysql://root:{}@localhost:3306/sql_test",pwd);
 
     let pool = Pool::new(url).unwrap();
 

@@ -68,7 +68,7 @@ impl AsyCry for DefAsyCry{
 
     fn build_pub_key(&mut self) -> Result<Vec<u8>,u32> {
         let mut rng = rand::rngs::OsRng;
-        let priv_key = RSAPrivateKey::new(&mut rng, 2048);
+        let priv_key = RSAPrivateKey::new(&mut rng, 4096);
         if priv_key.is_err()
         {
             return Err(21); //21 gen private key failed
