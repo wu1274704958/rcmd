@@ -192,7 +192,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
 
     loop {
         /// read request
-        //println!("{} read the request....",logic_id);
+        //println!("read the request....");
         match stream.try_read(&mut buf) {
             Ok(0) => {
                 println!("ok n == 0 ----");
@@ -213,6 +213,9 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
         };
         /// handle request
         //dbg!(&buf_rest);
+        if package.is_none() && subpackager.need_check(){
+            package = subpackager.subpackage(&[],0);
+        }
 
         if let Some( mut d) = package {
             package = None;

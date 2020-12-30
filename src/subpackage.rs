@@ -8,6 +8,10 @@ pub trait Subpackage{
     {
         None
     }
+    fn need_check(&self)->bool
+    {
+        false
+    }
 }
 
 pub enum SpState {
@@ -25,7 +29,8 @@ pub struct DefSubpackage {
     bp:Option<usize>,
     idx:usize,
     len:Option<u32>,
-    ext:Option<u32>
+    ext:Option<u32>,
+    need_ck:bool
 }
 
 impl DefSubpackage{
@@ -38,6 +43,7 @@ impl DefSubpackage{
             idx:0,
             len:None,
             ext:None,
+            need_ck:false
         }
     }
 }
@@ -45,6 +51,7 @@ impl DefSubpackage{
 impl Subpackage for DefSubpackage
 {
     fn subpackage(&mut self,data: &[u8], len: usize) -> Option<Vec<u8>> {
+        self.need_ck = false;
         for i in 0..len { self.temp.push(data[i]); }
         if self.temp.is_empty() { return None; }
         'Out: loop {
@@ -89,11 +96,10 @@ impl Subpackage for DefSubpackage
                     if self.temp.len() - self.idx > 1
                     {
                         let mut rest_data = Vec::new();
-                        for i in (self.idx+1)..self.temp.len()
-                        {
-                            rest_data.push(self.temp[i]);
-                        }
+                        rest_data.resize(self.temp.len() - (self.idx+1),0);
+                        rest_data.copy_from_slice(&(self.temp[(self.idx+1)..]));
                         self.temp = rest_data;
+                        self.need_ck = true;
                     }else{
                         self.temp.clear();
                     }
@@ -107,5 +113,9 @@ impl Subpackage for DefSubpackage
             }
         }
         None
+    }
+
+    fn need_check(&self) -> bool {
+        !self.temp.is_empty() && self.need_ck
     }
 }

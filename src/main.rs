@@ -150,6 +150,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
 
+                if package.is_none() && subpackager.need_check(){
+                    package = subpackager.subpackage(&[],0);
+                }
+
                 if let Some(mut d) = package
                 {
                     package = None;
