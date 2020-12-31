@@ -5,7 +5,7 @@ use std::collections::hash_map::RandomState;
 use async_std::sync::Arc;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::ext_code::{EXT_LOGIN, EXT_LOGOUT, EXT_ERR_PARSE_ARGS, EXT_ERR_ALREADY_LOGIN, EXT_ERR_NOT_KNOW, EXT_ERR_WRONG_PASSWORD, EXT_ERR_NOT_FOUND_ACC};
+use crate::ext_code::{EXT_LOGIN, EXT_LOGOUT, EXT_ERR_PARSE_ARGS, EXT_ERR_ALREADY_LOGIN, EXT_ERR_NOT_KNOW, EXT_ERR_WRONG_PASSWORD, EXT_ERR_NOT_FOUND_ACC, EXT_ERR_NOT_LOGIN};
 use crate::db::db_mgr::DBMgr;
 use crate::model::user::{User, MinUser};
 use mysql::prelude::Queryable;
@@ -79,7 +79,35 @@ impl SubHandle for Login
                 return Some((vec![],EXT_ERR_PARSE_ARGS));
             }
         }else if ext == EXT_LOGOUT{
-
+            if let Ok(mut m) = self.user_map.lock()
+            {
+                if !m.contains_key(&id)
+                {
+                   return Some((vec![],EXT_ERR_NOT_LOGIN));
+                }else{
+                    let u = m.remove(&id).unwrap();
+                    let acc = u.acc.clone();
+                    if let Ok(mut c) = self.db_mgr.get_conn()
+                    {
+                        if let Ok(r) = c.exec_drop("UPDATE user SET name = (), acc = () ,pwd = () ,is_admin = () , super_admin = ()
+                            WHERE user.id = ();",
+                                       (u.name,u.acc,u.pwd,u.is_admin,u.super_admin,u.id))
+                        {
+                            if let Ok(mut m) = self.login_map.lock()
+                            {
+                                m.remove(&acc);
+                            }else{
+                                return Some((vec![], EXT_ERR_NOT_KNOW));
+                            }
+                            return Some((vec![], EXT_LOGOUT));
+                        }else{
+                            return Some((vec![], EXT_ERR_NOT_KNOW));
+                        }
+                    }else{
+                        return Some((vec![], EXT_ERR_NOT_KNOW));
+                    }
+                }
+            }
         }
         None
     }
