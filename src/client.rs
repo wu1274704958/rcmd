@@ -15,6 +15,7 @@ mod asy_cry;
 mod data_transform;
 mod ext_code;
 mod subpackage;
+mod model;
 
 use tools::*;
 use agreement::*;
@@ -157,6 +158,14 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                         eprintln!("{}",e);
                     }
                 }
+            }
+            "2" => {
+                if cmds.len() < 3 {continue;}
+                let acc = cmds[1].trim().to_string();
+                let pwd = cmds[2].trim().to_string();
+                let user = model::user::MinUser{acc,pwd};
+                let s = serde_json::to_string(&user).unwrap();
+                send(&msg_queue,s.into_bytes(),EXT_LOGIN);
             }
             _ => {}
         }

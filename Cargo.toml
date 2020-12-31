@@ -14,6 +14,10 @@ rand = { version = "0.7.0", default-features = false }
 flate2 = { version = "1.0.19", features = ["zlib"], default-features = false }
 terminal = { version = "0.2" , features = ["crossterm-backend"] }
 mysql = "20.1.0"
+serde = { version = "1.0.61",features=["serde_derive"]}
+serde_json = "1.0.61"
+
+
 
 [[example]]
 name = "client"
@@ -35,3 +39,7 @@ path = "src/test/test_terminal.rs"
 [[example]]
 name = "test_mysql"
 path = "src/test/test_mysql.rs"
+
+[[example]]
+name = "json"
+path = "src/test/json.rs"

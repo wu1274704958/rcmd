@@ -11,6 +11,8 @@ mod asy_cry;
 mod data_transform;
 mod ext_code;
 mod subpackage;
+mod db;
+mod model;
 
 use tokio::net::TcpListener;
 use tokio::prelude::*;
@@ -37,6 +39,7 @@ use crate::asy_cry::{DefAsyCry, AsyCry, EncryptRes};
 use crate::data_transform::def_compress::DefCompress;
 use crate::subpackage::{DefSubpackage, Subpackage};
 use std::time::SystemTime;
+use crate::db::db_mgr::DBMgr;
 
 
 //fn main(){}
@@ -60,11 +63,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = DefParser::new();
     let mut plugs = DefPlugMgr::<HeartBeat>::new();
 
+    let dbmgr = Arc::new(DBMgr::new().unwrap());
+    let user_map = Arc::new(Mutex::new(HashMap::<usize,model::user::User>::new()));
+    let login_map = Arc::new(Mutex::new(HashMap::<String,usize>::new()));
+
     {
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
-        handler.add_handler(Arc::new(TestHandler{}));
+        //handler.add_handler(Arc::new(TestHandler{}));
         handler.add_handler(Arc::new(handlers::upload_file::UploadHandler::new()));
-
+        handler.add_handler(Arc::new(handlers::login::Login::new(dbmgr.clone(),user_map.clone(),login_map.clone())));
         //parser.add_transform(Arc::new(DefCompress{}));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
@@ -75,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let plugs_cp:Arc<_> = plugs.into();
 
     let listener = TcpListener::bind(config.addr).await?;
-
+    println!("Init Success!!!!");
     loop {
         let mut logic_id_cp = logic_id_.clone();
         let mut ab_clients_cp = ab_clients.clone();
