@@ -9,6 +9,8 @@ use crate::ext_code::{EXT_LOGIN, EXT_LOGOUT, EXT_ERR_PARSE_ARGS, EXT_ERR_ALREADY
 use crate::db::db_mgr::DBMgr;
 use crate::model::user::{User, MinUser};
 use mysql::prelude::Queryable;
+use crate::plug::Plug;
+use crate::config_build::Config;
 
 pub struct Login{
     db_mgr:Arc<DBMgr>,
@@ -116,5 +118,64 @@ impl SubHandle for Login
             }
         }
         None
+    }
+}
+
+
+pub struct OnDeadPlug{
+    db_mgr:Arc<DBMgr>,
+    login_map:Arc<Mutex<HashMap<String,usize>>>,
+    user_map:Arc<Mutex<HashMap<usize,user::User>>>
+}
+
+impl OnDeadPlug{
+    pub fn new(db_mgr:Arc<DBMgr>,user_map:Arc<Mutex<HashMap<usize,user::User>>>,
+               login_map:Arc<Mutex<HashMap<String,usize>>>) -> Self
+{
+    OnDeadPlug{db_mgr,login_map,user_map}
+}
+}
+
+impl Plug for OnDeadPlug {
+    type ABClient = AbClient;
+    type Id = usize;
+    type Config = Config;
+
+    fn run(&self, id: Self::Id, clients: &mut Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, config: &Self::Config) where Self::Id: Copy {
+        if let Ok(mut m) = self.user_map.lock()
+        {
+            if !m.contains_key(&id)
+            {
+                return;
+            }else{
+                println!("remove user");
+                let u = m.remove(&id).unwrap();
+                let acc = u.acc.clone();
+                if let Ok(mut c) = self.db_mgr.get_conn()
+                {
+                    match c.exec_drop("UPDATE user SET name = (?), acc = (?) ,pwd = (?) ,is_admin = (?) , super_admin = (?)
+                            WHERE user.id = (?);",
+                                      (u.name,u.acc,u.pwd,u.is_admin,u.super_admin,u.id))
+                    {
+                        Ok(l) =>{
+                            println!("remove login");
+                            if let Ok(mut m) = self.login_map.lock()
+                            {
+                                m.remove(&acc);
+                            }else{
+                                return;
+                            }
+                            return;
+                        }
+                        Err(e)=>{
+                            dbg!(e);
+                            return;
+                        }
+                    }
+                }else{
+                    return;
+                }
+            }
+        }
     }
 }

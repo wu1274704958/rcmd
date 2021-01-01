@@ -62,6 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut handler = DefHandler::<TestHandler>::new();
     let mut parser = DefParser::new();
     let mut plugs = DefPlugMgr::<HeartBeat>::new();
+    let mut dead_plugs = DefPlugMgr::<HeartBeat>::new();
 
     let dbmgr = Arc::new(DBMgr::new().unwrap());
     let user_map = Arc::new(Mutex::new(HashMap::<usize,model::user::User>::new()));
@@ -70,16 +71,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
         //handler.add_handler(Arc::new(TestHandler{}));
-        handler.add_handler(Arc::new(handlers::upload_file::UploadHandler::new()));
+        handler.add_handler(Arc::new(handlers::upload_file::UploadHandler::new(user_map.clone())));
         handler.add_handler(Arc::new(handlers::login::Login::new(dbmgr.clone(),user_map.clone(),login_map.clone())));
         //parser.add_transform(Arc::new(DefCompress{}));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
+
+        dead_plugs.add_plug(Arc::new(handlers::login::OnDeadPlug::new(dbmgr.clone(),user_map.clone(),login_map.clone())));
     }
 
     let handler_cp:Arc<_> = handler.into();
     let parser_cp:Arc<_> = parser.into();
     let plugs_cp:Arc<_> = plugs.into();
+    let dead_plugs_cp:Arc<_> = dead_plugs.into();
 
     let listener = TcpListener::bind(config.addr).await?;
     println!("Init Success!!!!");
@@ -89,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handler_cp = handler_cp.clone();
         let parser_cp = parser_cp.clone();
         let plugs_cp = plugs_cp.clone();
+        let dead_plugs_cp:Arc<_> = dead_plugs_cp.clone();
         let (mut socket, _) = listener.accept().await?;
 
         rt.spawn(async move {
@@ -124,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if st.is_none() { return; }
                     match st{
                         Some(WaitKill) => {
+                            dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
                             del_client(&mut ab_clients_cp,logic_id);
                             return;
                         }
@@ -135,6 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match socket.try_read(&mut buf) {
                     Ok(0) => {
                         //println!("ok n == 0 ----");
+                        dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
                         del_client(&mut ab_clients_cp,logic_id);
                         return;
                     },
@@ -152,6 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(e) => {
                         eprintln!("error = {}", e);
+                        dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
                         del_client(&mut ab_clients_cp,logic_id);
                         return;
                     }

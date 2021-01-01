@@ -9,17 +9,20 @@ use crate::ext_code::*;
 use crate::tools::{TOKEN_BEGIN, TOKEN_END};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use crate::model::user;
 
 pub struct UploadHandler
 {
-    file_map:Arc<Mutex<HashMap<String,(usize,File)>>>
+    file_map:Arc<Mutex<HashMap<String,(usize,File)>>>,
+    user_map:Arc<Mutex<HashMap<usize,user::User>>>
 }
 
 impl UploadHandler {
-    pub fn new()->UploadHandler
+    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>)->UploadHandler
     {
         UploadHandler{
-            file_map:Arc::new(Mutex::new(HashMap::new()))
+            file_map:Arc::new(Mutex::new(HashMap::new())),
+            user_map
         }
     }
 }
@@ -31,6 +34,16 @@ impl SubHandle for UploadHandler
 
     fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>,u32)> where Self::Id: Copy {
         if ext != EXT_UPLOAD_FILE_CREATE && ext != EXT_UPLOAD_FILE && ext != EXT_UPLOAD_FILE_ELF {return  None;}
+        let has_permission = if let Ok(u) = self.user_map.lock()
+        {
+            if let Some(user) = u.get(&id)
+            {
+                user.super_admin
+            }else{false}
+        }else{false};
+        if !has_permission{
+            return Some((vec![],EXT_ERR_PERMISSION_DENIED));
+        }
         //println!("{:?} ext: {}",data,ext);
         if data[0] != TOKEN_BEGIN
         {
