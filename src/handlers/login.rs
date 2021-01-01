@@ -85,23 +85,29 @@ impl SubHandle for Login
                 {
                    return Some((vec![],EXT_ERR_NOT_LOGIN));
                 }else{
+                    println!("remove user");
                     let u = m.remove(&id).unwrap();
                     let acc = u.acc.clone();
                     if let Ok(mut c) = self.db_mgr.get_conn()
                     {
-                        if let Ok(r) = c.exec_drop("UPDATE user SET name = (), acc = () ,pwd = () ,is_admin = () , super_admin = ()
-                            WHERE user.id = ();",
+                        match c.exec_drop("UPDATE user SET name = (?), acc = (?) ,pwd = (?) ,is_admin = (?) , super_admin = (?)
+                            WHERE user.id = (?);",
                                        (u.name,u.acc,u.pwd,u.is_admin,u.super_admin,u.id))
                         {
-                            if let Ok(mut m) = self.login_map.lock()
-                            {
-                                m.remove(&acc);
-                            }else{
+                            Ok(l) =>{
+                                println!("remove login");
+                                if let Ok(mut m) = self.login_map.lock()
+                                {
+                                    m.remove(&acc);
+                                }else{
+                                    return Some((vec![], EXT_ERR_NOT_KNOW));
+                                }
+                                return Some((vec![], EXT_LOGOUT));
+                            }
+                            Err(e)=>{
+                                dbg!(e);
                                 return Some((vec![], EXT_ERR_NOT_KNOW));
                             }
-                            return Some((vec![], EXT_LOGOUT));
-                        }else{
-                            return Some((vec![], EXT_ERR_NOT_KNOW));
                         }
                     }else{
                         return Some((vec![], EXT_ERR_NOT_KNOW));

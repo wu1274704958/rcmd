@@ -167,6 +167,9 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                 let s = serde_json::to_string(&user).unwrap();
                 send(&msg_queue,s.into_bytes(),EXT_LOGIN);
             }
+            "3" => {
+                send(&msg_queue,vec![],EXT_LOGOUT);
+            }
             _ => {}
         }
 
