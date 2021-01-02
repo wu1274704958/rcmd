@@ -1270,6 +1270,7 @@ dependencies = [
  "flate2",
  "mysql",
  "rand",
+ "regex",
  "rsa",
  "serde",
  "serde_json",

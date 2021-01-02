@@ -16,6 +16,8 @@ terminal = { version = "0.2" , features = ["crossterm-backend"] }
 mysql = "20.1.0"
 serde = { version = "1.0.61",features=["serde_derive"]}
 serde_json = "1.0.61"
+regex = "1.4.2"
+
 
 
 

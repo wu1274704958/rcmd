@@ -170,6 +170,15 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
             "3" => {
                 send(&msg_queue,vec![],EXT_LOGOUT);
             }
+            "4" => {
+                if cmds.len() < 4 {continue;}
+                let acc = cmds[1].trim().to_string();
+                let pwd = cmds[2].trim().to_string();
+                let name = cmds[3].trim().to_string();
+                let user = model::user::RegUser{acc,pwd,name};
+                let s = serde_json::to_string(&user).unwrap();
+                send(&msg_queue,s.into_bytes(),EXT_REGISTER);
+            }
             _ => {}
         }
 

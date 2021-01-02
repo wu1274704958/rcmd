@@ -22,6 +22,14 @@ pub struct MinUser
     pub pwd:String,
 }
 
+#[derive(Clone,Debug,PartialEq,Eq, Serialize, Deserialize)]
+pub struct RegUser
+{
+    pub name:String,
+    pub acc:String,
+    pub pwd:String,
+}
+
 impl Default for User
 {
     fn default() -> Self {

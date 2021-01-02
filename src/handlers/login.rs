@@ -51,7 +51,7 @@ impl SubHandle for Login
 
                 if let Ok(mut c) = self.db_mgr.get_conn()
                 {
-                    if let Ok(Some(Ok(user))) = c.query_first_opt::<User,_>(format!("select * from user where user.name='{}';",mu.acc))
+                    if let Ok(Some(Ok(mut user))) = c.query_first_opt::<User,_>(format!("select * from user where user.name='{}';",mu.acc))
                     {
                         if user.pwd != mu.pwd
                         {
@@ -68,6 +68,7 @@ impl SubHandle for Login
                             m.insert(id,user.clone());
                         }
                         println!("return the user info");
+                        user.pwd.clear();
                         let s = serde_json::to_string(&user).unwrap();
                         return Some((s.into_bytes(),EXT_LOGIN));
                     }else{
