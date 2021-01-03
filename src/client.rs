@@ -208,7 +208,23 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                 let su = model::SendMsg{lid,msg};
                 send(&msg_queue,serde_json::to_string(&su).unwrap().into_bytes(),EXT_SEND_MSG);
             }
-            _ => {}
+            "7" => {
+                if cmds.len() < 2 {continue;}
+                let msg = cmds[1].trim().to_string();
+                send(&msg_queue,msg.into_bytes(),EXT_SEND_BROADCAST);
+            }
+            _ => {
+                let help = r"
+                    1 upload file
+                    2 login [acc pwd]
+                    3 logout
+                    4 register [acc pwd name]
+                    5 user list
+                    6 send_msg [lid msg]
+                    7 broadcast [msg]
+                ";
+                println!("{}",help);
+            }
         }
 
     }

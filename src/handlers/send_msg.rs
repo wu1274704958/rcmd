@@ -8,6 +8,7 @@ use crate::ab_client::AbClient;
 use std::collections::hash_map::RandomState;
 use crate::ext_code::*;
 use crate::model::user::User;
+use crate::tools::real_package;
 
 pub struct SendMsg
 {
@@ -63,6 +64,21 @@ impl SubHandle for SendMsg
             } else {
                 return Some((vec![], EXT_ERR_PARSE_ARGS));
             }
+        }else if ext == EXT_SEND_BROADCAST{
+            let s = String::from_utf8_lossy(data).to_string();
+            let msg = model::RecvMsg{lid:id,msg:s,from_name:self_name.unwrap()};
+            let v = serde_json::to_string(&msg).unwrap().into_bytes();
+
+            {
+                let mut cls = clients.lock().unwrap();
+                cls.iter_mut().for_each(|(it,cl)|{
+                    if it != &id{
+                        cl.push_msg(v.clone(),EXT_RECV_MSG);
+                    }
+                });
+                return Some((vec![],EXT_SEND_BROADCAST));
+            }
+
         }
         None
     }
