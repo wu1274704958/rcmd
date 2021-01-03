@@ -1,0 +1,69 @@
+use std::sync::{Arc, PoisonError, MutexGuard};
+use std::sync::Mutex;
+use std::collections::HashMap;
+use crate::model;
+use crate::model::user;
+use crate::handler::SubHandle;
+use crate::ab_client::AbClient;
+use std::collections::hash_map::RandomState;
+use crate::ext_code::*;
+use crate::model::user::User;
+
+pub struct SendMsg
+{
+    login_map:Arc<Mutex<HashMap<String,usize>>>,
+    user_map:Arc<Mutex<HashMap<usize,user::User>>>
+}
+
+impl SendMsg {
+    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>,
+               login_map:Arc<Mutex<HashMap<String,usize>>>)->SendMsg
+    {
+        SendMsg{
+            login_map,
+            user_map
+        }
+    }
+}
+
+impl SubHandle for SendMsg
+{
+    type ABClient = AbClient;
+    type Id = usize;
+
+    fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+        if ext != EXT_SEND_BROADCAST && ext != EXT_SEND_MSG { return None;}
+
+        let mut self_name = None;
+        {
+            let lm = self.user_map.lock().unwrap();
+            match lm.get(&id){
+                None => {return Some((vec![],EXT_ERR_NOT_LOGIN));}
+                Some(u) => { self_name = Some(u.name.clone())}
+            };
+        }
+        if ext == EXT_SEND_MSG {
+            let s = String::from_utf8_lossy(data).to_string();
+            if let Ok(mut mu) = serde_json::from_str::<model::SendMsg>(s.as_str()) {
+                if mu.lid == id{
+                    return Some((vec![], EXT_ERR_BAD_TARGET));
+                }
+                let mut cls = clients.lock().unwrap();
+                match cls.get_mut(&mu.lid){
+                    None => {
+                        return Some((vec![], EXT_ERR_NOT_FOUND_LID));
+                    }
+                    Some(cl) => {
+                        let msg = model::RecvMsg{lid:id,msg:mu.msg,from_name:self_name.unwrap()};
+                        let v = serde_json::to_string(&msg).unwrap().into_bytes();
+                        cl.push_msg(v,EXT_RECV_MSG);
+                        return Some((vec![], EXT_SEND_MSG));
+                    }
+                };
+            } else {
+                return Some((vec![], EXT_ERR_PARSE_ARGS));
+            }
+        }
+        None
+    }
+}

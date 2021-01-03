@@ -30,6 +30,13 @@ pub struct RegUser
     pub pwd:String,
 }
 
+#[derive(Clone,Debug,PartialEq,Eq, Serialize, Deserialize)]
+pub struct GetUser
+{
+    pub lid:usize,
+    pub name:String
+}
+
 impl Default for User
 {
     fn default() -> Self {

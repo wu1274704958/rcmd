@@ -4,6 +4,8 @@ use tokio::net::TcpStream;
 use std::cell::RefCell;
 use crate::ab_client::State::Ready;
 use std::time::SystemTime;
+use std::collections::VecDeque;
+use std::sync::{Arc,Mutex};
 
 #[derive(Debug,Copy, Clone)]
 pub enum State
@@ -23,7 +25,7 @@ pub struct AbClient
     pub logic_id:usize,
     pub form_thread:ThreadId,
     pub state:State,
-    pub write_buf:Option<(Vec<u8>,u32)>,
+    write_buf:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
     pub heartbeat_time:SystemTime
 }
 
@@ -36,8 +38,22 @@ impl AbClient {
             logic_id,
             form_thread,
             state:Ready,
-            write_buf:None,
+            write_buf:Arc::new(Mutex::new(VecDeque::new())),
             heartbeat_time:SystemTime::now()
+        }
+    }
+
+    pub fn push_msg(&self,d:Vec<u8>,ext:u32)
+    {
+        let mut q = self.write_buf.lock().unwrap();
+        q.push_back((d,ext));
+    }
+
+    pub fn pop_msg(& self)->Option<(Vec<u8>,u32)>
+    {
+        let mut q = self.write_buf.lock().unwrap();
+        if q.is_empty() {  None }else{
+            q.pop_back()
         }
     }
 }

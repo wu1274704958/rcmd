@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, MutexGuard};
 use std::sync::Mutex;
 use std::collections::HashMap;
 use crate::model::user;
@@ -9,13 +9,16 @@ use crate::ext_code::*;
 
 pub struct GetUser
 {
+    login_map:Arc<Mutex<HashMap<String,usize>>>,
     user_map:Arc<Mutex<HashMap<usize,user::User>>>
 }
 
 impl GetUser {
-    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>)->GetUser
+    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>,
+               login_map:Arc<Mutex<HashMap<String,usize>>>)->GetUser
     {
         GetUser{
+            login_map,
             user_map
         }
     }
@@ -41,7 +44,17 @@ impl SubHandle for GetUser
             um.iter().for_each(|(i,it)|{
                 if *i != id
                 {
-                    res.push(serde_json::Value::String(it.name.clone()));
+                    let lid =  match self.login_map.lock()
+                    {
+                        Ok(v) => {
+                            v.get(&it.acc).unwrap().clone()
+                        }
+                        Err(e) => {
+                            0
+                        }
+                    };
+                    let u = user::GetUser{name:it.name.clone(),lid};
+                    res.push(serde_json::to_value(&u).unwrap());
                 }
             });
         }

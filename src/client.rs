@@ -16,6 +16,7 @@ mod data_transform;
 mod ext_code;
 mod subpackage;
 mod model;
+mod client_handlers;
 
 use tools::*;
 use agreement::*;
@@ -33,6 +34,8 @@ use std::fs::OpenOptions;
 use std::io::*;
 use ext_code::*;
 use subpackage::{DefSubpackage,Subpackage};
+use crate::client_handlers::def_handler::Handle;
+use std::num::ParseIntError;
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -65,6 +68,13 @@ async fn main() -> io::Result<()>
 
     let mut msg_queue = Arc::new(Mutex::new(VecDeque::<(Vec<u8>, u32)>::new()));
     let mut is_runing = Arc::new(Mutex::new(true));
+    let mut handler = client_handlers::def_handler::DefHandler::new();
+
+    {
+        handler.add_handler(Arc::new(client_handlers::get_users::GetUser::new()));
+        handler.add_handler(Arc::new(client_handlers::get_users::RecvMsg::new()));
+        handler.add_handler(Arc::new(client_handlers::err::Err{}));
+    }
 
     let rt = runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -83,7 +93,13 @@ async fn main() -> io::Result<()>
         let msg_queue = msg_queue.clone();
         let is_runing = is_runing.clone();
 
-        run(ip,port,msg_queue, is_runing).await?
+        run(
+            ip,
+            port,
+            msg_queue,
+            is_runing,
+            Arc::new(handler)
+        ).await?
     }
     Ok(())
 }
@@ -179,6 +195,19 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                 let s = serde_json::to_string(&user).unwrap();
                 send(&msg_queue,s.into_bytes(),EXT_REGISTER);
             }
+            "5" => {
+                send(&msg_queue,vec![],EXT_GET_USERS);
+            }
+            "6" => {
+                if cmds.len() < 3 {continue;}
+                let lid = match usize::from_str(cmds[1]){
+                    Ok(v) => {v}
+                    Err(e) => { dbg!(e); continue;}
+                };
+                let msg = cmds[2].trim().to_string();
+                let su = model::SendMsg{lid,msg};
+                send(&msg_queue,serde_json::to_string(&su).unwrap().into_bytes(),EXT_SEND_MSG);
+            }
             _ => {}
         }
 
@@ -193,7 +222,8 @@ fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
     }
 }
 
-async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc<Mutex<bool>>) -> io::Result<()>
+async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc<Mutex<bool>>,
+             handler:Arc<client_handlers::def_handler::DefHandler>) -> io::Result<()>
 {
     let sock = TcpSocket::new_v4().unwrap();
     let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), port)).await?;
@@ -278,8 +308,12 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 {
                     m.msg = v.as_slice();
                 }
-                if m.ext != 9
-                {println!("{:?} {}",&m.msg,m.ext);}
+                // if m.ext != 9
+                // {println!("{:?} {}",&m.msg,m.ext);}
+                if let Some(d) = handler.handle_ex(m)
+                {
+                    send(&msg_queue,d.0,d.1);
+                }
                 //dbg!(String::from_utf8_lossy(m.msg));
             }
             package = None;

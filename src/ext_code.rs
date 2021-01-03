@@ -18,7 +18,9 @@ pub const EXT_LOGIN:u32 = 43;
 pub const EXT_LOGOUT:u32 = 44;
 pub const EXT_GET_USERS:u32 = 45;
 pub const EXT_REGISTER:u32 = 46;
-
+pub const EXT_SEND_MSG:u32 = 47;
+pub const EXT_SEND_BROADCAST:u32 = 48;
+pub const EXT_RECV_MSG:u32 = 49;
 
 pub const EXT_DEFAULT_ERR_CODE:u32 = 50000;
 pub const EXT_ERR_CREATE_FILE_FAILED:u32 = 50001;
@@ -41,3 +43,5 @@ pub const EXT_ERR_BAD_ACCOUNT:u32 = 50017;
 pub const EXT_ERR_BAD_USERNAME:u32 = 50018;
 pub const EXT_ERR_BAD_PASSWORD:u32 = 50019;
 pub const EXT_ERR_ACC_REGISTERED:u32 = 50020;
+pub const EXT_ERR_NOT_FOUND_LID:u32 = 50021;
+pub const EXT_ERR_BAD_TARGET:u32 = 50022;

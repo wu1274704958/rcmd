@@ -1,1 +1,16 @@
 pub mod user;
+
+use serde::{Serialize, Deserialize};
+
+#[derive(Clone,Debug,PartialEq,Eq, Serialize, Deserialize)]
+pub struct SendMsg{
+    pub lid:usize,
+    pub msg:String
+}
+
+#[derive(Clone,Debug,PartialEq,Eq, Serialize, Deserialize)]
+pub struct RecvMsg{
+    pub lid:usize,
+    pub msg:String,
+    pub from_name:String
+}

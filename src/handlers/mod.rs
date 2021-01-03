@@ -3,3 +3,4 @@ pub mod upload_file;
 pub mod login;
 pub mod get_users;
 pub mod register;
+pub mod send_msg;

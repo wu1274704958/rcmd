@@ -51,7 +51,7 @@ impl SubHandle for Login
 
                 if let Ok(mut c) = self.db_mgr.get_conn()
                 {
-                    if let Ok(Some(Ok(mut user))) = c.query_first_opt::<User,_>(format!("select * from user where user.name='{}';",mu.acc))
+                    if let Ok(Some(Ok(mut user))) = c.query_first_opt::<User,_>(format!("select * from user where user.acc='{}';",mu.acc))
                     {
                         if user.pwd != mu.pwd
                         {

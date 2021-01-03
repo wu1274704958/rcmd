@@ -75,7 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         handler.add_handler(Arc::new(handlers::login::Login::new(dbmgr.clone(),user_map.clone(),login_map.clone())));
         //parser.add_transform(Arc::new(DefCompress{}));
         handler.add_handler(Arc::new(handlers::register::Register::new(dbmgr.clone(),user_map.clone())));
-        handler.add_handler(Arc::new(handlers::get_users::GetUser::new(user_map.clone())));
+        handler.add_handler(Arc::new(handlers::get_users::GetUser::new(user_map.clone(),login_map.clone())));
+        handler.add_handler(Arc::new(handlers::send_msg::SendMsg::new(user_map.clone(),login_map.clone())));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
 
@@ -227,21 +228,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 //println!("{} handle the request....", logic_id);
                 //println!("{} check the write_buf....", logic_id);
-
-                if let Some(mut w_buf) = get_client_write_buf(&mut ab_clients_cp,logic_id)
+                let mut msg = None;
                 {
-                    //------------------------------------------------
-                    match asy.encrypt(&w_buf.0,w_buf.1) {
-                        EncryptRes::EncryptSucc(d) => {
-                            w_buf.0 = d;
-                        }
-                        _ => {}
-                    };
-                    let real_pkg = parser_cp.package_tf(w_buf.0,w_buf.1);
-                    socket.write(real_pkg.as_slice()).await;
+                    if let Some(mut cl) = ab_clients_cp.lock().unwrap().get(&logic_id)
+                    {
+                        msg = cl.pop_msg();
+                    }
+                }
+                        //------------------------------------------------
+                if let Some((mut data,e)) = msg{
+                     match asy.encrypt(&data, e) {
+                         EncryptRes::EncryptSucc(d) => {
+                             data = d;
+                         }
+                         _ => {}
+                     };
+                     let real_pkg = parser_cp.package_tf(data, e);
+                     socket.write(real_pkg.as_slice()).await;
+
                 }else {
                     async_std::task::sleep(config.min_sleep_dur).await;
                 }
+
                 set_client_st(&mut ab_clients_cp,logic_id,Ready);
                 plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
             }
