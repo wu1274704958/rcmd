@@ -2,7 +2,7 @@
 mod config_build;
 mod ab_client;
 mod handler;
-mod tools;
+mod utils;
 mod agreement;
 mod plug;
 mod plugs;
@@ -13,6 +13,7 @@ mod ext_code;
 mod subpackage;
 mod db;
 mod model;
+mod utils;
 
 use tokio::net::TcpListener;
 use tokio::prelude::*;

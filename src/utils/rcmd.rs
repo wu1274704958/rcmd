@@ -1,12 +1,7 @@
-
-use std::process::{Command, Output, Stdio};
-use tokio::io::Error;
-use std::io::{Stdout, Stderr, Write, Read, stdin};
-use std::thread::sleep;
-use tokio::time::Duration;
-
 use std::path::PathBuf;
-use serde::{Serialize,Deserialize};
+use std::process::{Command, Stdio};
+use std::io::Read;
+
 #[derive(Debug)]
 pub struct Rcmd{
     curr_dir:PathBuf
@@ -95,6 +90,9 @@ impl Rcmd{
         }).collect();
         return match a[0] {
             "cd" => {
+                if a.len() != 2 {
+                    return Err("Args Error!".to_string());
+                }
                 let v = self.cd(a[1]);
                 Ok(CmdRes{
                     code:Some(if v {0}else{1}),
@@ -106,16 +104,5 @@ impl Rcmd{
                 self.exec(a[0],&a[1..])
             }
         };
-    }
-}
-
-fn main()
-{
-
-    let mut r = Rcmd::new();
-    loop{
-        let mut l = String::new();
-        stdin().read_line(&mut l);
-        dbg!(r.exec_ex(l));
     }
 }
