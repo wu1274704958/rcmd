@@ -4,7 +4,7 @@ use tokio::{io, runtime};
 use tokio::prelude::*;
 use std::ffi::{CString, CStr};
 use async_std::net::Shutdown;
-use tokio::time::Duration;
+use tokio::time::{Duration, sleep};
 
 mod config_build;
 mod ab_client;
@@ -369,6 +369,8 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                     _ => {}
                 };
 
+            }else{
+                sleep(Duration::from_millis(1)).await;
             }
         }
 
