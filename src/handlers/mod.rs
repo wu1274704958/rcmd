@@ -6,3 +6,4 @@ pub mod get_users;
 #[cfg(feature = "mysql")]
 pub mod register;
 pub mod send_msg;
+pub mod exec_cmd;

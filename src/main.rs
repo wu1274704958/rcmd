@@ -13,7 +13,7 @@ mod ext_code;
 mod subpackage;
 mod db;
 mod model;
-mod utils;
+mod tools;
 
 use tokio::net::TcpListener;
 use tokio::prelude::*;
@@ -134,7 +134,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match st{
                         Some(WaitKill) => {
                             dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
-                            del_client(&mut ab_clients_cp,logic_id);
+                            if del_client(&mut ab_clients_cp,logic_id) == 0{
+                                if let Ok(mut l) = logic_id_cp.lock(){ l.set_zero(); }
+                            }
                             return;
                         }
                         _ => {}
@@ -146,7 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(0) => {
                         //println!("ok n == 0 ----");
                         dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
-                        del_client(&mut ab_clients_cp,logic_id);
+                        if del_client(&mut ab_clients_cp,logic_id) == 0{
+                            if let Ok(mut l) = logic_id_cp.lock(){ l.set_zero(); }
+                        }
                         return;
                     },
                     Ok(n) => {
@@ -164,7 +168,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => {
                         eprintln!("error = {}", e);
                         dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
-                        del_client(&mut ab_clients_cp,logic_id);
+                        if del_client(&mut ab_clients_cp,logic_id) == 0{
+                            if let Ok(mut l) = logic_id_cp.lock(){ l.set_zero(); }
+                        }
                         return;
                     }
                 };

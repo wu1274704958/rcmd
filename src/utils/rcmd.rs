@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::io::Read;
+use serde::{
+    Serialize,
+    Deserialize
+};
 
 #[derive(Debug)]
 pub struct Rcmd{
@@ -12,6 +16,25 @@ pub struct CmdRes{
     pub out:String,
     pub err:String,
     pub code:Option<i32>,
+}
+
+impl CmdRes{
+    pub fn err_str(s:String)->CmdRes
+    {
+        CmdRes {
+            out : "".to_string(),
+            err : s,
+            code : Some(-1)
+        }
+    }
+    pub fn new(out:String,err:Sting,code:Option<i32>)->CmdRes
+    {
+        CmdRes {
+            out ,
+            err ,
+            code
+        }
+    }
 }
 
 impl Rcmd{

@@ -22,7 +22,7 @@ pub const BigEndian:bool = false;
 #[cfg(target_endian = "big")]
 pub const BigEndian:bool = true;
 
-pub fn del_client(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>, id:usize)
+pub fn del_client(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>, id:usize) ->usize
 {
     let mut cs_ = cs.lock().unwrap();
     if cs_.contains_key(&id)
@@ -30,6 +30,7 @@ pub fn del_client(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>, id:usize)
         println!("del client {} -=-=-=-=-",id);
         cs_.remove(&id).unwrap();
     }
+    return cs_.len();
 }
 
 pub fn set_client_st(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize,st:State)
