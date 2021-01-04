@@ -50,3 +50,7 @@ path = "src/test/test_mysql.rs"
 [[example]]
 name = "json"
 path = "src/test/json.rs"
+
+[[example]]
+name = "r"
+path = "src/test/cmd.rs"
