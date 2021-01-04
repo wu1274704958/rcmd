@@ -28,7 +28,7 @@ optional = true
 [[example]]
 name = "client"
 path = "src/client.rs"
-
+required-features = []
 
 [[example]]
 name = "learn_async"
