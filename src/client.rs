@@ -17,6 +17,7 @@ mod ext_code;
 mod subpackage;
 mod model;
 mod client_handlers;
+mod tools;
 
 use tools::*;
 use agreement::*;

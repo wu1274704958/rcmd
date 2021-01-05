@@ -27,7 +27,7 @@ impl CmdRes{
             code : Some(-1)
         }
     }
-    pub fn new(out:String,err:Sting,code:Option<i32>)->CmdRes
+    pub fn new(out:String,err:String,code:Option<i32>)->CmdRes
     {
         CmdRes {
             out ,

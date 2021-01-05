@@ -4,8 +4,11 @@ use std::collections::HashMap;
 use crate::handler::SubHandle;
 use std::collections::hash_map::RandomState;
 use crate::ab_client::AbClient;
-use crate::ext_code::{EXT_RUN_CMD, EXT_EXEC_CMD};
+use crate::ext_code::{EXT_RUN_CMD, EXT_EXEC_CMD, EXT_ERR_NOT_LOGIN, EXT_ERR_PERMISSION_DENIED, EXT_ERR_PARSE_ARGS, EXT_ERR_NOT_KNOW, EXT_ERR_NOT_FOUND_LID, EXT_ERR_EXEC_CMD_RET_ERR};
 use std::ops::AddAssign;
+use crate::model::user;
+use crate::model;
+use crate::tools;
 
 pub enum ExecState{
     Init,
@@ -32,13 +35,15 @@ impl ExecData{
 }
 
 pub struct ExecCmd{
+    user_map:Arc<Mutex<HashMap<usize,user::User>>>,
     logic_id:Arc<Mutex<usize>>,
     data:Arc<Mutex<HashMap<usize,ExecData>>>
 }
 
 impl ExecCmd{
-    pub fn new()->ExecCmd{
+    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>)->ExecCmd{
         ExecCmd{
+            user_map,
             logic_id : Arc::new(Mutex::new(0)),
             data : Arc::new(Mutex::new(HashMap::new()))
         }
@@ -53,19 +58,20 @@ impl ExecCmd{
         0
     }
 
-    pub fn del_data(&self,i:usize)
+    pub fn del_data(&self,i:usize) -> Option<ExecData>
     {
         if let Ok(mut d) = self.data.lock(){
-            if d.contains_key(&i) {
-                d.remove(&i);
-            }
+            let res = if d.contains_key(&i) {
+                d.remove(&i)
+            }else{None};
             if d.len() == 0
             {
                 if let Ok(mut l) = self.logic_id.lock(){
                     l.set_zero();
                 }
             }
-        }
+            res
+        }else{None}
     }
 
     pub fn set_st(&self,i:usize,st:ExecState)
@@ -74,6 +80,13 @@ impl ExecCmd{
             if d.contains_key(&i) {
                 d.get_mut(&i).unwrap().st = st;
             }
+        }
+    }
+
+    pub fn push(&self,i:usize,data:ExecData)
+    {
+        if let Ok(mut d) = self.data.lock(){
+            d.insert(i,data);
         }
     }
 }
@@ -85,9 +98,59 @@ impl SubHandle for ExecCmd
 
     fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
         if ext == EXT_RUN_CMD{
+            let is_su = if let Ok(um) = self.user_map.lock()
+            {
+                if let Some(u) = um.get(&id){
+                    u.super_admin
+                }else{
+                    return Some((vec![],EXT_ERR_NOT_LOGIN));
+                }
+            }else { false };
+            if !is_su { return Some((vec![],EXT_ERR_PERMISSION_DENIED)); }
+
+            let s = String::from_utf8_lossy(data).to_string();
+            if let Ok(msg) = serde_json::from_str::<model::SendMsg>(&s)
+            {
+                if let Ok(mut cls) = clients.lock()
+                {
+                    if let Some(cl) = cls.get_mut(&msg.lid){
+                        let sm = model::SendMsg {
+                            lid: self.next_id(),
+                            msg: msg.msg.clone()
+                        };
+                        let mut st = ExecData::new(msg.lid.clone(),id.clone());
+                        st.st = ExecState::SendToTarget;
+                        self.push(sm.lid,st);
+                        cl.push_msg(serde_json::to_string(&sm).unwrap().into_bytes(),EXT_EXEC_CMD);
+                    }else{ return Some((vec![],EXT_ERR_NOT_FOUND_LID));}
+                }else{ return Some((vec![],EXT_ERR_NOT_KNOW));}
+            }else{ return Some((vec![],EXT_ERR_PARSE_ARGS));}
 
         }else if ext == EXT_EXEC_CMD{
-
+            let s = String::from_utf8_lossy(data).to_string();
+            let msg = serde_json::from_str::<model::SendMsg>(&s);
+            match msg {
+                Err(e) => {
+                    println!("parse exec cmd return msg failed! {:?}",e);
+                }
+                Ok(mut m) =>{
+                    if let Some(ed) = self.del_data(m.lid){
+                        if let Ok(mut cls) = clients.lock()
+                        {
+                            if let Some(cl) = cls.get_mut(&ed.su)
+                            {
+                                m.lid = ed.tar;
+                                cl.push_msg(serde_json::to_string(&m).unwrap().into_bytes(),EXT_RUN_CMD);
+                            }
+                        }
+                    }
+                }
+            }
+        }else if ext == EXT_ERR_EXEC_CMD_RET_ERR{
+            if data.len() == std::mem::size_of::<u32>(){
+                let err = tools::u32_form_bytes(data);
+                println!("exec cmd return error code {}",err);
+            }
         }
         None
     }
