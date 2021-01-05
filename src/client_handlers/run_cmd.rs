@@ -4,6 +4,8 @@ use std::sync::Mutex;
 use crate::utils::rcmd::*;
 use crate::ext_code::*;
 use crate::model;
+use terminal::Color;
+
 pub struct RunCmd
 {
 }
@@ -28,13 +30,29 @@ impl SubHandle for RunCmd
                     let result = serde_json::from_str::<CmdRes>(&msg.msg);
                     match result{
                         Ok(res) => {
-                            println!("out:\n{}\nerr:\n{}\n",res.out,res.err);
+                            let out = terminal::stdout();
+                            out.batch(terminal::Action::SetForegroundColor(Color::Green));
+                            out.flush_batch();
+                            println!("{}\n",res.out);
+                            out.batch(terminal::Action::SetForegroundColor(Color::Red));
+                            out.flush_batch();
+                            println!("{}\n",res.err);
+
                             if res.code.is_some() {
+                                out.batch(terminal::Action::SetForegroundColor(Color::Blue));
+                                out.flush_batch();
                                 println!("code:{}",res.code.unwrap());
                             }
+                            out.batch(terminal::Action::SetForegroundColor(Color::Reset));
+                            out.flush_batch();
                         }
                         Err(e) =>{
+                            let out = terminal::stdout();
+                            out.batch(terminal::Action::SetForegroundColor(Color::Red));
+                            out.flush_batch();
                             println!("run cmd parse result error {:?}",e);
+                            out.batch(terminal::Action::SetForegroundColor(Color::Reset));
+                            out.flush_batch();
                         }
                     }
                 }

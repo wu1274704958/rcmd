@@ -206,14 +206,32 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                 send(&msg_queue,msg.into_bytes(),EXT_SEND_BROADCAST);
             }
             "8" => {
-                if cmds.len() < 3 {continue;}
-                let lid = match usize::from_str(cmds[1]){
+                if cmds.len() < 2 {continue;}
+                let lid = match usize::from_str(cmds[1].trim()){
                     Ok(v) => {v}
                     Err(e) => { dbg!(e); continue;}
                 };
-                let msg = cmd.split_at(cmds[0].len() + cmds[1].len() + 2);
-                let su = model::SendMsg{lid,msg:msg.1.trim().to_string()};
-                send(&msg_queue,serde_json::to_string(&su).unwrap().into_bytes(),EXT_RUN_CMD);
+                loop {
+                    let mut vec = vec![];
+                    loop {
+                        if let Ok(c) = in_.read_u8().await {
+                            if c != b'\n'
+                            {
+                                vec.push(c);
+                            }else { break; }
+                        }
+                    }
+                    let s = String::from_utf8_lossy(vec.as_slice()).trim().to_string();
+                    match s.trim(){
+                        "quit" =>{
+                            break;
+                        }
+                        _=>{
+                            let su = model::SendMsg { lid, msg: s.trim().to_string() };
+                            send(&msg_queue, serde_json::to_string(&su).unwrap().into_bytes(), EXT_RUN_CMD);
+                        }
+                    }
+                }
             }
             _ => {
                 let help = r"
@@ -339,7 +357,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
 
         if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
         {
-            if n > Duration::from_secs_f32(17f32)
+            if n > Duration::from_secs_f32(10f32)
             {
                 heartbeat_t = SystemTime::now();
                 let pkg = pakager.package_tf(vec![9], 9);
