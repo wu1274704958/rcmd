@@ -37,37 +37,26 @@ use ext_code::*;
 use subpackage::{DefSubpackage,Subpackage};
 use crate::client_handlers::def_handler::Handle;
 use std::num::ParseIntError;
+use args::ArgsError;
 
 #[tokio::main]
 async fn main() -> io::Result<()>
 {
-    let args = env::args();
-    let mut ip = Ipv4Addr::new(127, 0, 0, 1);
-    let mut port = 8080u16;
-    if args.len() > 1
+    let args = match tools::parse_c_args()
     {
-        args.enumerate().for_each(|it|
-            {
-                if it.0 == 1
-                {
-                    if let Ok(i) = Ipv4Addr::from_str(it.1.as_str())
-                    {
-                        ip = i;
-                    }
-                }
-                if it.0 == 2
-                {
-                    if let Ok(p) = u16::from_str(it.1.as_str())
-                    {
-                        port = p;
-                    }
-                }
-            });
-    }
-    dbg!(ip);
-
+        Ok(a) => {a}
+        Err(e) => {
+            dbg!(e);
+            return Ok(());
+        }
+    };
 
     let mut msg_queue = Arc::new(Mutex::new(VecDeque::<(Vec<u8>, u32)>::new()));
+    if args.acc.is_some(){
+        let user = model::user::MinUser{ acc: args.acc.unwrap(),pwd:args.pwd.unwrap()};
+        let s = serde_json::to_string(&user).unwrap();
+        send(&msg_queue,s.into_bytes(),EXT_LOGIN);
+    }
     let mut is_runing = Arc::new(Mutex::new(true));
     let mut handler = client_handlers::def_handler::DefHandler::new();
 
@@ -95,8 +84,8 @@ async fn main() -> io::Result<()>
         let is_runing = is_runing.clone();
 
         run(
-            ip,
-            port,
+            args.ip,
+            args.port,
             msg_queue,
             is_runing,
             Arc::new(handler)

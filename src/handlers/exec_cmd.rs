@@ -67,7 +67,7 @@ impl ExecCmd{
             if d.len() == 0
             {
                 if let Ok(mut l) = self.logic_id.lock(){
-                    l.set_zero();
+                    *l = 0;
                 }
             }
             res

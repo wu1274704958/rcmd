@@ -135,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Some(WaitKill) => {
                             dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
                             if del_client(&mut ab_clients_cp,logic_id) == 0{
-                                if let Ok(mut l) = logic_id_cp.lock(){ l.set_zero(); }
+                                if let Ok(mut l) = logic_id_cp.lock(){ *l = 0; }
                             }
                             return;
                         }
@@ -149,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         //println!("ok n == 0 ----");
                         dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
                         if del_client(&mut ab_clients_cp,logic_id) == 0{
-                            if let Ok(mut l) = logic_id_cp.lock(){ l.set_zero(); }
+                            if let Ok(mut l) = logic_id_cp.lock(){ *l = 0; }
                         }
                         return;
                     },
@@ -169,7 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("error = {}", e);
                         dead_plugs_cp.run(logic_id,&mut ab_clients_cp,&config);
                         if del_client(&mut ab_clients_cp,logic_id) == 0{
-                            if let Ok(mut l) = logic_id_cp.lock(){ l.set_zero(); }
+                            if let Ok(mut l) = logic_id_cp.lock(){ *l = 0; }
                         }
                         return;
                     }
