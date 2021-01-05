@@ -84,21 +84,25 @@ impl Rcmd{
         };
 
         let st = {
+            //println!("wait.......");
             match c.wait(){
                 Ok(v) => {
+                    //println!("exec ok {:?}",v.code());
                     v.code()
                 }
                 Err(e) => {
+                    //println!("exec err {:?}",e);
                     return Err(format!("{:?}",e));
                 }
             }
         };
-
+        //println!("read out str");
         let mut out = String::new();
         c.stdout.unwrap().read_to_string(&mut out);
+        //println!("read err str");
         let mut err = String::new();
         c.stderr.unwrap().read_to_string(&mut err);
-
+        //println!("read over");
         Ok(CmdRes{
             code:st,
             out,err
@@ -107,6 +111,7 @@ impl Rcmd{
 
     pub fn exec_ex(&mut self,s:String) ->Result<CmdRes,String>
     {
+        //println!("exec '{}'",s);
         let mut a:Vec<_> = s.split(" ").collect();
         a = a.iter_mut().map(|it|{
             it.trim()

@@ -28,7 +28,7 @@ impl SubHandle for RunCmd
                     let result = serde_json::from_str::<CmdRes>(&msg.msg);
                     match result{
                         Ok(res) => {
-                            println!("out:\n{}err:\n{}",res.out,res.err);
+                            println!("out:\n{}\nerr:\n{}\n",res.out,res.err);
                             if res.code.is_some() {
                                 println!("code:{}",res.code.unwrap());
                             }

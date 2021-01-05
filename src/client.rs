@@ -64,6 +64,8 @@ async fn main() -> io::Result<()>
         handler.add_handler(Arc::new(client_handlers::get_users::GetUser::new()));
         handler.add_handler(Arc::new(client_handlers::get_users::RecvMsg::new()));
         handler.add_handler(Arc::new(client_handlers::err::Err{}));
+        handler.add_handler(Arc::new(client_handlers::exec_cmd::Exec::new()));
+        handler.add_handler(Arc::new(client_handlers::run_cmd::RunCmd::new()));
     }
 
     let rt = runtime::Builder::new_multi_thread()
@@ -202,6 +204,16 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                 if cmds.len() < 2 {continue;}
                 let msg = cmds[1].trim().to_string();
                 send(&msg_queue,msg.into_bytes(),EXT_SEND_BROADCAST);
+            }
+            "8" => {
+                if cmds.len() < 3 {continue;}
+                let lid = match usize::from_str(cmds[1]){
+                    Ok(v) => {v}
+                    Err(e) => { dbg!(e); continue;}
+                };
+                let msg = cmd.split_at(cmds[0].len() + cmds[1].len() + 2);
+                let su = model::SendMsg{lid,msg:msg.1.trim().to_string()};
+                send(&msg_queue,serde_json::to_string(&su).unwrap().into_bytes(),EXT_RUN_CMD);
             }
             _ => {
                 let help = r"

@@ -34,7 +34,7 @@ impl SubHandle for Exec
             let mut msg = msg.unwrap();
             if let Ok(mut r) = self.rcmd.lock()
             {
-                let res = match r.exec_ex(msg.msg)
+                let res = match r.exec_ex(msg.msg.trim().to_string())
                 {
                     Ok(v) => {
                         v
@@ -43,8 +43,9 @@ impl SubHandle for Exec
                        CmdRes::err_str(e)
                     }
                 };
-
+                //dbg!(&res);
                 if let Ok(r) = serde_json::to_string(&res){
+                    //dbg!(&r);
                     msg.msg = r;
                     return Some((serde_json::to_string(&msg).unwrap().into_bytes(),EXT_EXEC_CMD));
                 }else{
