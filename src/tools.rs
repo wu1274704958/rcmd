@@ -18,6 +18,10 @@ pub const TOKEN_BEGIN:u8 = 7u8;
 pub const TOKEN_MID:u8 = 31u8;
 pub const TOKEN_END:u8 = 9u8;
 
+pub const TOKEN_NORMAL:u8 = 1u8;
+pub const TOKEN_SUBPACKAGE:u8 = 2u8;
+pub const TOKEN_SUBPACKAGE_END:u8 = 3u8;
+
 #[cfg(target_endian = "little")]
 pub const BigEndian:bool = false;
 

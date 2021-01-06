@@ -1,4 +1,4 @@
-use crate::tools::{u32_form_bytes, set_slices_form_u32, TOKEN_BEGIN, TOKEN_END, TOKEN_MID};
+use crate::tools::{u32_form_bytes, set_slices_form_u32, TOKEN_BEGIN, TOKEN_END, TOKEN_MID, TOKEN_NORMAL};
 use std::mem::size_of;
 use async_std::sync::Arc;
 use std::sync::Mutex;
@@ -82,14 +82,15 @@ impl DefParser {
 pub struct Message<'a>{
     pub len:u32,
     pub msg:&'a [u8],
-    pub ext:u32
+    pub ext:u32,
+    pub sign:u8
 }
 
 impl <'a> Message<'a>{
-    fn new(len:u32,msg:&'a [u8],ext:u32)->Message<'a>
+    fn new(len:u32,msg:&'a [u8],ext:u32,sign:u8)->Message<'a>
     {
         Message{
-            len,msg,ext
+            len,msg,ext,sign
         }
     }
 }
@@ -154,18 +155,19 @@ impl <'a>Agreement<'a> for DefParser
             return None
         }
 
-        let h_m = data.split_at(4);
+        let h_m = data.split_at(size_of::<u32>() + size_of::<u8>());
         let hml = h_m.1.len();
-        let m_d = h_m.1.split_at(hml - 4);
+        let m_d = h_m.1.split_at(hml - size_of::<u32>());
         //dbg!(&m_d);
         let ext = u32_form_bytes(m_d.1);
+        let pack_sign = h_m.0[size_of::<u32>()];
         //dbg!(ext);
-        Some(Message::new(len,&m_d.0[0..(m_d.0.len() - 1)],ext))
+        Some(Message::new(len,&m_d.0[0..(m_d.0.len() - 1)],ext,pack_sign))
     }
 
     fn package(&self, mut data:Vec<u8>,ext:u32) -> Vec<u8> {
         let mut res = Vec::new();
-        let len = data.len() as u32 + size_of::<u32>() as u32 * 2 + size_of::<u8>() as u32;
+        let len = data.len() as u32 + (size_of::<u32>() as u32 * 2) + (size_of::<u8>() * 2) as u32;
         //dbg!(len);
         let len_buf = len.to_be_bytes();
         let ext_buf = ext.to_be_bytes();
@@ -176,6 +178,7 @@ impl <'a>Agreement<'a> for DefParser
             //dbg!(i);
             res.push(*i);
         }
+        res.push(TOKEN_NORMAL);
         res.append(&mut data);
         res.push(TOKEN_MID);
         for i in ext_buf.iter(){

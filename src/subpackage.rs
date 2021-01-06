@@ -1,5 +1,5 @@
 use crate::subpackage::SpState::ExpectBegin;
-use crate::tools::{TOKEN_BEGIN, u32_form_bytes, TOKEN_END, TOKEN_MID};
+use crate::tools::{TOKEN_BEGIN, u32_form_bytes, TOKEN_END, TOKEN_MID, TOKEN_NORMAL, TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END};
 use std::mem::size_of;
 use std::time::SystemTime;
 
@@ -46,6 +46,11 @@ impl DefSubpackage{
             need_ck:false
         }
     }
+
+    pub fn good_sign(b:u8) -> bool
+    {
+        b == TOKEN_NORMAL || b == TOKEN_SUBPACKAGE || b == TOKEN_SUBPACKAGE_END
+    }
 }
 
 impl Subpackage for DefSubpackage
@@ -60,8 +65,13 @@ impl Subpackage for DefSubpackage
                     assert_eq!(self.idx, 0, "ExpectBegin idx must be eq 0!");
                     while !self.temp.is_empty() {
                         if self.temp[self.idx] == TOKEN_BEGIN {
-                            if self.temp.len() < size_of::<u8>() + size_of::<u32>() { return None; }
-                            let len = u32_form_bytes(&self.temp[(self.idx + 1)..]);
+                            if self.temp.len() < size_of::<u8>() + size_of::<u32>() + size_of::<u8>() { return None; }
+                            let len = u32_form_bytes(&self.temp[(self.idx + size_of::<u8>())..]);
+                            if !Self::good_sign(self.temp[self.idx + size_of::<u8>() + size_of::<u32>()]){
+                                println!("{:?} i={} len={} bad package not found good TOKEN_SIGN!",self.temp,self.idx,len);
+                                self.temp.pop();
+                                return None;
+                            }
                             if self.temp.len() < size_of::<u8>() * 2 + len as usize { return None; }
                             if self.temp[self.idx + len as usize + 1] == TOKEN_END {
                                 if self.temp[self.idx + len as usize - 4] == TOKEN_MID {
