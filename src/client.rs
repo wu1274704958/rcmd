@@ -38,6 +38,7 @@ use subpackage::{DefSubpackage,Subpackage};
 use crate::client_handlers::def_handler::Handle;
 use std::num::ParseIntError;
 use args::ArgsError;
+use utils::msg_split::{DefMsgSplit,MsgSplit};
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -139,7 +140,7 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                         cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
                         head_v.push(TOKEN_END);
 
-                        let mut buf = [0u8;490];
+                        let mut buf = [0u8;1024*64];
                         let mut is_first = true;
                         loop {
                             let mut d = head_v.clone();
@@ -268,6 +269,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
     let mut heartbeat_t = SystemTime::now();
     let mut pakager = DefParser::new();
     let mut asy = DefAsyCry::new();
+    let mut spliter = DefMsgSplit::new();
     let mut package = None;
 
     //pakager.add_transform(Arc::new(TestDataTransform{}));
@@ -276,7 +278,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
     //pakager.add_transform(Arc::new(DefCompress{}));
 
     if let Ok(pub_key_data) = asy.build_pub_key(){
-        let real_pkg = pakager.package_tf(pub_key_data, 10);
+        let real_pkg = pakager.package_nor(pub_key_data, 10);
         //dbg!(&real_pkg);
         stream.write(real_pkg.as_slice()).await;
     }
@@ -312,6 +314,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
 
         if let Some( mut d) = package {
             package = None;
+            let mut temp_data = None;
             let msg = pakager.parse_tf(&mut d);
             //dbg!(&msg);
             if let Some(mut m) = msg {
@@ -336,7 +339,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 };
                 if let Some(v) = immediate_send
                 {
-                    let mut real_pkg = pakager.package_tf(v, m.ext);
+                    let mut real_pkg = pakager.package_nor(v, m.ext);
                     stream.write(real_pkg.as_slice()).await;
                     continue;
                 }
@@ -346,6 +349,17 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 }
                 // if m.ext != 9
                 // {println!("{:?} {}",&m.msg,m.ext);}
+                if spliter.need_merge(&m)
+                {
+                    if let Some((data,ext)) = spliter.merge(&m)
+                    {
+                        temp_data = Some(data);
+                        m.ext = ext;
+                        m.msg = temp_data.as_ref().unwrap().as_slice();
+                    }else{
+                        continue;
+                    }
+                }
                 if let Some(d) = handler.handle_ex(m)
                 {
                     send(&msg_queue,d.0,d.1);
@@ -360,7 +374,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
             if n > Duration::from_secs_f32(10f32)
             {
                 heartbeat_t = SystemTime::now();
-                let pkg = pakager.package_tf(vec![9], 9);
+                let pkg = pakager.package_nor(vec![9], 9);
                 //dbg!(&pkg);
                 stream.write(pkg.as_slice()).await;
                 //println!("send heart beat");
@@ -373,22 +387,32 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 let mut queue = msg_queue.lock().unwrap();
                 data = queue.pop_front();
             }
-            if let Some(v) = data {
-
-                match asy.encrypt(&v.0, v.1) {
-                    EncryptRes::EncryptSucc(d) => {
-                        //println!("{:?} ext: {}",&v.0, v.1);
-                        let pkg = pakager.package_tf(d, v.1);
-                        stream.write(pkg.as_slice()).await;
+            if let Some(mut v) = data {
+                if spliter.need_split(v.0.len())
+                {
+                    let mut msgs = spliter.split(v.0,v.1);
+                    for i in msgs.into_iter(){
+                        let (mut data,ext,tag) = i;
+                        match asy.encrypt(&data, ext) {
+                            EncryptRes::EncryptSucc(d) => {
+                                data = d;
+                            }
+                            _ => {}
+                        };
+                        let mut real_pkg = pakager.package_tf(data, ext,tag);
+                        stream.write(real_pkg.as_slice()).await;
                     }
-                    EncryptRes::NotChange => {
-                        //println!("{:?} ext: {}",&v.0, v.1);
-                        let pkg = pakager.package_tf(v.0, v.1);
-                        stream.write(pkg.as_slice()).await;
-                    }
-                    _ => {}
-                };
-
+                }else {
+                    match asy.encrypt(&v.0, v.1) {
+                        EncryptRes::EncryptSucc(d) => {
+                            v.0 = d;
+                        }
+                        EncryptRes::NotChange => {}
+                        _ => {}
+                    };
+                    let pkg = pakager.package_nor(v.0, v.1);
+                    stream.write(pkg.as_slice()).await;
+                }
             }else{
                 sleep(Duration::from_millis(1)).await;
             }

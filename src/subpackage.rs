@@ -1,5 +1,5 @@
 use crate::subpackage::SpState::ExpectBegin;
-use crate::tools::{TOKEN_BEGIN, u32_form_bytes, TOKEN_END, TOKEN_MID, TOKEN_NORMAL, TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END};
+use crate::tools::{TOKEN_BEGIN, u32_form_bytes, TOKEN_END, TOKEN_MID, TOKEN_NORMAL, TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END, TOKEN_SUBPACKAGE_BEGIN};
 use std::mem::size_of;
 use std::time::SystemTime;
 
@@ -49,7 +49,7 @@ impl DefSubpackage{
 
     pub fn good_sign(b:u8) -> bool
     {
-        b == TOKEN_NORMAL || b == TOKEN_SUBPACKAGE || b == TOKEN_SUBPACKAGE_END
+        b == TOKEN_NORMAL || b == TOKEN_SUBPACKAGE || b == TOKEN_SUBPACKAGE_END || b == TOKEN_SUBPACKAGE_BEGIN
     }
 }
 

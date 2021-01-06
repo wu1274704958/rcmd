@@ -11,7 +11,7 @@ pub trait DataTransform<In,Out> : Send + Sync{
 pub trait Agreement<'a> {
     type AgreementTy;
     fn parse(&self,data:&'a Vec<u8>)->Option<Self::AgreementTy>;
-    fn package(&self,data:Vec<u8>,ext:u32)->Vec<u8>;
+    fn package(&self,data:Vec<u8>,ext:u32,pkg_tag:u8)->Vec<u8>;
     fn add_transform(&mut self,dt:Arc<dyn DataTransform<Vec<u8>,Vec<u8>>>);
     fn get_transform(&self,id:usize)->&dyn DataTransform<Vec<u8>,Vec<u8>>;
     fn transform_count(&self)->usize;
@@ -49,7 +49,7 @@ pub trait Agreement<'a> {
         }
     }
 
-    fn package_tf(&self,mut data:Vec<u8>,ext:u32)->Vec<u8>
+    fn package_tf(&self,mut data:Vec<u8>,ext:u32,pkg_tag:u8)->Vec<u8>
     {
         //println!("compress before = {:?} len = {}",&data,data.len());
         let mut res_tf;
@@ -60,7 +60,12 @@ pub trait Agreement<'a> {
             data = res_tf;
         }
         //println!("compress after = {:?} len = {}",&data,data.len());
-        self.package(data,ext)
+        self.package(data,ext,pkg_tag)
+    }
+
+    fn package_nor(&self,mut data:Vec<u8>,ext:u32)->Vec<u8>
+    {
+        self.package_tf(data,ext,TOKEN_NORMAL)
     }
 }
 
@@ -83,14 +88,14 @@ pub struct Message<'a>{
     pub len:u32,
     pub msg:&'a [u8],
     pub ext:u32,
-    pub sign:u8
+    pub tag:u8
 }
 
 impl <'a> Message<'a>{
-    fn new(len:u32,msg:&'a [u8],ext:u32,sign:u8)->Message<'a>
+    fn new(len:u32,msg:&'a [u8],ext:u32,tag:u8)->Message<'a>
     {
         Message{
-            len,msg,ext,sign
+            len,msg,ext,tag
         }
     }
 }
@@ -160,12 +165,12 @@ impl <'a>Agreement<'a> for DefParser
         let m_d = h_m.1.split_at(hml - size_of::<u32>());
         //dbg!(&m_d);
         let ext = u32_form_bytes(m_d.1);
-        let pack_sign = h_m.0[size_of::<u32>()];
+        let pkg_tag = h_m.0[size_of::<u32>()];
         //dbg!(ext);
-        Some(Message::new(len,&m_d.0[0..(m_d.0.len() - 1)],ext,pack_sign))
+        Some(Message::new(len,&m_d.0[0..(m_d.0.len() - 1)],ext,pkg_tag))
     }
 
-    fn package(&self, mut data:Vec<u8>,ext:u32) -> Vec<u8> {
+    fn package(&self, mut data:Vec<u8>,ext:u32,pkg_tag:u8) -> Vec<u8> {
         let mut res = Vec::new();
         let len = data.len() as u32 + (size_of::<u32>() as u32 * 2) + (size_of::<u8>() * 2) as u32;
         //dbg!(len);
@@ -178,7 +183,7 @@ impl <'a>Agreement<'a> for DefParser
             //dbg!(i);
             res.push(*i);
         }
-        res.push(TOKEN_NORMAL);
+        res.push(pkg_tag);
         res.append(&mut data);
         res.push(TOKEN_MID);
         for i in ext_buf.iter(){

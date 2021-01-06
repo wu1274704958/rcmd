@@ -15,7 +15,7 @@ mod db;
 mod model;
 mod tools;
 
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 use std::thread::{ThreadId, Thread};
 use tokio::runtime;
@@ -41,6 +41,8 @@ use crate::data_transform::def_compress::DefCompress;
 use crate::subpackage::{DefSubpackage, Subpackage};
 use std::time::SystemTime;
 use crate::db::db_mgr::DBMgr;
+use crate::utils::msg_split::{DefMsgSplit, MsgSplit};
+use getopts::HasArg::No;
 
 
 //fn main(){}
@@ -125,6 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut buf = [0; 1024];
             let mut subpackager = DefSubpackage::new();
             let mut asy = DefAsyCry::new();
+            let mut spliter = DefMsgSplit::new();
             let mut package = None;
             // In a loop, read data from the socket and write the data back.
             loop {
@@ -183,8 +186,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(mut d) = package
                 {
                     package = None;
+                    let mut temp_data = None;
                     //handle request
-                    let msg = parser_cp.parse_tf(&mut d);
+                    let msg = {  parser_cp.parse_tf(&mut d) };
                     //dbg!(&msg);
                     if let Some(mut m) = msg {
                         //----------------------------------
@@ -208,7 +212,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
                         if let Some(v) = immediate_send
                         {
-                            let mut real_pkg = parser_cp.package_tf(v, m.ext);
+                            let mut real_pkg = parser_cp.package_nor(v, m.ext);
                             socket.write(real_pkg.as_slice()).await;
                             continue;
                         }
@@ -217,19 +221,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             m.msg = v.as_slice();
                         }
                         let b = SystemTime::now();
+                        if spliter.need_merge(&m)
+                        {
+                            if let Some((data,ext)) = spliter.merge(&m)
+                            {
+                                temp_data = Some(data);
+                                m.ext = ext;
+                                m.msg = temp_data.as_ref().unwrap().as_slice();
+                            }else{
+                                continue;
+                            }
+                        }
                         let respose = handler_cp.handle_ex(m, &ab_clients_cp, logic_id);
                         println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());
                         if let Some((mut respose,mut ext)) = respose {
                             //---------------------------------
-                            match asy.encrypt(&respose,ext) {
-                                EncryptRes::EncryptSucc(d) => {
-                                    respose = d;
-                                    println!("send ext {}",ext);
+                            if spliter.need_split(respose.len())
+                            {
+                                let mut msgs = spliter.split(respose,ext);
+                                for i in msgs.into_iter(){
+                                    let (mut data,ext,tag) = i;
+                                    match asy.encrypt(&data, ext) {
+                                        EncryptRes::EncryptSucc(d) => {
+                                            data = d;
+                                        }
+                                        _ => {}
+                                    };
+                                    let mut real_pkg = parser_cp.package_tf(data, ext,tag);
+                                    socket.write(real_pkg.as_slice()).await;
                                 }
-                                _ => {}
-                            };
-                            let mut real_pkg = parser_cp.package_tf(respose, ext);
-                            socket.write(real_pkg.as_slice()).await;
+                            }else {
+                                match asy.encrypt(&respose, ext) {
+                                    EncryptRes::EncryptSucc(d) => {
+                                        respose = d;
+                                        println!("send ext {}", ext);
+                                    }
+                                    _ => {}
+                                };
+                                let mut real_pkg = parser_cp.package_nor(respose, ext);
+                                socket.write(real_pkg.as_slice()).await;
+                            }
                         }
                     }
                 }
@@ -245,15 +276,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                         //------------------------------------------------
                 if let Some((mut data,e)) = msg{
-                     match asy.encrypt(&data, e) {
-                         EncryptRes::EncryptSucc(d) => {
-                             data = d;
-                         }
-                         _ => {}
-                     };
-                     let real_pkg = parser_cp.package_tf(data, e);
-                     socket.write(real_pkg.as_slice()).await;
-
+                    if spliter.need_split(data.len())
+                    {
+                        let mut msgs = spliter.split(data,e);
+                        for i in msgs.into_iter(){
+                            let (mut data,ext,tag) = i;
+                            match asy.encrypt(&data, ext) {
+                                EncryptRes::EncryptSucc(d) => {
+                                    data = d;
+                                }
+                                _ => {}
+                            };
+                            let mut real_pkg = parser_cp.package_tf(data, ext,tag);
+                            socket.write(real_pkg.as_slice()).await;
+                        }
+                    }else {
+                        match asy.encrypt(&data, e) {
+                            EncryptRes::EncryptSucc(d) => {
+                                data = d;
+                            }
+                            _ => {}
+                        };
+                        let real_pkg = parser_cp.package_nor(data, e);
+                        socket.write(real_pkg.as_slice()).await;
+                    }
                 }else {
                     async_std::task::sleep(config.min_sleep_dur).await;
                 }
