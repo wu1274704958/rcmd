@@ -5,6 +5,7 @@ use serde::{
     Serialize,
     Deserialize
 };
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Rcmd{
@@ -64,16 +65,38 @@ impl Rcmd{
         }
         false
     }
+    #[cfg(target_os = "windows")]
+    fn append_env(v:&mut String,s:&str)
+    {
+        v.push_str(s);
+        v.push(';');
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn append_env(v:&mut String,s:&str)
+    {
+        v.push(':');
+        v.push_str(s);
+        v.push(':');
+    }
 
     pub fn exec(&self,d:&str,args:&[&str])-> Result<CmdRes,String>
     {
+
         dbg!(&d);
         dbg!(&args);
+
+        let mut filtered_env : HashMap<String, String> = std::env::vars().collect();
+        if let Some(p) = filtered_env.get_mut(&"PATH".to_string()){
+            Self::append_env(p,".");
+        };
+
         let mut c = match Command::new(d.trim())
             .args(args)
             .current_dir(self.curr_dir.to_str().unwrap())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .envs(&filtered_env)
             .spawn(){
             Ok(v) => {
                 v
@@ -84,25 +107,21 @@ impl Rcmd{
         };
 
         let st = {
-            //println!("wait.......");
             match c.wait(){
                 Ok(v) => {
-                    //println!("exec ok {:?}",v.code());
                     v.code()
                 }
                 Err(e) => {
-                    //println!("exec err {:?}",e);
                     return Err(format!("{:?}",e));
                 }
             }
         };
-        //println!("read out str");
+
         let mut out = String::new();
         c.stdout.unwrap().read_to_string(&mut out);
-        //println!("read err str");
         let mut err = String::new();
         c.stderr.unwrap().read_to_string(&mut err);
-        //println!("read over");
+
         Ok(CmdRes{
             code:st,
             out,err
@@ -111,16 +130,12 @@ impl Rcmd{
 
     pub fn exec_ex(&mut self,s:String) ->Result<CmdRes,String>
     {
-        //println!("exec '{}'",s);
         let mut a:Vec<_> = s.split(" ").collect();
         a = a.iter_mut().map(|it|{
             it.trim()
         }).collect();
         return match a[0] {
             "cd" => {
-                if a.len() != 2 {
-                    return Err("Args Error!".to_string());
-                }
                 let v = self.cd(a[1]);
                 Ok(CmdRes{
                     code:Some(if v {0}else{1}),

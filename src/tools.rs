@@ -198,7 +198,8 @@ pub struct ClientArgs{
     pub ip : Ipv4Addr,
     pub port : u16,
     pub acc : Option<String>,
-    pub pwd : Option<String>
+    pub pwd : Option<String>,
+    pub thread_num:u16
 }
 
 pub fn parse_c_args() -> Result<ClientArgs, ArgsError> {
@@ -229,6 +230,12 @@ pub fn parse_c_args() -> Result<ClientArgs, ArgsError> {
                 "PWD",
                 Occur::Optional,
                 None);
+    args.option("j",
+                "thread",
+                "Thread num",
+                "Thread Num",
+                Occur::Optional,
+                Some("1".to_string()));
 
     args.parse(input)?;
 
@@ -241,6 +248,7 @@ pub fn parse_c_args() -> Result<ClientArgs, ArgsError> {
     let mut port = 8080u16;
     let mut acc = None;
     let mut pwd = None;
+    let mut thread_num = 1u16;
     args.iter().for_each(|(k,v)|{
         match k.as_str() {
             "ip" => {
@@ -263,13 +271,18 @@ pub fn parse_c_args() -> Result<ClientArgs, ArgsError> {
             "password" => {
                 pwd = Some(v.clone());
             }
+            "thread" => {
+                if let Ok(tn) = u16::from_str(v.as_str()){
+                    thread_num = tn;
+                };
+            }
             _=>{}
         }
     });
 
     if acc.is_none() || pwd.is_none() {  acc = None; pwd = None;  }
     Ok(ClientArgs{
-        ip,port,acc,pwd
+        ip,port,acc,pwd,thread_num
     })
 }
 
