@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::ab_client::{AbClient, State};
 use tokio::net::TcpListener;
 use crate::handler::{Handle, SubHandle, DefHandler};
-use crate::agreement::{Agreement, Message};
+use crate::agreement::{Agreement, Message, DataTransform};
 use crate::config_build::Config;
 use std::error::Error;
 use std::env;
@@ -12,6 +12,7 @@ use std::str::FromStr;
 use async_std::net::SocketAddrV4;
 use args::{ArgsError, Args};
 use getopts::Occur;
+use std::ffi::OsStr;
 
 
 pub const TOKEN_BEGIN:u8 = 7u8;
@@ -204,6 +205,10 @@ pub struct ClientArgs{
 
 pub fn parse_c_args() -> Result<ClientArgs, ArgsError> {
     let input:Vec<_> = std::env::args().collect();
+    parse_c_args_ex(input)
+}
+pub fn parse_c_args_ex<C: IntoIterator>(input:C) -> Result<ClientArgs, ArgsError>
+    where C::Item: AsRef<OsStr>{
     let mut args = Args::new("Client", "-=-=-=-=-=-=-=-=-=-=-");
     args.flag("h", "help", "Print the usage menu");
     args.option("i",
@@ -284,6 +289,20 @@ pub fn parse_c_args() -> Result<ClientArgs, ArgsError> {
     Ok(ClientArgs{
         ip,port,acc,pwd,thread_num
     })
+}
+
+pub fn compress(s:&str)->Vec<u8>
+{
+    let c = crate::data_transform::def_compress::DefCompress{};
+    let v = s.as_bytes().to_vec();
+    c.to(&v)
+}
+
+pub fn decompress(s:&Vec<u8>)->String
+{
+    let c = crate::data_transform::def_compress::DefCompress{};
+    let res = c.form(&s);
+    String::from_utf8_lossy(res.as_ref()).to_string()
 }
 
 

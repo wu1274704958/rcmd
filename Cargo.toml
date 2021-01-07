@@ -65,3 +65,7 @@ path = "src/test/args.rs"
 [[example]]
 name = "scl"
 path = "src/scl.rs"
+
+[[example]]
+name = "gen_cnf"
+path = "src/test/gen_cnf.rs"

@@ -31,7 +31,7 @@ use data_transform::def_compress::DefCompress;
 use std::env::consts::OS;
 use std::collections::VecDeque;
 use tokio::runtime::Runtime;
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, File};
 use std::io::*;
 use ext_code::*;
 use subpackage::{DefSubpackage,Subpackage};
@@ -43,14 +43,32 @@ use utils::msg_split::{DefMsgSplit,MsgSplit};
 #[tokio::main]
 async fn main() -> io::Result<()>
 {
-    let args = match tools::parse_c_args()
-    {
-        Ok(a) => {a}
-        Err(e) => {
-            dbg!(e);
-            return Ok(());
-        }
-    };
+    let mut cnf = OpenOptions::new().read(true).open("cnf");
+    let args =
+        if let Ok(mut cnf) = cnf {
+            let mut d = Vec::new();
+            cnf.read_to_end(&mut d);
+            let s = tools::decompress(&d);
+            let args:Vec<_> = s.split(" ").collect();
+            match tools::parse_c_args_ex(args)
+            {
+                Ok(a) => {a}
+                Err(e) => {
+                    dbg!(e);
+                    return Ok(());
+                }
+            }
+        }else{
+            match tools::parse_c_args()
+            {
+                Ok(a) => {a}
+                Err(e) => {
+                    dbg!(e);
+                    return Ok(());
+                }
+            }
+        };
+
     dbg!(&args);
     let mut msg_queue = Arc::new(Mutex::new(VecDeque::<(Vec<u8>, u32)>::new()));
     if args.acc.is_some(){
