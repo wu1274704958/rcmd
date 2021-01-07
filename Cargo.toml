@@ -21,6 +21,7 @@ serde_json = "1.0.61"
 regex = "1.4.2"
 args = "2.2.0"
 getopts = "0.2.21"
+subprocess = "0.2.6"
 
 [dependencies.mysql]
 version = "=20.1.0"
