@@ -5,6 +5,8 @@ use crate::utils::rcmd::*;
 use crate::ext_code::*;
 use crate::model;
 use crate::tools;
+use std::time::Duration;
+
 pub struct Exec
 {
     rcmd:Arc<Mutex<Rcmd>>
@@ -14,7 +16,7 @@ impl Exec {
     pub fn new()->Exec
     {
         Exec{
-            rcmd:Arc::new(Mutex::new(Rcmd::new()))
+            rcmd:Arc::new(Mutex::new(Rcmd::new(Some(Duration::from_secs(10)))))
         }
     }
 }

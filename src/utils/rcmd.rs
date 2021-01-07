@@ -1,15 +1,19 @@
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, ExitStatus};
 use std::io::Read;
 use serde::{
     Serialize,
     Deserialize
 };
 use std::collections::HashMap;
+use std::time::{Duration, SystemTime};
+use tokio::io::Error;
+use tokio::stream::StreamExt;
 
 #[derive(Debug)]
 pub struct Rcmd{
-    curr_dir:PathBuf
+    curr_dir:PathBuf,
+    pub timeout:Option<Duration>
 }
 
 #[derive(Debug,Deserialize,Serialize)]
@@ -39,11 +43,13 @@ impl CmdRes{
 }
 
 impl Rcmd{
-    pub fn new()->Rcmd
+    pub fn new(timeout:Option<Duration>)->Rcmd
     {
         PathBuf::from(".");
 
-        Rcmd{curr_dir:std::env::current_dir().unwrap()}
+        Rcmd{curr_dir:std::env::current_dir().unwrap(),
+            timeout
+        }
     }
 
     pub fn cd(&mut self,d:&str)->bool
@@ -90,7 +96,6 @@ impl Rcmd{
         if let Some(p) = filtered_env.get_mut(&"PATH".to_string()){
             Self::append_env(p,".");
         };
-
         let mut c = match Command::new(d.trim())
             .args(args)
             .current_dir(self.curr_dir.to_str().unwrap())
@@ -105,18 +110,40 @@ impl Rcmd{
                 return Err(format!("{:?}",e));
             }
         };
-
-        let st = {
-            match c.wait(){
-                Ok(v) => {
-                    v.code()
+        let st = match self.timeout{
+            None => {
+                match c.wait(){
+                    Ok(v) => {
+                        v.code()
+                    }
+                    Err(e) => {
+                        return Err(format!("{:?}",e));
+                    }
                 }
-                Err(e) => {
-                    return Err(format!("{:?}",e));
+            }
+            Some(dur) => {
+                let b = SystemTime::now();
+                loop {
+                    match c.try_wait() {
+                        Ok(Some(status)) => {
+                            break status.code();
+                        }
+                        Ok(None) => {
+
+                        }
+                        Err(e) => {
+                            return Err(format!( "error attempting to wait: {}",e));
+                        }
+                    }
+                    if let Ok(nd) = SystemTime::now().duration_since(b)
+                    {
+                        if nd > dur{
+                            return Err(format!("time out {} ",d));
+                        }
+                    }
                 }
             }
         };
-
         let mut out = String::new();
         c.stdout.unwrap().read_to_string(&mut out);
         let mut err = String::new();
