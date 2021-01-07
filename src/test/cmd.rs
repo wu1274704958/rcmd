@@ -7,6 +7,8 @@ use tokio::time::Duration;
 
 use std::path::PathBuf;
 use serde::{Serialize,Deserialize};
+use std::collections::HashMap;
+
 #[derive(Debug)]
 pub struct Rcmd{
     curr_dir:PathBuf
@@ -46,16 +48,39 @@ impl Rcmd{
         }
         false
     }
+    #[cfg(target_os = "windows")]
+    fn append_env(v:&mut String,s:&str)
+    {
+        v.push_str(s);
+        v.push(';');
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn append_env(v:&mut String,s:&str)
+    {
+        v.push(':');
+        v.push_str(s);
+        v.push(':');
+    }
 
     pub fn exec(&self,d:&str,args:&[&str])-> Result<CmdRes,String>
     {
+
         dbg!(&d);
         dbg!(&args);
+
+        let mut filtered_env : HashMap<String, String> = std::env::vars().collect();
+        if let Some(p) = filtered_env.get_mut(&"PATH".to_string()){
+            Self::append_env(p,".");
+            dbg!(&p);
+        };
+
         let mut c = match Command::new(d.trim())
             .args(args)
             .current_dir(self.curr_dir.to_str().unwrap())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .envs(&filtered_env)
             .spawn(){
             Ok(v) => {
                 v
