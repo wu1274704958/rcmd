@@ -35,10 +35,48 @@ use std::fs::{OpenOptions, File};
 use std::io::*;
 use ext_code::*;
 use subpackage::{DefSubpackage,Subpackage};
-use crate::client_handlers::def_handler::Handle;
+use crate::client_handlers::def_handler::{ Handle,SubHandle};
 use std::num::ParseIntError;
 use args::ArgsError;
 use utils::msg_split::{DefMsgSplit,MsgSplit};
+
+struct AutoLogin{
+    acc:String,
+    pwd:String,
+    msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
+    dur:Duration,
+    last:Arc<Mutex<SystemTime>>
+}
+
+impl AutoLogin{
+    pub fn new(acc:String,
+               pwd:String,
+               msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
+                dur:Duration)->AutoLogin
+    {
+        AutoLogin{acc,pwd,msg_queue,dur,last:Arc::new(Mutex::new(SystemTime::now()))}
+    }
+}
+
+impl SubHandle for AutoLogin{
+    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+        if ext == EXT_ERR_ALREADY_LOGIN {
+            let mut last = self.last.lock().unwrap();
+            if let Ok(dur) = SystemTime::now().duration_since(*last)
+            {
+                if dur < self.dur
+                {
+                    std::thread::sleep(self.dur - dur);
+                }
+                let user = model::user::MinUser { acc: self.acc.clone(), pwd: self.pwd.clone() };
+                let s = serde_json::to_string(&user).unwrap();
+                send(&self.msg_queue, s.into_bytes(), EXT_LOGIN);
+                *last = SystemTime::now();
+            }
+        }
+        None
+    }
+}
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -83,6 +121,11 @@ async fn main() -> io::Result<()>
     {
         handler.add_handler(Arc::new(client_handlers::err::Err{}));
         handler.add_handler(Arc::new(client_handlers::exec_cmd::Exec::new()));
+        if args.acc.is_some(){
+            handler.add_handler(Arc::new(AutoLogin::new(args.acc.as_ref().unwrap().clone(),
+                                                        args.pwd.as_ref().unwrap().clone(),
+            msg_queue.clone(),Duration::from_secs(2))));
+        }
     }
 
     let handler = Arc::new(handler);
@@ -129,6 +172,7 @@ async fn main() -> io::Result<()>
             let s = serde_json::to_string(&user).unwrap();
             send(&msg_queue,s.into_bytes(),EXT_LOGIN);
         }
+        sleep(Duration::from_secs(1)).await;
     }
     Ok(())
 }
