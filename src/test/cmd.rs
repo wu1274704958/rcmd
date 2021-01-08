@@ -10,7 +10,7 @@ use serde::{Serialize,Deserialize};
 use std::collections::HashMap;
 use std::fs::{OpenOptions, File};
 use subprocess::{Exec, PopenError, ExitStatus, Popen, Redirection};
-
+use encoding_rs::Decoder;
 
 #[derive(Debug)]
 pub struct Rcmd{
@@ -152,7 +152,6 @@ impl Rcmd{
 
             match in_ {
                 Some(mut f) => {
-                    println!("write....");
                     f.write(d.as_bytes());
                     args.iter().for_each(|it| {
                         f.write(b" ".as_ref());
@@ -178,12 +177,20 @@ impl Rcmd{
                 }
             }
         };
-        sleep(Duration::from_secs(1));
         let out = match OpenOptions::new().read(true).open(out_file){
             Ok(mut o) => {
                 let mut vec = vec![];
                 o.read_to_end(&mut vec);
-                String::from_utf8_lossy(vec.as_slice()).trim().to_string()
+                drop(o);
+                std::fs::remove_file(out_file);
+                let mut decoder = encoding_rs::GBK.new_decoder();
+                if let Some(len) = decoder.max_utf8_buffer_length(vec.len()){
+                    let mut s = String::with_capacity(len);
+                    decoder.decode_to_string(vec.as_slice(),&mut s,false);
+                    s
+                }else{
+                    return Err(format!("Decode out result get max buffer len failed!!!"));
+                }
             }
             Err(e) => {return Err(format!("open stdout failed {:?}",e));}
         };
@@ -191,7 +198,16 @@ impl Rcmd{
             Ok(mut o) => {
                 let mut vec = vec![];
                 o.read_to_end(&mut vec);
-                String::from_utf8_lossy(vec.as_slice()).trim().to_string()
+                drop(o);
+                std::fs::remove_file(err_file);
+                let mut decoder = encoding_rs::GBK.new_decoder();
+                if let Some(len) = decoder.max_utf8_buffer_length(vec.len()){
+                    let mut s = String::with_capacity(len);
+                    decoder.decode_to_string(vec.as_slice(),&mut s,false);
+                    s
+                }else{
+                    return Err(format!("Decode err result get max buffer len failed!!!"));
+                }
             }
             Err(e) => {return Err(format!("open stderr failed {:?}",e));}
         };
@@ -234,4 +250,6 @@ fn main()
         let a = r.exec_ex(l).unwrap();
         println!("{}",a.out);
     }
+
+
 }
