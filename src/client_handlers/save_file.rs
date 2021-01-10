@@ -31,7 +31,7 @@ impl SubHandle for SaveFile
         id_buf.copy_from_slice(&data[0..size_of::<usize>()]);
         let id = usize::from_be_bytes(id_buf);
 
-        let data = data[size_of::<usize>()..];
+        let data = &data[size_of::<usize>()..];
 
         if data[0] != TOKEN_BEGIN
         {
