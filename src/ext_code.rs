@@ -23,6 +23,11 @@ pub const EXT_SEND_BROADCAST:u32 = 48;
 pub const EXT_RECV_MSG:u32 = 49;
 pub const EXT_EXEC_CMD:u32 = 50;
 pub const EXT_RUN_CMD:u32 = 51;
+pub const EXT_SEND_FILE:u32 = 52;
+pub const EXT_SAVE_FILE:u32 = 53;
+pub const EXT_SAVE_FILE_ELF:u32 = 54;
+pub const EXT_SAVE_FILE_CREATE:u32 = 55;
+
 
 pub const EXT_DEFAULT_ERR_CODE:u32 = 50000;
 pub const EXT_ERR_CREATE_FILE_FAILED:u32 = 50001;
@@ -49,3 +54,4 @@ pub const EXT_ERR_NOT_FOUND_LID:u32 = 50021;
 pub const EXT_ERR_BAD_TARGET:u32 = 50022;
 pub const EXT_ERR_EXEC_CMD_NOT_KNOW:u32 = 50023;
 pub const EXT_ERR_EXEC_CMD_RET_ERR:u32 = 50024;
+pub const EXT_ERR_SAVE_FILE_RET_EXT:u32 = 50025;

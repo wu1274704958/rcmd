@@ -13,6 +13,7 @@ use async_std::net::SocketAddrV4;
 use args::{ArgsError, Args};
 use getopts::Occur;
 use std::ffi::OsStr;
+use std::mem::size_of;
 
 
 pub const TOKEN_BEGIN:u8 = 7u8;
@@ -163,6 +164,14 @@ pub fn real_package(mut pkg:Vec<u8>)->Vec<u8>
     real_pkg.append(&mut pkg);
     real_pkg.push(TOKEN_END);
     real_pkg
+}
+
+pub fn ext_content(content:u32)->Vec<u8>
+{
+    let mut v = Vec::with_capacity(size_of::<u32>());
+    v.resize(size_of::<u32>(),0);
+    set_slices_form_u32(&mut v[..],content);
+    v
 }
 
 

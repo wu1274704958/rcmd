@@ -7,3 +7,4 @@ pub mod get_users;
 pub mod register;
 pub mod send_msg;
 pub mod exec_cmd;
+pub mod send_file;
