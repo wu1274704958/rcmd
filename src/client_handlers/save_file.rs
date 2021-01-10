@@ -6,6 +6,7 @@ use crate::tools::ext_content;
 use crate::ext_code::*;
 use std::io::Write;
 use crate::tools::{TOKEN_BEGIN,TOKEN_END};
+use std::mem::size_of;
 
 pub struct SaveFile
 {
@@ -25,6 +26,12 @@ impl SubHandle for SaveFile
 {
     fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         if ext != EXT_SAVE_FILE { return None;}
+
+        let mut id_buf = [0u8;size_of::<usize>()];
+        id_buf.copy_from_slice(&data[0..size_of::<usize>()]);
+        let id = usize::from_be_bytes(id_buf);
+
+        let data = data[size_of::<usize>()..];
 
         if data[0] != TOKEN_BEGIN
         {
