@@ -7,6 +7,7 @@ use crate::ext_code::*;
 use std::io::Write;
 use crate::tools::{TOKEN_BEGIN,TOKEN_END};
 use std::mem::size_of;
+use getopts::HasArg::No;
 
 pub struct SaveFile
 {
@@ -22,27 +23,47 @@ impl SaveFile {
     }
 }
 
+fn ret_ext(id_buf:&[u8],ext:u32)->Vec<u8>
+{
+    let mut v = Vec::with_capacity(id_buf.len());
+    v.resize(id_buf.len(),0);
+    v.copy_from_slice(id_buf);
+    v.append(&mut ext_content(ext));
+    v
+}
+
+fn ret(id_buf:&[u8],mut v2:Vec<u8>)->Vec<u8>
+{
+    let mut v = Vec::with_capacity(id_buf.len());
+    v.resize(id_buf.len(),0);
+    v.copy_from_slice(id_buf);
+    v.append(&mut v2);
+    v
+}
+
 impl SubHandle for SaveFile
 {
     fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
-        if ext != EXT_SAVE_FILE { return None;}
-
+        if ext != EXT_SAVE_FILE_CREATE &&
+            ext != EXT_SAVE_FILE &&
+            ext != EXT_SAVE_FILE_ELF{
+            return None;
+        }
         let mut id_buf = [0u8;size_of::<usize>()];
         id_buf.copy_from_slice(&data[0..size_of::<usize>()]);
-        let id = usize::from_be_bytes(id_buf);
 
         let data = &data[size_of::<usize>()..];
 
         if data[0] != TOKEN_BEGIN
         {
-            return Some((ext_content(EXT_AGREEMENT_ERR_CODE),EXT_ERR_SAVE_FILE_RET_EXT));
+            return Some((ret_ext(&id_buf,EXT_AGREEMENT_ERR_CODE),EXT_ERR_SAVE_FILE_RET_EXT));
         }
 
         let mut name_e = 0usize;
         loop  {
             if name_e >= data.len()
             {
-                return Some((ext_content(EXT_AGREEMENT_ERR_CODE),EXT_ERR_SAVE_FILE_RET_EXT));
+                return Some((ret_ext(&id_buf,EXT_AGREEMENT_ERR_CODE),EXT_ERR_SAVE_FILE_RET_EXT));
             }else if *data.get(name_e.clone()).unwrap() == TOKEN_END
             {
                 break;
@@ -53,7 +74,7 @@ impl SubHandle for SaveFile
 
         if name.is_empty()
         {
-            return Some((ext_content(EXT_ERR_FILE_NAME_EMPTY),EXT_ERR_SAVE_FILE_RET_EXT));
+            return Some((ret_ext(&id_buf,EXT_ERR_FILE_NAME_EMPTY),EXT_ERR_SAVE_FILE_RET_EXT));
         }
 
         let mut rd = name.as_bytes().to_vec();
@@ -63,7 +84,7 @@ impl SubHandle for SaveFile
             if let Ok(m) = self.file_map.lock(){
                 if let Some(v) = m.get(&name)
                 {
-                    let mut ve = ext_content(EXT_ERR_ALREADY_CREATED);
+                    let mut ve = ret_ext(&id_buf,EXT_ERR_ALREADY_CREATED);
                     ve.append(&mut rd);
                     return Some((ve, EXT_ERR_SAVE_FILE_RET_EXT));
                 }
@@ -78,15 +99,15 @@ impl SubHandle for SaveFile
                     if let Ok(mut fm) = self.file_map.lock()
                     {
                         fm.insert(name.clone(), f);
-                        return Some((rd, EXT_SAVE_FILE_CREATE));
+                        return Some((ret(&id_buf,rd), EXT_SAVE_FILE_CREATE));
                     }
                 }else{
-                    let mut ve = ext_content(EXT_ERR_WRITE_FILE_FAILED);
+                    let mut ve = ret_ext(&id_buf,EXT_ERR_WRITE_FILE_FAILED);
                     ve.append(&mut rd);
                     return Some((ve, EXT_ERR_SAVE_FILE_RET_EXT));
                 }
             }else{
-                let mut ve = ext_content(EXT_ERR_CREATE_FILE_FAILED);
+                let mut ve = ret_ext(&id_buf,EXT_ERR_CREATE_FILE_FAILED);
                 ve.append(&mut rd);
                 return Some((ve, EXT_ERR_SAVE_FILE_RET_EXT));
             }
@@ -102,14 +123,14 @@ impl SubHandle for SaveFile
                         let b = (l as u32).to_be_bytes();
                         b.iter().for_each(|it|{rd.push(*it)});
                         //f.1.sync_all().unwrap();
-                        return Some((rd,EXT_SAVE_FILE));
+                        return Some((ret(&id_buf,rd),EXT_SAVE_FILE));
                     }else{
-                        let mut ve = ext_content(EXT_ERR_WRITE_FILE_FAILED);
+                        let mut ve = ret_ext(&id_buf,EXT_ERR_WRITE_FILE_FAILED);
                         ve.append(&mut rd);
                         return Some((ve, EXT_ERR_SAVE_FILE_RET_EXT));
                     }
                 }else {
-                    let mut ve = ext_content(EXT_ERR_FILE_NAME_NOT_EXITS);
+                    let mut ve = ret_ext(&id_buf,EXT_ERR_FILE_NAME_NOT_EXITS);
                     ve.append(&mut rd);
                     return Some((ve, EXT_ERR_SAVE_FILE_RET_EXT));
                 }
@@ -122,14 +143,13 @@ impl SubHandle for SaveFile
                 {
                     f.sync_all().unwrap();
                 }else{
-                    let mut ve = ext_content(EXT_ERR_FILE_NAME_NOT_EXITS);
+                    let mut ve = ret_ext(&id_buf,EXT_ERR_FILE_NAME_NOT_EXITS);
                     ve.append(&mut rd);
                     return Some((ve, EXT_ERR_SAVE_FILE_RET_EXT));
                 }
-
                 if let Some(k) = fm.remove(&name)
                 {
-                    return Some((rd,EXT_SAVE_FILE_ELF));
+                    return Some((ret(&id_buf,rd),EXT_SAVE_FILE_ELF));
                 }
             }
         }

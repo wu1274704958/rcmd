@@ -24,9 +24,11 @@ pub const EXT_RECV_MSG:u32 = 49;
 pub const EXT_EXEC_CMD:u32 = 50;
 pub const EXT_RUN_CMD:u32 = 51;
 pub const EXT_SEND_FILE:u32 = 52;
-pub const EXT_SAVE_FILE:u32 = 53;
-pub const EXT_SAVE_FILE_ELF:u32 = 54;
-pub const EXT_SAVE_FILE_CREATE:u32 = 55;
+pub const EXT_SEND_FILE_ELF:u32 = 53;
+pub const EXT_SEND_FILE_CREATE:u32 = 54;
+pub const EXT_SAVE_FILE:u32 = 55;
+pub const EXT_SAVE_FILE_ELF:u32 = 56;
+pub const EXT_SAVE_FILE_CREATE:u32 = 57;
 
 
 pub const EXT_DEFAULT_ERR_CODE:u32 = 50000;

@@ -81,6 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         handler.add_handler(Arc::new(handlers::get_users::GetUser::new(user_map.clone(),login_map.clone())));
         handler.add_handler(Arc::new(handlers::send_msg::SendMsg::new(user_map.clone(),login_map.clone())));
         handler.add_handler(Arc::new(handlers::exec_cmd::ExecCmd::new(user_map.clone())));
+        handler.add_handler(Arc::new(handlers::send_file::SendFile::new(user_map.clone())));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
 

@@ -57,6 +57,7 @@ impl Subpackage for DefSubpackage
 {
     fn subpackage(&mut self,data: &[u8], len: usize) -> Option<Vec<u8>> {
         self.need_ck = false;
+        self.temp.reserve(data.len());
         for i in 0..len { self.temp.push(data[i]); }
         if self.temp.is_empty() { return None; }
         'Out: loop {
@@ -105,7 +106,7 @@ impl Subpackage for DefSubpackage
                     let res = self.temp[(b+1)..self.idx].to_vec();
                     if self.temp.len() - self.idx > 1
                     {
-                        let mut rest_data = Vec::new();
+                        let mut rest_data = Vec::with_capacity(self.temp.len() - (self.idx+1));
                         rest_data.resize(self.temp.len() - (self.idx+1),0);
                         rest_data.copy_from_slice(&(self.temp[(self.idx+1)..]));
                         self.temp = rest_data;
