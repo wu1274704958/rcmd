@@ -26,8 +26,8 @@ impl ConfigBuilder
             config:Config{
                 thread_count:0,
                 addr:SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0,0,0,0),8080)),
-                min_sleep_dur: Duration::from_micros(100),
-                max_sleep_dur: Duration::from_millis(1),
+                min_sleep_dur: Duration::from_micros(10),
+                max_sleep_dur: Duration::from_micros(100),
                 big_msg_limit: 1024 * 128,
                 heartbeat_dur: Duration::from_secs(36)
             }

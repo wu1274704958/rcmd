@@ -125,7 +125,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             socket.readable().await;
 
-            let mut buf = [0; 1024];
+            let mut buf = Vec::with_capacity(1024*1024*10);
+            buf.resize(1024*1024*10,0);
             let mut subpackager = DefSubpackage::new();
             let mut asy = DefAsyCry::new();
             let mut spliter = DefMsgSplit::new();
@@ -162,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         //println!("n = {}",n);
                         set_client_st(&mut ab_clients_cp, logic_id, Busy);
                         let b = SystemTime::now();
-                        package = subpackager.subpackage(&buf,n);
+                        package = subpackager.subpackage(&buf[0..n],n);
                         let e = SystemTime::now();
                         println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
 
@@ -234,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         let respose = handler_cp.handle_ex(m, &ab_clients_cp, logic_id);
-                        println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());
+                        if m.ext != 9 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
                         if let Some((mut respose,mut ext)) = respose {
                             //---------------------------------
                             if spliter.need_split(respose.len())

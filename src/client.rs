@@ -141,11 +141,12 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                         cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
                         head_v.push(TOKEN_END);
 
-                        let mut buf = [0u8;1024*64];
+                        let mut buf = Vec::with_capacity(1024*100);
+                        buf.resize(1024*100,0);
                         let mut is_first = true;
                         loop {
                             let mut d = head_v.clone();
-                            match f.read(&mut buf){
+                            match f.read(&mut buf[..]){
                                 Ok(n) => {
                                     //println!("==== {} ====",n);
                                     if n <= 0
@@ -153,6 +154,7 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                                         send(&msg_queue,d,EXT_UPLOAD_FILE_ELF);
                                         break;
                                     }else{
+                                        d.reserve(n);
                                         for i in 0..n { d.push(buf[i]);  }
                                         send(&msg_queue,d,if is_first {EXT_UPLOAD_FILE_CREATE}else{EXT_UPLOAD_FILE});
                                         is_first = false;
@@ -224,7 +226,7 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                         }
                     }
                     let s = String::from_utf8_lossy(vec.as_slice()).trim().to_string();
-                    if dbg!(s.as_bytes()[0] == b'#')
+                    if s.as_bytes()[0] == b'#'
                     {
                         let (_,c) = s.split_at(2);
                         let cmds:Vec<&str> = c.split(" ").collect();
@@ -237,11 +239,12 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                                 cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
                                 head_v.push(TOKEN_END);
 
-                                let mut buf = [0u8;1024*64];
+                                let mut buf = Vec::with_capacity(1024 * 100);
+                                buf.resize(1024 * 100,0);
                                 let mut is_first = true;
                                 loop {
                                     let mut d = head_v.clone();
-                                    match f.read(&mut buf){
+                                    match f.read(&mut buf[..]){
                                         Ok(n) => {
                                             //println!("==== {} ====",n);
                                             if n <= 0
@@ -249,6 +252,7 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                                                 send(&msg_queue,d,EXT_SEND_FILE_ELF);
                                                 break;
                                             }else{
+                                                d.reserve(n);
                                                 for i in 0..n { d.push(buf[i]);  }
                                                 send(&msg_queue,d,if is_first {EXT_SEND_FILE_CREATE}else{EXT_SEND_FILE});
                                                 is_first = false;
@@ -308,7 +312,8 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
 {
     let sock = TcpSocket::new_v4().unwrap();
     let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), port)).await?;
-    let mut buf = [0u8; 1024];
+    let mut buf = Vec::with_capacity(1024 * 1024 * 10);
+    buf.resize(1024 * 1024 * 10,0);
     // In a loop, read data from the socket and write the data back.
     let mut heartbeat_t = SystemTime::now();
     let mut pakager = DefParser::new();
@@ -332,14 +337,14 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
     loop {
         /// read request
         //println!("read the request....");
-        match stream.try_read(&mut buf) {
+        match stream.try_read(&mut buf[..]) {
             Ok(0) => {
                 println!("ok n == 0 ----");
                 break;
             }
             Ok(n) => {
                 //println!("n = {}", n);
-                package = subpackager.subpackage(&buf,n);
+                package = subpackager.subpackage(&buf[0..n],n);
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 //async_std::task::sleep(Duration::from_millis(10)).await;
