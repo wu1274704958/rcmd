@@ -22,9 +22,11 @@ pub trait Agreement<'a> {
             let mut i:usize = self.transform_count() - 1;
             let mut l:[u8;4] = [0,0,0,0];
             let mut e:[u8;4] = [0,0,0,0];
-            e.copy_from_slice(&data[(data.len() - 4)..data.len()]);
+            let mut tag = TOKEN_NORMAL;
+            e.copy_from_slice(&data[(data.len() - size_of::<u32>())..data.len()]);
+            tag = data[size_of::<u32>()];
             //dbg!(e);
-            let mut tf_data:Vec<u8> = data[4..(data.len() - 4)].into();
+            let mut tf_data:Vec<u8> = data[(size_of::<u32>() + size_of::<u8>())..(data.len() - 5)].into();
             //println!("decompress before = {:?} len = {} ",&tf_data,tf_data.len());
             let mut res_data;
             loop{
@@ -36,10 +38,12 @@ pub trait Agreement<'a> {
             }
             *data = tf_data;
             //println!("decompress after = {:?} len = {} ",&data,data.len());
-            set_slices_form_u32(&mut l,(data.len() + 8) as u32);
+            set_slices_form_u32(&mut l,(data.len() + 10) as u32);
             for i in l.iter().enumerate() {
                 data.insert(i.0,*i.1);
             }
+            data.insert(size_of::<u32>(),tag);
+            data.push(TOKEN_MID);
             for i in e.iter() {
                 data.push(*i);
             }
