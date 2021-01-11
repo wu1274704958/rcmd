@@ -182,7 +182,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 if package.is_none() && subpackager.need_check(){
+                    let b = SystemTime::now();
                     package = subpackager.subpackage(&[],0);
+                    println!("subpackage check use {} ms",SystemTime::now().duration_since(b).unwrap().as_millis());
                 }
 
                 if let Some(mut d) = package

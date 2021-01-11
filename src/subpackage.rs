@@ -105,17 +105,10 @@ impl Subpackage for DefSubpackage
                 SpState::ExpectExt => {}
                 SpState::ExpectEnd => {
                     let b = self.bp.unwrap();
-                    let res = self.temp[(b+1)..self.idx].to_vec();
-                    if self.temp.len() - self.idx > 1
-                    {
-                        let mut rest_data = Vec::with_capacity(self.temp.len() - (self.idx+1));
-                        rest_data.resize(self.temp.len() - (self.idx+1),0);
-                        rest_data.copy_from_slice(&(self.temp[(self.idx+1)..]));
-                        self.temp = rest_data;
-                        self.need_ck = true;
-                    }else{
-                        self.temp.clear();
-                    }
+                    let mut res:Vec<_> = self.temp.drain(b..self.idx).collect();
+                    res.remove(0);
+                    self.temp.remove(0);
+                    self.need_ck = !self.temp.is_empty();
                     self.st = SpState::ExpectBegin;
                     self.len = None;
                     self.bp = None;
