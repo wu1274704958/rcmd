@@ -105,9 +105,8 @@ impl Subpackage for DefSubpackage
                 SpState::ExpectExt => {}
                 SpState::ExpectEnd => {
                     let b = self.bp.unwrap();
-                    let mut res:Vec<_> = self.temp.drain(b..self.idx).collect();
-                    res.remove(0);
-                    self.temp.remove(0);
+                    let mut res:Vec<_> = self.temp.drain((b+1)..self.idx).collect();
+                    self.temp.drain(0..2);
                     self.need_ck = !self.temp.is_empty();
                     self.st = SpState::ExpectBegin;
                     self.len = None;
