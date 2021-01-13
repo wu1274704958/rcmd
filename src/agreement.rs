@@ -3,17 +3,17 @@ use std::mem::size_of;
 use async_std::sync::Arc;
 use std::sync::Mutex;
 
-pub trait DataTransform<In,Out> : Send + Sync{
-    fn to(&self,d:&In)->Out;
-    fn form(&self,d:&Out)->In;
+pub trait DataTransform : Send + Sync{
+    fn to(&self,d:&[u8])->Vec<u8>;
+    fn form(&self,d:&[u8])->Vec<u8>;
 }
 
 pub trait Agreement<'a> {
     type AgreementTy;
     fn parse(&self,data:&'a Vec<u8>)->Option<Self::AgreementTy>;
     fn package(&self,data:Vec<u8>,ext:u32,pkg_tag:u8)->Vec<u8>;
-    fn add_transform(&mut self,dt:Arc<dyn DataTransform<Vec<u8>,Vec<u8>>>);
-    fn get_transform(&self,id:usize)->&dyn DataTransform<Vec<u8>,Vec<u8>>;
+    fn add_transform(&mut self,dt:Arc<dyn DataTransform>);
+    fn get_transform(&self,id:usize)->&dyn DataTransform;
     fn transform_count(&self)->usize;
     fn parse_tf(&self,data:&'a mut Vec<u8>)->Option<Self::AgreementTy>
     {
@@ -26,17 +26,17 @@ pub trait Agreement<'a> {
             e.copy_from_slice(&data[(data.len() - size_of::<u32>())..data.len()]);
             tag = data[size_of::<u32>()];
             //dbg!(e);
-            let mut tf_data:Vec<u8> = data[(size_of::<u32>() + size_of::<u8>())..(data.len() - 5)].into();
+            let mut tf_data = &data[(size_of::<u32>() + size_of::<u8>())..(data.len() - 5)];
             //println!("decompress before = {:?} len = {} ",&tf_data,tf_data.len());
             let mut res_data;
             loop{
                 let tf = self.get_transform(i);
-                res_data = tf.form(&tf_data);
-                tf_data = res_data;
+                res_data = tf.form(tf_data);
+                tf_data = &res_data[..];
                 if i == 0 {break;}
                 i -= 1;
             }
-            *data = tf_data;
+            *data = tf_data.to_vec();
             //println!("decompress after = {:?} len = {} ",&data,data.len());
             set_slices_form_u32(&mut l,(data.len() + 10) as u32);
             for i in l.iter().enumerate() {
@@ -60,7 +60,7 @@ pub trait Agreement<'a> {
         for i in 0..self.transform_count()
         {
             let tf = self.get_transform(i);
-            res_tf = tf.to(&data);
+            res_tf = tf.to(&data[..]);
             data = res_tf;
         }
         //println!("compress after = {:?} len = {}",&data,data.len());
@@ -75,7 +75,7 @@ pub trait Agreement<'a> {
 
 
 pub struct DefParser {
-    tfs:Vec<Arc<dyn DataTransform<Vec<u8>,Vec<u8>>>>
+    tfs:Vec<Arc<dyn DataTransform>>
 }
 
 impl DefParser {
@@ -114,10 +114,10 @@ pub struct Test2DataTransform{
 
 }
 
-impl DataTransform<Vec<u8>,Vec<u8>> for TestDataTransform
+impl DataTransform for TestDataTransform
 {
-    fn to(&self,d: &Vec<u8>) -> Vec<u8> {
-        let mut res = d.clone();
+    fn to(&self,d: &[u8]) -> Vec<u8> {
+        let mut res = d.to_vec();
         if res[4] < u8::max_value() {
             res[4] += 1;
         }else{
@@ -126,8 +126,8 @@ impl DataTransform<Vec<u8>,Vec<u8>> for TestDataTransform
         res
     }
 
-    fn form(&self,d: &Vec<u8>) -> Vec<u8> {
-        let mut res = d.clone();
+    fn form(&self,d: &[u8]) -> Vec<u8> {
+        let mut res = d.to_vec();
         if res[4] > u8::min_value() {
             res[4] -= 1;
         }else{
@@ -137,16 +137,16 @@ impl DataTransform<Vec<u8>,Vec<u8>> for TestDataTransform
     }
 }
 
-impl DataTransform<Vec<u8>,Vec<u8>> for Test2DataTransform
+impl DataTransform for Test2DataTransform
 {
-    fn to(&self,d: &Vec<u8>) -> Vec<u8> {
-        let mut res = d.clone();
+    fn to(&self,d: &[u8]) -> Vec<u8> {
+        let mut res = d.to_vec();
         res[4] /= 2;
         res
     }
 
-    fn form(&self,d: &Vec<u8>) -> Vec<u8> {
-        let mut res = d.clone();
+    fn form(&self,d: &[u8]) -> Vec<u8> {
+        let mut res = d.to_vec();
         res[4] *= 2;
         res
     }
@@ -197,11 +197,11 @@ impl <'a>Agreement<'a> for DefParser
         res
     }
 
-    fn add_transform(&mut self, dt: Arc<dyn DataTransform<Vec<u8>,Vec<u8>>>) {
+    fn add_transform(&mut self, dt: Arc<dyn DataTransform>) {
         self.tfs.push(dt);
     }
 
-    fn get_transform(&self, id: usize) -> &dyn DataTransform<Vec<u8>, Vec<u8>> {
+    fn get_transform(&self, id: usize) -> &dyn DataTransform {
         self.tfs[id].as_ref()
     }
 

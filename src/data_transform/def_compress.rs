@@ -8,10 +8,10 @@ pub struct DefCompress{
 
 }
 
-impl DataTransform<Vec<u8>,Vec<u8>> for DefCompress {
-    fn to(&self, d: &Vec<u8>) -> Vec<u8> {
+impl DataTransform for DefCompress {
+    fn to(&self, d: &[u8]) -> Vec<u8> {
         let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
-        e.write_all(d.as_slice());
+        e.write_all(d);
         if let Ok(v) = e.finish(){
             //dbg!(&v);
             v
@@ -20,8 +20,8 @@ impl DataTransform<Vec<u8>,Vec<u8>> for DefCompress {
         }
     }
 
-    fn form(&self, d: &Vec<u8>) -> Vec<u8> {
-        let mut d = ZlibDecoder::new(d.as_slice());
+    fn form(&self, d: &[u8]) -> Vec<u8> {
+        let mut d = ZlibDecoder::new(d);
         let mut res = vec![];
         let r = d.read_to_end(&mut res);
         //dbg!(r);
