@@ -507,7 +507,14 @@ fn handle_sub_cmd(lid:usize,mut s:String,mut msg_queue: Arc<Mutex<VecDeque<(Vec<
         "2" => {
             if cmds.len() < 2 {return;}
             let mut head_v = lid.to_be_bytes().to_vec();
-            head_v.extend_from_slice(cmds[1].trim().as_bytes());
+            let mut pull_msg = model::PullFileMsg{
+                far_end_path : cmds[1].trim().to_string(),
+                near_end_path : if cmds.len() >= 3 {
+                    Some(cmds[2].trim().to_string())
+                } else{None}
+            };
+            let s = serde_json::to_string(&pull_msg).unwrap();
+            head_v.extend_from_slice(s.as_bytes());
             send(&msg_queue,head_v,EXT_PULL_FILE_S);
         }
         _ => {}
