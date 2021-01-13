@@ -9,7 +9,7 @@ pub trait MsgSplit{
     fn need_split(&self,len:usize) ->bool {
         self.open() && len > self.max_unit_size()
     }
-    fn split(&mut self,data:Vec<u8>,ext:u32) -> Vec<(Vec<u8>,u32,u8)>;
+    fn split<'a>(&mut self,data:&'a mut Vec<u8>,ext:u32) -> Vec<(&'a [u8],u32,u8)>;
     fn need_merge<'a>(&self,msg:&'a Message<'a>)->bool;
     fn merge<'a>(&mut self,msg:&'a Message<'a>)->Option<(Vec<u8>, u32)>;
 }
@@ -57,17 +57,19 @@ impl MsgSplit for DefMsgSplit
         501
     }
 
-    fn split(&mut self, data: Vec<u8>, ext: u32) -> Vec<(Vec<u8>,u32,u8)> {
+    fn split<'a>(&mut self,data:&'a mut Vec<u8>,ext:u32) -> Vec<(&'a [u8],u32,u8)> {
         let mut b = 0usize;
         let l = self.max_unit_size();
         let mut res = Vec::new();
         let id = self.get_id();
         let id_ = id.to_be_bytes();
         let mut i = 0u16;
+        let len = data.len();
+        data.extend_from_slice(&id_);
         loop{
-            if b >= data.len() { break; }
-            let e = if b + l <= data.len() { b + l } else { data.len() };
-            let sli = data[b..e].to_vec();
+            if b >= len { break; }
+            let e = if b + l <= len { b + l } else { len };
+            let sli = &data[b..e];
             let begin = b == 0;
 
             let mut ext_buf = [0u8;size_of::<u32>()];
@@ -86,7 +88,7 @@ impl MsgSplit for DefMsgSplit
             i += 1;
             b = e;
         }
-        res.push((id_.to_vec(),ext,TOKEN_SUBPACKAGE_END));
+        res.push((&data[len..],ext,TOKEN_SUBPACKAGE_END));
         res
     }
 
@@ -113,9 +115,8 @@ impl MsgSplit for DefMsgSplit
                 {
                     let (cache,idx_) = self.msg_cache.get_mut(&id).unwrap();
                     assert_eq!(*idx_+1,idx);
-                    msg.msg.iter().for_each(|it|{
-                        cache.push(*it);
-                    });
+                    cache.reserve(msg.msg.len());
+                    cache.extend_from_slice(&msg.msg);
                     *idx_ = idx;
                 }else{
                     eprintln!("Not found this subpackage id!!!");

@@ -363,16 +363,16 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
             if let Some(mut v) = data {
                 if spliter.need_split(v.0.len())
                 {
-                    let mut msgs = spliter.split(v.0,v.1);
+                    let mut msgs = spliter.split(&mut v.0,v.1);
                     for i in msgs.into_iter(){
                         let (mut data,ext,tag) = i;
-                        match asy.encrypt(&data, ext) {
+                        let mut send_data = match asy.encrypt(data, ext) {
                             EncryptRes::EncryptSucc(d) => {
-                                data = d;
+                                d
                             }
-                            _ => {}
+                            _ => { data.to_vec()}
                         };
-                        let mut real_pkg = pakager.package_tf(data, ext,tag);
+                        let mut real_pkg = pakager.package_tf(send_data, ext,tag);
                         stream.write(real_pkg.as_slice()).await;
                     }
                 }else {

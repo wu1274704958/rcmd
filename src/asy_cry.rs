@@ -34,7 +34,7 @@ pub trait AsyCry{
         EncryptRes::NotChange
     }
 
-    fn encrypt(&self,d:&Vec<u8>,ext:u32) -> EncryptRes {
+    fn encrypt(&self,d:&[u8],ext:u32) -> EncryptRes {
         EncryptRes::NotChange
     }
 
@@ -211,7 +211,7 @@ impl AsyCry for DefAsyCry{
         }
     }
 
-    fn encrypt(&self, d: &Vec<u8>, ext: u32) -> EncryptRes {
+    fn encrypt(&self, d: &[u8], ext: u32) -> EncryptRes {
         if ext == 9 || (ext >= 10 && ext <= 20)
         {
             EncryptRes::NotChange
@@ -219,7 +219,7 @@ impl AsyCry for DefAsyCry{
             if let Some(ref k) = self.pub_key{
                 let mut rng = rand::rngs::OsRng;
                 let enc_data = k.encrypt(&mut rng, PaddingScheme::new_pkcs1v15_encrypt(),
-                                         d.as_slice());
+                                         d);
                 match enc_data {
                     Ok(ed) => {
                         EncryptRes::EncryptSucc(ed)

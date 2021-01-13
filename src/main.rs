@@ -242,16 +242,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             //---------------------------------
                             if spliter.need_split(respose.len())
                             {
-                                let mut msgs = spliter.split(respose,ext);
+                                let mut msgs = spliter.split(&mut respose,ext);
                                 for i in msgs.into_iter(){
                                     let (mut data,ext,tag) = i;
-                                    match asy.encrypt(&data, ext) {
+                                    let mut send_data = match asy.encrypt(data, ext) {
                                         EncryptRes::EncryptSucc(d) => {
-                                            data = d;
+                                            d
                                         }
-                                        _ => {}
+                                        _ => { data.to_vec()}
                                     };
-                                    let mut real_pkg = parser_cp.package_tf(data, ext,tag);
+                                    let mut real_pkg = parser_cp.package_tf(send_data, ext,tag);
                                     socket.write(real_pkg.as_slice()).await;
                                 }
                             }else {
@@ -282,16 +282,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some((mut data,e)) = msg{
                     if spliter.need_split(data.len())
                     {
-                        let mut msgs = spliter.split(data,e);
+                        let mut msgs = spliter.split(&mut data,e);
                         for i in msgs.into_iter(){
                             let (mut data,ext,tag) = i;
-                            match asy.encrypt(&data, ext) {
+                            let mut send_data = match asy.encrypt(data, ext) {
                                 EncryptRes::EncryptSucc(d) => {
-                                    data = d;
+                                    d
                                 }
-                                _ => {}
+                                _ => { data.to_vec()}
                             };
-                            let mut real_pkg = parser_cp.package_tf(data, ext,tag);
+                            let mut real_pkg = parser_cp.package_tf(send_data, ext, tag);
                             socket.write(real_pkg.as_slice()).await;
                         }
                     }else {

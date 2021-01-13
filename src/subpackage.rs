@@ -59,7 +59,7 @@ impl Subpackage for DefSubpackage
         self.need_ck = false;
         if data.len() != 0 {
             self.temp.reserve(data.len());
-            for i in 0..len { self.temp.push(data[i]); }
+            self.temp.extend_from_slice(&data[0..len]);
         }
         if self.temp.is_empty() { return None; }
         'Out: loop {
