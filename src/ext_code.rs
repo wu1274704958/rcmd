@@ -29,6 +29,11 @@ pub const EXT_SEND_FILE_CREATE:u32 = 54;
 pub const EXT_SAVE_FILE:u32 = 55;
 pub const EXT_SAVE_FILE_ELF:u32 = 56;
 pub const EXT_SAVE_FILE_CREATE:u32 = 57;
+pub const EXT_SAVE_FILE_RET:u32 = 58;
+pub const EXT_SAVE_FILE_ELF_RET:u32 = 59;
+pub const EXT_SAVE_FILE_CREATE_RET:u32 = 60;
+pub const EXT_PULL_FILE_S:u32 = 61;
+pub const EXT_PULL_FILE_C:u32 = 62;
 
 
 pub const EXT_DEFAULT_ERR_CODE:u32 = 50000;
@@ -57,3 +62,6 @@ pub const EXT_ERR_BAD_TARGET:u32 = 50022;
 pub const EXT_ERR_EXEC_CMD_NOT_KNOW:u32 = 50023;
 pub const EXT_ERR_EXEC_CMD_RET_ERR:u32 = 50024;
 pub const EXT_ERR_SAVE_FILE_RET_EXT:u32 = 50025;
+pub const EXT_ERR_PULL_FILE_RET_EXT:u32 = 50026;
+pub const EXT_ERR_BAD_FILE_PATH:u32 = 50027;
+pub const EXT_ERR_OPEN_FILE:u32 = 50028;

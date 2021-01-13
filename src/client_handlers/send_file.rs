@@ -24,14 +24,14 @@ impl SubHandle for SendFile
     fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         match ext
         {
-            EXT_SAVE_FILE |
-            EXT_SAVE_FILE_CREATE =>{
+            EXT_SAVE_FILE_RET |
+            EXT_SAVE_FILE_CREATE_RET =>{
                 let mid = data.len() - size_of::<u32>();
                 let len = u32_form_bytes(&data[mid..]);
                 let name = String::from_utf8_lossy(&data[0..mid]).to_string();
                 println!("{} send {} bytes",name,len);
             }
-            EXT_SAVE_FILE_ELF => {
+            EXT_SAVE_FILE_ELF_RET => {
                 let name = String::from_utf8_lossy(data).to_string();
                 println!("{} send complete",name);
             }

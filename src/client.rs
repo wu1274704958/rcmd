@@ -68,6 +68,8 @@ async fn main() -> io::Result<()>
         handler.add_handler(Arc::new(client_handlers::exec_cmd::Exec::new()));
         handler.add_handler(Arc::new(client_handlers::run_cmd::RunCmd::new()));
         handler.add_handler(Arc::new(client_handlers::send_file::SendFile::new()));
+        handler.add_handler(Arc::new(client_handlers::save_file::SaveFile::with_observer(Box::new(on_save_file))));
+        handler.add_handler(Arc::new(client_handlers::pull_file_ret::PullFileRet::new()));
     }
 
     let rt = runtime::Builder::new_multi_thread()
@@ -228,47 +230,7 @@ async fn console(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing:
                     let s = String::from_utf8_lossy(vec.as_slice()).trim().to_string();
                     if s.as_bytes()[0] == b'#'
                     {
-                        let (_,c) = s.split_at(2);
-                        let cmds:Vec<&str> = c.split(" ").collect();
-                        if cmds.len() < 3 {continue;}
-                        match OpenOptions::new().read(true).open(cmds[1])
-                        {
-                            Ok(mut f) => {
-                                let mut head_v = lid.to_be_bytes().to_vec();
-                                head_v.push(TOKEN_BEGIN);
-                                cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
-                                head_v.push(TOKEN_END);
-
-                                let mut buf = Vec::with_capacity(1024 * 100);
-                                buf.resize(1024 * 100,0);
-                                let mut is_first = true;
-                                loop {
-                                    let mut d = head_v.clone();
-                                    match f.read(&mut buf[..]){
-                                        Ok(n) => {
-                                            //println!("==== {} ====",n);
-                                            if n <= 0
-                                            {
-                                                send(&msg_queue,d,EXT_SEND_FILE_ELF);
-                                                break;
-                                            }else{
-                                                d.reserve(n);
-                                                for i in 0..n { d.push(buf[i]);  }
-                                                send(&msg_queue,d,if is_first {EXT_SEND_FILE_CREATE}else{EXT_SEND_FILE});
-                                                is_first = false;
-                                            }
-                                        }
-                                        _=>{
-                                        }
-                                    }
-                                }
-                                //println!("==== end ====");
-                            }
-                            Err(e) => {
-                                eprintln!("{}",e);
-                                continue;
-                            }
-                        }
+                        handle_sub_cmd(lid,s,msg_queue.clone());
                         continue;
                     }
                     match s.trim(){
@@ -477,4 +439,60 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
         }
     }
     Ok(())
+}
+
+fn on_save_file(name:&str,len:usize,ext:u32)
+{
+
+}
+
+fn handle_sub_cmd(lid:usize,mut s:String,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)
+{
+    s.remove(0);
+    let cmds:Vec<&str> = s.split(" ").collect();
+
+    match cmds[0].trim() {
+        "1" => {
+            if cmds.len() < 3 {return;}
+            match OpenOptions::new().read(true).open(cmds[1])
+            {
+                Ok(mut f) => {
+                    let mut head_v = lid.to_be_bytes().to_vec();
+                    head_v.push(TOKEN_BEGIN);
+                    cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
+                    head_v.push(TOKEN_END);
+
+                    let mut buf = Vec::with_capacity(1024 * 100);
+                    buf.resize(1024 * 100,0);
+                    let mut is_first = true;
+                    loop {
+                        let mut d = head_v.clone();
+                        match f.read(&mut buf[..]){
+                            Ok(n) => {
+                                //println!("==== {} ====",n);
+                                if n <= 0
+                                {
+                                    send(&msg_queue,d,EXT_SEND_FILE_ELF);
+                                    break;
+                                }else{
+                                    d.reserve(n);
+                                    for i in 0..n { d.push(buf[i]);  }
+                                    send(&msg_queue,d,if is_first {EXT_SEND_FILE_CREATE}else{EXT_SEND_FILE});
+                                    is_first = false;
+                                }
+                            }
+                            _=>{
+                            }
+                        }
+                    }
+                    //println!("==== end ====");
+                }
+                Err(e) => {
+                    eprintln!("{}",e);
+                    return;
+                }
+            }
+        }
+        _ => {}
+    }
 }

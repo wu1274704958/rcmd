@@ -122,6 +122,7 @@ async fn main() -> io::Result<()>
         handler.add_handler(Arc::new(client_handlers::err::Err{}));
         handler.add_handler(Arc::new(client_handlers::exec_cmd::Exec::new()));
         handler.add_handler(Arc::new(client_handlers::save_file::SaveFile::new()));
+        handler.add_handler(Arc::new(client_handlers::pull_file::PullFile::new(msg_queue.clone())));
         if args.acc.is_some(){
             handler.add_handler(Arc::new(AutoLogin::new(args.acc.as_ref().unwrap().clone(),
                                                         args.pwd.as_ref().unwrap().clone(),

@@ -11,14 +11,32 @@ use getopts::HasArg::No;
 
 pub struct SaveFile
 {
-    file_map:Arc<Mutex<HashMap<String,File>>>
+    file_map:Arc<Mutex<HashMap<String,File>>>,
+    observer:Option<Box<fn(&str,usize,u32)>>
 }
 
 impl SaveFile {
     pub fn new()->SaveFile
     {
         SaveFile{
-            file_map:Arc::new(Mutex::new(HashMap::new()))
+            file_map:Arc::new(Mutex::new(HashMap::new())),
+            observer:None
+        }
+    }
+    pub fn with_observer(ob:Box<fn(&str,usize,u32)>)->SaveFile
+    {
+        SaveFile{
+            file_map:Arc::new(Mutex::new(HashMap::new())),
+            observer:Some(ob)
+        }
+    }
+
+    #[inline]
+    fn observe(&self,name:&str,len:usize,ext:u32)
+    {
+        if let Some(ob) = self.observer.as_ref()
+        {
+            ob(name,len,ext);
         }
     }
 }
@@ -99,6 +117,7 @@ impl SubHandle for SaveFile
                     if let Ok(mut fm) = self.file_map.lock()
                     {
                         fm.insert(name.clone(), f);
+                        self.observe(name.as_str(),l,ext);
                         return Some((ret(&id_buf,rd), EXT_SAVE_FILE_CREATE));
                     }
                 }else{
@@ -122,6 +141,7 @@ impl SubHandle for SaveFile
                     {
                         let b = (l as u32).to_be_bytes();
                         b.iter().for_each(|it|{rd.push(*it)});
+                        self.observe(name.as_str(),l,ext);
                         //f.1.sync_all().unwrap();
                         return Some((ret(&id_buf,rd),EXT_SAVE_FILE));
                     }else{
@@ -147,6 +167,7 @@ impl SubHandle for SaveFile
                     ve.append(&mut rd);
                     return Some((ve, EXT_ERR_SAVE_FILE_RET_EXT));
                 }
+                self.observe(name.as_str(),0,ext);
                 if let Some(k) = fm.remove(&name)
                 {
                     return Some((ret(&id_buf,rd),EXT_SAVE_FILE_ELF));
