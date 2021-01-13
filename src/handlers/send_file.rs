@@ -34,6 +34,10 @@ impl SubHandle for SendFile
             EXT_SEND_FILE_CREATE |
             EXT_SEND_FILE |
             EXT_SEND_FILE_ELF =>{
+                let mut buf = [0u8; size_of::<usize>()];
+                buf.copy_from_slice(&data[0..size_of::<usize>()]);
+                let lid = usize::from_be_bytes(buf);
+
                 let has_permission = if let Ok(u) = self.user_map.lock()
                 {
                     if let Some(user) = u.get(&id)
@@ -41,16 +45,22 @@ impl SubHandle for SendFile
                         user.super_admin
                     } else { false }
                 } else { false };
-                if !has_permission {
+                let has_permission_ = if let Ok(u) = self.user_map.lock()
+                {
+                    if let Some(user) = u.get(&lid)
+                    {
+                        user.super_admin
+                    } else { false }
+                } else { false };
+
+                if !has_permission && !has_permission_ {
                     return Some((vec![], EXT_ERR_PERMISSION_DENIED));
                 }
                 if data.len() < size_of::<usize>()
                 {
                     return Some((vec![], EXT_ERR_PARSE_ARGS));
                 }
-                let mut buf = [0u8; size_of::<usize>()];
-                buf.copy_from_slice(&data[0..size_of::<usize>()]);
-                let lid = usize::from_be_bytes(buf);
+
                 let mut id_buf = id.to_be_bytes();
                 if let Ok(mut cls) = clients.lock()
                 {

@@ -443,6 +443,17 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
 
 fn on_save_file(name:&str,len:usize,ext:u32)
 {
+    match ext {
+        EXT_SAVE_FILE|
+        EXT_SAVE_FILE_CREATE => {
+            println!("recv file {} {} bytes!",name,len);
+        }
+        EXT_SAVE_FILE_ELF => {
+            println!("recv file {} complete!",name);
+        }
+        _=>{}
+    }
+
 
 }
 
@@ -492,6 +503,12 @@ fn handle_sub_cmd(lid:usize,mut s:String,mut msg_queue: Arc<Mutex<VecDeque<(Vec<
                     return;
                 }
             }
+        }
+        "2" => {
+            if cmds.len() < 2 {return;}
+            let mut head_v = lid.to_be_bytes().to_vec();
+            head_v.extend_from_slice(cmds[1].trim().as_bytes());
+            send(&msg_queue,head_v,EXT_PULL_FILE_S);
         }
         _ => {}
     }

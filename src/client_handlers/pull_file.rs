@@ -78,7 +78,7 @@ impl SubHandle for PullFile
                                     }
                                 }
                             }
-                            return Some((vec![],EXT_PULL_FILE_C));
+                            return Some((id_buf,EXT_PULL_FILE_C));
                         }
                         Err(_) => {
                             id_buf.append(&mut ext_content(EXT_ERR_OPEN_FILE));
