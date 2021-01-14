@@ -6,17 +6,20 @@ use crate::ab_client::AbClient;
 use crate::ext_code::*;
 use std::collections::hash_map::RandomState;
 use std::mem::size_of;
+use crate::utils::temp_permission::TempPermission;
 
 pub struct PullFile{
-    user_map:Arc<Mutex<HashMap<usize,user::User>>>
+    user_map:Arc<Mutex<HashMap<usize,user::User>>>,
+    temp_permission:TempPermission
 }
 
 
 impl PullFile {
-    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>)->PullFile
+    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>,temp_permission:TempPermission)->PullFile
     {
         PullFile{
-            user_map
+            user_map,
+            temp_permission
         }
     }
 }
@@ -58,6 +61,7 @@ impl SubHandle for PullFile
                         (&mut v[0..size_of::<usize>()]).copy_from_slice(&id_buf);
                         (&mut v[size_of::<usize>()..]).copy_from_slice(&data[size_of::<usize>()..]);
                         cl.push_msg(v, EXT_PULL_FILE_C);
+                        self.temp_permission.give_permission(id,lid);
                         return Some((vec![], ext));
                     } else {
                         return Some((vec![], EXT_ERR_NOT_FOUND_LID));
@@ -68,10 +72,11 @@ impl SubHandle for PullFile
             EXT_ERR_PULL_FILE_RET_EXT => {
                 let mut id_buf = [0u8;size_of::<usize>()];
                 id_buf.copy_from_slice(&data[0..size_of::<usize>()]);
-                let id = usize::from_be_bytes(id_buf);
+                let lid = usize::from_be_bytes(id_buf);
+                self.temp_permission.take_permission(lid,id);
                 if let Ok(mut cls) = clients.lock()
                 {
-                    if let Some(cl) = cls.get_mut(&id)
+                    if let Some(cl) = cls.get_mut(&lid)
                     {
                         cl.push_msg(data[size_of::<usize>()..].to_vec(),ext);
                     }

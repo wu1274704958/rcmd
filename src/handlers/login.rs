@@ -11,6 +11,7 @@ use crate::model::user::{User, MinUser};
 use mysql::prelude::Queryable;
 use crate::plug::Plug;
 use crate::config_build::Config;
+use crate::utils::temp_permission::TempPermission;
 
 pub struct Login{
     db_mgr:Arc<DBMgr>,
@@ -126,14 +127,16 @@ impl SubHandle for Login
 pub struct OnDeadPlug{
     db_mgr:Arc<DBMgr>,
     login_map:Arc<Mutex<HashMap<String,usize>>>,
-    user_map:Arc<Mutex<HashMap<usize,user::User>>>
+    user_map:Arc<Mutex<HashMap<usize,user::User>>>,
+    temp_permission:TempPermission
 }
 
 impl OnDeadPlug{
     pub fn new(db_mgr:Arc<DBMgr>,user_map:Arc<Mutex<HashMap<usize,user::User>>>,
-               login_map:Arc<Mutex<HashMap<String,usize>>>) -> Self
+               login_map:Arc<Mutex<HashMap<String,usize>>>,
+               temp_permission:TempPermission) -> Self
 {
-    OnDeadPlug{db_mgr,login_map,user_map}
+    OnDeadPlug{db_mgr,login_map,user_map,temp_permission}
 }
 }
 
@@ -145,10 +148,7 @@ impl Plug for OnDeadPlug {
     fn run(&self, id: Self::Id, clients: &mut Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, config: &Self::Config) where Self::Id: Copy {
         if let Ok(mut m) = self.user_map.lock()
         {
-            if !m.contains_key(&id)
-            {
-                return;
-            }else{
+            if m.contains_key(&id){
                 println!("remove user");
                 let u = m.remove(&id).unwrap();
                 let acc = u.acc.clone();
@@ -163,20 +163,15 @@ impl Plug for OnDeadPlug {
                             if let Ok(mut m) = self.login_map.lock()
                             {
                                 m.remove(&acc);
-                            }else{
-                                return;
                             }
-                            return;
                         }
                         Err(e)=>{
                             dbg!(e);
-                            return;
                         }
                     }
-                }else{
-                    return;
                 }
             }
         }
+        self.temp_permission.take_all_permission(id);
     }
 }

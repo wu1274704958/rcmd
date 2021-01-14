@@ -43,6 +43,7 @@ use std::time::SystemTime;
 use crate::db::db_mgr::DBMgr;
 use crate::utils::msg_split::{DefMsgSplit, MsgSplit};
 use getopts::HasArg::No;
+use crate::utils::temp_permission::TempPermission;
 
 
 //fn main(){}
@@ -70,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dbmgr = Arc::new(DBMgr::new().unwrap());
     let user_map = Arc::new(Mutex::new(HashMap::<usize,model::user::User>::new()));
     let login_map = Arc::new(Mutex::new(HashMap::<String,usize>::new()));
+    let temp_permission = TempPermission::new();
 
     {
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
@@ -81,12 +83,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         handler.add_handler(Arc::new(handlers::get_users::GetUser::new(user_map.clone(),login_map.clone())));
         handler.add_handler(Arc::new(handlers::send_msg::SendMsg::new(user_map.clone(),login_map.clone())));
         handler.add_handler(Arc::new(handlers::exec_cmd::ExecCmd::new(user_map.clone())));
-        handler.add_handler(Arc::new(handlers::send_file::SendFile::new(user_map.clone())));
-        handler.add_handler(Arc::new(handlers::pull_file::PullFile::new(user_map.clone())));
+        handler.add_handler(Arc::new(handlers::send_file::SendFile::new(user_map.clone(),temp_permission.clone())));
+        handler.add_handler(Arc::new(handlers::pull_file::PullFile::new(user_map.clone(),temp_permission.clone())));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
 
-        dead_plugs.add_plug(Arc::new(handlers::login::OnDeadPlug::new(dbmgr.clone(),user_map.clone(),login_map.clone())));
+        dead_plugs.add_plug(Arc::new(handlers::login::OnDeadPlug::new(
+            dbmgr.clone(),
+            user_map.clone(),
+            login_map.clone(),
+            temp_permission.clone())));
     }
 
     let handler_cp:Arc<_> = handler.into();

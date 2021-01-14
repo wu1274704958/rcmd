@@ -6,17 +6,20 @@ use crate::ab_client::AbClient;
 use crate::ext_code::*;
 use std::collections::hash_map::RandomState;
 use std::mem::size_of;
+use crate::utils::temp_permission::TempPermission;
 
 pub struct SendFile{
-    user_map:Arc<Mutex<HashMap<usize,user::User>>>
+    user_map:Arc<Mutex<HashMap<usize,user::User>>>,
+    temp_permission:TempPermission
 }
 
 
 impl SendFile {
-    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>)->SendFile
+    pub fn new(user_map:Arc<Mutex<HashMap<usize,user::User>>>,temp_permission:TempPermission)->SendFile
     {
         SendFile{
-            user_map
+            user_map,
+            temp_permission
         }
     }
 }
@@ -38,22 +41,18 @@ impl SubHandle for SendFile
                 buf.copy_from_slice(&data[0..size_of::<usize>()]);
                 let lid = usize::from_be_bytes(buf);
 
-                let has_permission = if let Ok(u) = self.user_map.lock()
+                let mut has_permission = if let Ok(u) = self.user_map.lock()
                 {
                     if let Some(user) = u.get(&id)
                     {
                         user.super_admin
                     } else { false }
                 } else { false };
-                let has_permission_ = if let Ok(u) = self.user_map.lock()
-                {
-                    if let Some(user) = u.get(&lid)
-                    {
-                        user.super_admin
-                    } else { false }
-                } else { false };
+                if !has_permission {
+                    has_permission = self.temp_permission.has_temp_permission(lid,id);
+                }
 
-                if !has_permission && !has_permission_ {
+                if !has_permission {
                     return Some((vec![], EXT_ERR_PERMISSION_DENIED));
                 }
                 if data.len() < size_of::<usize>()
