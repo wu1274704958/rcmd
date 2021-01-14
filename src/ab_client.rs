@@ -53,7 +53,7 @@ impl AbClient {
     {
         let mut q = self.write_buf.lock().unwrap();
         if q.is_empty() {  None }else{
-            q.pop_back()
+            q.pop_front()
         }
     }
 }

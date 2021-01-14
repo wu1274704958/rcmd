@@ -362,7 +362,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 data = queue.pop_front();
             }
             if let Some(mut v) = data {
-                if spliter.need_split(v.0.len())
+                if spliter.need_split(v.0.len(),v.1)
                 {
                     let mut msgs = spliter.split(&mut v.0,v.1);
                     for i in msgs.into_iter(){

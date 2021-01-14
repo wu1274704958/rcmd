@@ -247,7 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if m.ext != 9 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
                         if let Some((mut respose,mut ext)) = respose {
                             //---------------------------------
-                            if spliter.need_split(respose.len())
+                            if spliter.need_split(respose.len(),ext)
                             {
                                 let mut msgs = spliter.split(&mut respose,ext);
                                 for i in msgs.into_iter(){
@@ -287,7 +287,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                         //------------------------------------------------
                 if let Some((mut data,e)) = msg{
-                    if spliter.need_split(data.len())
+                    if spliter.need_split(data.len(),e)
                     {
                         let mut msgs = spliter.split(&mut data,e);
                         for i in msgs.into_iter(){

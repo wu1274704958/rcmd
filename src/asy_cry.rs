@@ -8,6 +8,8 @@
 use rsa::{PublicKey, RSAPrivateKey, PaddingScheme, RSAPublicKey, PublicKeyParts, BigUint};
 use rsa::errors::Error;
 use crate::tools::*;
+use std::collections::HashSet;
+use crate::ext_code::*;
 
 #[derive(Debug)]
 pub enum EncryptRes {
@@ -47,20 +49,33 @@ pub trait AsyCry{
 pub struct DefAsyCry{
     pri_key: Option<RSAPrivateKey>,
     pub_key: Option<RSAPublicKey>,
-    oth_ready:bool,
+    ignore_map: HashSet<u32>,
+    oth_ready: bool,
     state:u32
 }
 
 impl DefAsyCry
 {
-    pub fn  new() ->DefAsyCry
+    pub fn new() ->DefAsyCry
     {
+        let mut ignore_map = HashSet::new();
+        ignore_map.extend([9,
+            EXT_SEND_FILE_CREATE,EXT_SEND_FILE,EXT_SEND_FILE_ELF,
+            EXT_SAVE_FILE_CREATE,EXT_SAVE_FILE,EXT_SAVE_FILE_ELF,
+            EXT_SAVE_FILE_RET,EXT_SAVE_FILE_CREATE_RET,EXT_SAVE_FILE_ELF_RET,
+            EXT_UPLOAD_FILE_CREATE,EXT_UPLOAD_FILE,EXT_UPLOAD_FILE_ELF].iter());
         DefAsyCry{
             pri_key:None,
             pub_key:None,
             oth_ready:false,
-            state:10
+            state:10,
+            ignore_map
         }
+    }
+
+    pub fn ignore(&self,ext:u32)->bool
+    {
+        self.ignore_map.contains(&ext)
     }
 }
 
@@ -127,7 +142,7 @@ impl AsyCry for DefAsyCry{
 
     ///ext
     fn try_decrypt(&mut self, d: &[u8], ext: u32) -> EncryptRes {
-        if ext == 9 {
+        if self.ignore(ext) {
             EncryptRes::NotChange
         }else {
             if ext == 10
@@ -212,7 +227,7 @@ impl AsyCry for DefAsyCry{
     }
 
     fn encrypt(&self, d: &[u8], ext: u32) -> EncryptRes {
-        if ext == 9 || (ext >= 10 && ext <= 20)
+        if self.ignore(ext) || (ext >= 10 && ext <= 20)
         {
             EncryptRes::NotChange
         }else{

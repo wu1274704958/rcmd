@@ -1,14 +1,16 @@
 use crate::agreement::Message;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 use crate::tools::{TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END, TOKEN_SUBPACKAGE_BEGIN};
+use crate::ext_code::*;
 
 pub trait MsgSplit{
     fn open(&self) ->bool { false }
     fn max_unit_size(&self)-> usize {1024}
-    fn need_split(&self,len:usize) ->bool {
-        self.open() && len > self.max_unit_size()
+    fn need_split(&self,len:usize,ext:u32) ->bool {
+        self.open() && len > self.max_unit_size() && !self.ignore(ext)
     }
+    fn ignore(&self,ext:u32)-> bool;
     fn split<'a>(&mut self,data:&'a mut Vec<u8>,ext:u32) -> Vec<(&'a [u8],u32,u8)>;
     fn need_merge<'a>(&self,msg:&'a Message<'a>)->bool;
     fn merge<'a>(&mut self,msg:&'a Message<'a>)->Option<(Vec<u8>, u32)>;
@@ -16,14 +18,22 @@ pub trait MsgSplit{
 
 pub struct DefMsgSplit{
     msg_cache:HashMap<u16,(Vec<u8>,u16)>,
+    ignore_map: HashSet<u32>,
     logic_id:u16
 }
 
 impl DefMsgSplit{
     pub fn new()->DefMsgSplit{
+        let mut ignore_map = HashSet::new();
+        ignore_map.extend([9,
+            EXT_SEND_FILE_CREATE,EXT_SEND_FILE,EXT_SEND_FILE_ELF,
+            EXT_SAVE_FILE_CREATE,EXT_SAVE_FILE,EXT_SAVE_FILE_ELF,
+            EXT_SAVE_FILE_RET,EXT_SAVE_FILE_CREATE_RET,EXT_SAVE_FILE_ELF_RET,
+            EXT_UPLOAD_FILE_CREATE,EXT_UPLOAD_FILE,EXT_UPLOAD_FILE_ELF].iter());
         DefMsgSplit{
             msg_cache:HashMap::new(),
-            logic_id:0
+            logic_id:0,
+            ignore_map
         }
     }
 
@@ -55,6 +65,10 @@ impl MsgSplit for DefMsgSplit
 
     fn max_unit_size(&self) -> usize {
         501
+    }
+
+    fn ignore(&self, ext: u32) -> bool {
+        self.ignore_map.contains(&ext)
     }
 
     fn split<'a>(&mut self,data:&'a mut Vec<u8>,ext:u32) -> Vec<(&'a [u8],u32,u8)> {
