@@ -31,6 +31,9 @@ pub const BigEndian:bool = false;
 #[cfg(target_endian = "big")]
 pub const BigEndian:bool = true;
 
+
+pub const SEND_BUF_SIZE:usize = 1024 * 100;
+
 pub fn del_client(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>, id:usize) ->usize
 {
     let mut cs_ = cs.lock().unwrap();
