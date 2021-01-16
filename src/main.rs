@@ -172,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let b = SystemTime::now();
                         package = subpackager.subpackage(&buf[0..n],n);
                         let e = SystemTime::now();
-                        println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
+                        //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
 
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -191,7 +191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if package.is_none() && subpackager.need_check(){
                     let b = SystemTime::now();
                     package = subpackager.subpackage(&[],0);
-                    println!("subpackage check use {} ms",SystemTime::now().duration_since(b).unwrap().as_millis());
+                    //println!("subpackage check use {} ms",SystemTime::now().duration_since(b).unwrap().as_millis());
                 }
 
                 if let Some(mut d) = package
