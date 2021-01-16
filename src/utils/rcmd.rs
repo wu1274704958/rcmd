@@ -12,6 +12,7 @@ use tokio::stream::StreamExt;
 use std::fs::OpenOptions;
 use subprocess::{Exec, Redirection};
 use encoding_rs::GBK;
+use std::thread::sleep;
 
 #[derive(Debug)]
 pub struct Rcmd{
@@ -142,6 +143,8 @@ impl Rcmd{
                     {
                         if nd > dur{
                             return Err(format!("time out {} ",d));
+                        }else {
+                            sleep(Duration::from_millis(1));
                         }
                     }
                 }
@@ -210,7 +213,9 @@ impl Rcmd{
                     return Err(format!("stdin failed "));
                 }
             }
-            //exec.wait_timeout()
+            if let Some(dur) = self.timeout {
+                exec.wait_timeout(dur);
+            }
             let state = exec.wait();
             match state {
                 Ok(o) => {

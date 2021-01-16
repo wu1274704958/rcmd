@@ -23,6 +23,7 @@ args = "2.2.0"
 getopts = "0.2.21"
 subprocess = "0.2.6"
 encoding_rs = "0.8.26"
+futures = "*"
 
 [dependencies.mysql]
 version = "=20.1.0"

@@ -39,6 +39,7 @@ use crate::client_handlers::def_handler::{ Handle,SubHandle};
 use std::num::ParseIntError;
 use args::ArgsError;
 use utils::msg_split::{DefMsgSplit,MsgSplit};
+use std::ops::Deref;
 
 struct AutoLogin{
     acc:String,
@@ -121,7 +122,7 @@ async fn main() -> io::Result<()>
     {
         handler.add_handler(Arc::new(client_handlers::err::Err{}));
         handler.add_handler(Arc::new(client_handlers::exec_cmd::Exec::new()));
-        handler.add_handler(Arc::new(client_handlers::save_file::SaveFile::new()));
+        handler.add_handler(Arc::new(client_handlers::save_file::SaveFile::with_observer(Box::new(on_save_file))));
         handler.add_handler(Arc::new(client_handlers::pull_file::PullFile::new(msg_queue.clone())));
         if args.acc.is_some(){
             handler.add_handler(Arc::new(AutoLogin::new(args.acc.as_ref().unwrap().clone(),
@@ -131,23 +132,6 @@ async fn main() -> io::Result<()>
     }
 
     let handler = Arc::new(handler);
-
-    let rt = runtime::Builder::new_multi_thread()
-        .worker_threads(args.thread_num as usize)
-        .build()
-        .unwrap();
-
-    for i in 0..args.thread_num{
-        let msg_queue = msg_queue.clone();
-        let is_runing = is_runing.clone();
-        let msg_cache = msg_cache.clone();
-        let handler = handler.clone();
-
-        rt.spawn(async move{
-            println!("on_handle...............");
-            on_handle(msg_queue,is_runing,msg_cache,handler).await;
-        });
-    }
 
     loop{
         let msg_queue = msg_queue.clone();
@@ -159,8 +143,7 @@ async fn main() -> io::Result<()>
             args.port,
             msg_queue.clone(),
             is_runing,
-            handler,
-            msg_cache.clone()
+            handler
         ).await;
         println!("next times...");
         if let Ok(mut mq) = msg_queue.lock(){
@@ -174,53 +157,25 @@ async fn main() -> io::Result<()>
             let s = serde_json::to_string(&user).unwrap();
             send(&msg_queue,s.into_bytes(),EXT_LOGIN);
         }
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(3)).await;
     }
     Ok(())
 }
 
-async fn on_handle<T>(mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
-                   is_runing: Arc<Mutex<bool>>,
-                   msg_cache:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
-                   handler:Arc<T>) -> io::Result<()>
-where T:client_handlers::def_handler::Handle
+fn on_save_file(name:&str,len:usize,ext:u32)
 {
-    loop {
-        if let Ok(v) = is_runing.lock()
-        {
-            if !*v {
-                break;
-            }
-        } else {
-            break;
+    match ext {
+        EXT_SAVE_FILE|
+        EXT_SAVE_FILE_CREATE => {
+            println!("recv file {} {} bytes!",name,len);
         }
-        let mut msg = None;
-        {
-            if let Ok(mut mc) = msg_cache.lock() {
-                if let Some (m) = mc.pop_front(){
-                    msg = Some(m);
-                }
-            }
+        EXT_SAVE_FILE_ELF => {
+            println!("recv file {} complete!",name);
         }
-        match msg {
-            None => {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            Some(m) => {
-                let msg_ = Message{
-                    len : m.0.len() as u32,
-                    msg : m.0.as_slice(),
-                    ext : m.1,
-                    tag : TOKEN_NORMAL
-                };
-                if let Some(d) = handler.handle_ex(msg_)
-                {
-                    send(&msg_queue,d.0,d.1);
-                }
-            }
-        }
+        _=>{}
     }
-    Ok(())
+
+
 }
 
 fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
@@ -231,12 +186,12 @@ fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
 }
 
 async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc<Mutex<bool>>,
-             handler:Arc<client_handlers::def_handler::DefHandler>,
-             msg_cache:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>) -> io::Result<()>
+             handler:Arc<client_handlers::def_handler::DefHandler>) -> io::Result<()>
 {
     let sock = TcpSocket::new_v4().unwrap();
     let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), port)).await?;
-    let mut buf = [0u8; 1024];
+    let mut buf = Vec::with_capacity(1024 * 1024 * 10);
+    buf.resize(1024 * 1024 * 10,0);
     // In a loop, read data from the socket and write the data back.
     let mut heartbeat_t = SystemTime::now();
     let mut pakager = DefParser::new();
@@ -260,14 +215,14 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
     loop {
         /// read request
         //println!("read the request....");
-        match stream.try_read(&mut buf) {
+        match stream.try_read(&mut buf[..]) {
             Ok(0) => {
                 println!("ok n == 0 ----");
                 break;
             }
             Ok(n) => {
                 //println!("n = {}", n);
-                package = subpackager.subpackage(&buf,n);
+                package = subpackager.subpackage(&buf[0..n],n);
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 //async_std::task::sleep(Duration::from_millis(10)).await;
@@ -332,10 +287,9 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                         continue;
                     }
                 }
+                if let Some((d,e)) = handler.handle_ex(m)
                 {
-                    if let Ok(mut mc) = msg_cache.lock() {
-                        mc.push_back((m.msg.to_vec(),m.ext));
-                    }
+                    send(&msg_queue,d,e);
                 }
 
                 //dbg!(String::from_utf8_lossy(m.msg));
