@@ -224,7 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(v) = immediate_send
                         {
                             let mut real_pkg = parser_cp.package_nor(v, m.ext);
-                            socket.write(real_pkg.as_slice()).await;
+                            socket.write_all(real_pkg.as_slice()).await;
                             continue;
                         }
                         if let Some(ref v) = override_msg
@@ -259,7 +259,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         _ => { data.to_vec()}
                                     };
                                     let mut real_pkg = parser_cp.package_tf(send_data, ext,tag);
-                                    socket.write(real_pkg.as_slice()).await;
+                                    socket.write_all(real_pkg.as_slice()).await;
                                 }
                             }else {
                                 match asy.encrypt(&respose, ext) {
@@ -270,7 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     _ => {}
                                 };
                                 let mut real_pkg = parser_cp.package_nor(respose, ext);
-                                socket.write(real_pkg.as_slice()).await;
+                                socket.write_all(real_pkg.as_slice()).await;
                             }
                         }
                     }
@@ -299,7 +299,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 _ => { data.to_vec()}
                             };
                             let mut real_pkg = parser_cp.package_tf(send_data, ext, tag);
-                            socket.write(real_pkg.as_slice()).await;
+                            socket.write_all(real_pkg.as_slice()).await;
                         }
                     }else {
                         match asy.encrypt(&data, e) {
@@ -309,7 +309,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             _ => {}
                         };
                         let real_pkg = parser_cp.package_nor(data, e);
-                        socket.write(real_pkg.as_slice()).await;
+                        socket.write_all(real_pkg.as_slice()).await;
                     }
                 }else {
                     async_std::task::sleep(config.min_sleep_dur).await;

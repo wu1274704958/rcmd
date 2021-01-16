@@ -291,7 +291,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
     if let Ok(pub_key_data) = asy.build_pub_key(){
         let real_pkg = pakager.package_nor(pub_key_data, 10);
         //dbg!(&real_pkg);
-        stream.write(real_pkg.as_slice()).await;
+        stream.write_all(real_pkg.as_slice()).await;
     }
 
     let mut subpackager = DefSubpackage::new();
@@ -351,7 +351,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 if let Some(v) = immediate_send
                 {
                     let mut real_pkg = pakager.package_nor(v, m.ext);
-                    stream.write(real_pkg.as_slice()).await;
+                    stream.write_all(real_pkg.as_slice()).await;
                     continue;
                 }
                 if let Some(ref v) = override_msg
@@ -387,7 +387,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                 heartbeat_t = SystemTime::now();
                 let pkg = pakager.package_nor(vec![9], 9);
                 //dbg!(&pkg);
-                stream.write(pkg.as_slice()).await;
+                stream.write_all(pkg.as_slice()).await;
                 //println!("send heart beat");
             }
         }
@@ -411,7 +411,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                             _ => { data.to_vec()}
                         };
                         let mut real_pkg = pakager.package_tf(send_data, ext,tag);
-                        stream.write(real_pkg.as_slice()).await;
+                        stream.write_all(real_pkg.as_slice()).await;
                     }
                 }else {
                     match asy.encrypt(&v.0, v.1) {
@@ -422,7 +422,7 @@ async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u3
                         _ => {}
                     };
                     let pkg = pakager.package_nor(v.0, v.1);
-                    stream.write(pkg.as_slice()).await;
+                    stream.write_all(pkg.as_slice()).await;
                 }
             }else{
                 sleep(Duration::from_millis(1)).await;
