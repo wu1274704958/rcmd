@@ -8,14 +8,13 @@ pub trait DataTransform : Send + Sync{
     fn form(&self,d:&[u8])->Vec<u8>;
 }
 
-pub trait Agreement<'a> {
-    type AgreementTy;
-    fn parse(&self,data:&'a Vec<u8>)->Option<Self::AgreementTy>;
+pub trait Agreement {
+    fn parse<'a>(&self,data:&'a Vec<u8>)->Option<Message<'a>>;
     fn package(&self,data:Vec<u8>,ext:u32,pkg_tag:u8)->Vec<u8>;
     fn add_transform(&mut self,dt:Arc<dyn DataTransform>);
     fn get_transform(&self,id:usize)->&dyn DataTransform;
     fn transform_count(&self)->usize;
-    fn parse_tf(&self,data:&'a mut Vec<u8>)->Option<Self::AgreementTy>
+    fn parse_tf<'a>(&self,data:&'a mut Vec<u8>)->Option<Message<'a>>
     {
         if self.transform_count() > 0
         {
@@ -152,11 +151,9 @@ impl DataTransform for Test2DataTransform
     }
 }
 
-impl <'a>Agreement<'a> for DefParser
+impl Agreement for DefParser
 {
-    type AgreementTy = Message<'a>;
-
-    fn parse(&self,data: &'a Vec<u8>) -> Option<Self::AgreementTy> {
+    fn parse<'a>(&self,data:&'a Vec<u8>)->Option<Message<'a>>{
         let len = u32_form_bytes(data.as_slice());
         //dbg!(len);
         if len as usize != data.len()

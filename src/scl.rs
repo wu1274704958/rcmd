@@ -1,11 +1,4 @@
-use tokio::net::TcpSocket;
-use std::net::{SocketAddr, SocketAddrV4, IpAddr, Ipv4Addr};
-use tokio::{io, runtime};
-use tokio::prelude::*;
-use std::ffi::{CString, CStr};
-use async_std::net::Shutdown;
-use tokio::time::{Duration, sleep};
-
+use tokio::{io, time::{ sleep}};
 mod config_build;
 mod ab_client;
 mod handler;
@@ -18,28 +11,17 @@ mod subpackage;
 mod model;
 mod client_handlers;
 mod tools;
+mod clients;
 
-use tools::*;
 use agreement::*;
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, time::Duration};
 use std::time::SystemTime;
-use std::env;
-use std::str::FromStr;
-
-use asy_cry::*;
-use data_transform::def_compress::DefCompress;
-use std::env::consts::OS;
 use std::collections::VecDeque;
-use tokio::runtime::Runtime;
-use std::fs::{OpenOptions, File};
+use std::fs::{OpenOptions};
 use std::io::*;
 use ext_code::*;
-use subpackage::{DefSubpackage,Subpackage};
 use crate::client_handlers::def_handler::{ Handle,SubHandle};
-use std::num::ParseIntError;
-use args::ArgsError;
-use utils::msg_split::{DefMsgSplit,MsgSplit};
-use std::ops::Deref;
+use crate::clients::tcp_client::TcpClient;
 
 struct AutoLogin{
     acc:String,
@@ -60,7 +42,7 @@ impl AutoLogin{
 }
 
 impl SubHandle for AutoLogin{
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    fn handle(&self, _data: &[u8], _len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         if ext == EXT_ERR_ALREADY_LOGIN {
             let mut last = self.last.lock().unwrap();
             if let Ok(dur) = SystemTime::now().duration_since(*last)
@@ -79,10 +61,11 @@ impl SubHandle for AutoLogin{
     }
 }
 
+#[allow(unused_must_use)]
 #[tokio::main]
 async fn main() -> io::Result<()>
 {
-    let mut cnf = OpenOptions::new().read(true).open("cnf");
+    let cnf = OpenOptions::new().read(true).open("cnf");
     let args =
         if let Ok(mut cnf) = cnf {
             let mut d = Vec::new();
@@ -109,15 +92,14 @@ async fn main() -> io::Result<()>
         };
 
     dbg!(&args);
-    let mut msg_queue = Arc::new(Mutex::new(VecDeque::<(Vec<u8>, u32)>::new()));
+    let msg_queue = Arc::new(Mutex::new(VecDeque::<(Vec<u8>, u32)>::new()));
     if args.acc.is_some(){
         let user = model::user::MinUser{ acc: args.acc.as_ref().unwrap().clone(),pwd:args.pwd.as_ref().unwrap().clone()};
         let s = serde_json::to_string(&user).unwrap();
         send(&msg_queue,s.into_bytes(),EXT_LOGIN);
     }
-    let mut is_runing = Arc::new(Mutex::new(true));
+    
     let mut handler = client_handlers::def_handler::DefHandler::new();
-    let mut msg_cache = Arc::new(Mutex::new(VecDeque::<(Vec<u8>,u32)>::new()));
 
     {
         handler.add_handler(Arc::new(client_handlers::err::Err{}));
@@ -130,26 +112,17 @@ async fn main() -> io::Result<()>
             msg_queue.clone(),Duration::from_secs(2))));
         }
     }
-
+    
     let handler = Arc::new(handler);
-
     loop{
-        let msg_queue = msg_queue.clone();
-        let is_runing = is_runing.clone();
-        let handler = handler.clone();
         println!("runing.....");
-        run(
-            args.ip,
-            args.port,
-            msg_queue.clone(),
-            is_runing,
-            handler
-        ).await;
+        let client = TcpClient::with_msg_queue(handler.clone(),
+        DefParser::new(),
+            msg_queue.clone()
+        );
+        client.run(args.ip, args.port).await;
         println!("next times...");
         if let Ok(mut mq) = msg_queue.lock(){
-            mq.clear();
-        }
-        if let Ok(mut mq) = msg_cache.lock(){
             mq.clear();
         }
         if args.acc.is_some(){
@@ -159,7 +132,7 @@ async fn main() -> io::Result<()>
         }
         sleep(Duration::from_secs(3)).await;
     }
-    Ok(())
+    
 }
 
 fn on_save_file(name:&str,len:usize,ext:u32)
@@ -174,8 +147,6 @@ fn on_save_file(name:&str,len:usize,ext:u32)
         }
         _=>{}
     }
-
-
 }
 
 fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
@@ -183,177 +154,4 @@ fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
     {
         a.push_back((data,ext));
     }
-}
-
-async fn run(ip:Ipv4Addr,port:u16,mut msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc<Mutex<bool>>,
-             handler:Arc<client_handlers::def_handler::DefHandler>) -> io::Result<()>
-{
-    let sock = TcpSocket::new_v4().unwrap();
-    let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), port)).await?;
-    let mut buf = Vec::with_capacity(1024 * 1024 * 10);
-    buf.resize(1024 * 1024 * 10,0);
-    // In a loop, read data from the socket and write the data back.
-    let mut heartbeat_t = SystemTime::now();
-    let mut pakager = DefParser::new();
-    let mut asy = DefAsyCry::new();
-    let mut spliter = DefMsgSplit::new();
-    let mut package = None;
-
-    //pakager.add_transform(Arc::new(TestDataTransform{}));
-    //pakager.add_transform(Arc::new(Test2DataTransform{}));
-
-    //pakager.add_transform(Arc::new(DefCompress{}));
-
-    if let Ok(pub_key_data) = asy.build_pub_key(){
-        let real_pkg = pakager.package_nor(pub_key_data, 10);
-        //dbg!(&real_pkg);
-        stream.write_all(real_pkg.as_slice()).await;
-    }
-
-    let mut subpackager = DefSubpackage::new();
-
-    loop {
-        /// read request
-        //println!("read the request....");
-        match stream.try_read(&mut buf[..]) {
-            Ok(0) => {
-                println!("ok n == 0 ----");
-                break;
-            }
-            Ok(n) => {
-                //println!("n = {}", n);
-                package = subpackager.subpackage(&buf[0..n],n);
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                //async_std::task::sleep(Duration::from_millis(10)).await;
-                //println!("e  WouldBlock -------");
-            }
-            Err(e) => {
-                eprintln!("error = {}", e);
-                break;
-            }
-        };
-        /// handle request
-        //dbg!(&buf_rest);
-        if package.is_none() && subpackager.need_check(){
-            package = subpackager.subpackage(&[],0);
-        }
-
-        if let Some( mut d) = package {
-            package = None;
-            let mut temp_data = None;
-            let msg = pakager.parse_tf(&mut d);
-            //dbg!(&msg);
-            if let Some(mut m) = msg {
-                //----------------------------------
-                let mut immediate_send = None;
-                let mut override_msg = None;
-                match asy.try_decrypt(m.msg, m.ext)
-                {
-                    EncryptRes::EncryptSucc(d) => {
-                        override_msg = Some(d);
-                    }
-                    EncryptRes::RPubKey(d) => {
-                        immediate_send = Some(d.0);
-                        m.ext = d.1;
-                    }
-                    EncryptRes::ErrMsg((d)) => {
-                        immediate_send = Some(d.0);
-                        m.ext = d.1;
-                    }
-                    EncryptRes::NotChange => {}
-                    EncryptRes::Break => { continue; }
-                };
-                if let Some(v) = immediate_send
-                {
-                    let mut real_pkg = pakager.package_nor(v, m.ext);
-                    stream.write_all(real_pkg.as_slice()).await;
-                    continue;
-                }
-                if let Some(ref v) = override_msg
-                {
-                    m.msg = v.as_slice();
-                }
-                // if m.ext != 9
-                // {println!("{:?} {}",&m.msg,m.ext);}
-                if spliter.need_merge(&m)
-                {
-                    if let Some((data,ext)) = spliter.merge(&m)
-                    {
-                        temp_data = Some(data);
-                        m.ext = ext;
-                        m.msg = temp_data.as_ref().unwrap().as_slice();
-                    }else{
-                        continue;
-                    }
-                }
-                if let Some((d,e)) = handler.handle_ex(m)
-                {
-                    send(&msg_queue,d,e);
-                }
-
-                //dbg!(String::from_utf8_lossy(m.msg));
-            }
-            package = None;
-        }
-
-        if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
-        {
-            if n > Duration::from_secs_f32(10f32)
-            {
-                heartbeat_t = SystemTime::now();
-                let pkg = pakager.package_nor(vec![9], 9);
-                //dbg!(&pkg);
-                stream.write_all(pkg.as_slice()).await;
-                //println!("send heart beat");
-            }
-        }
-
-        if asy.can_encrypt() {
-            let mut data = None;
-            {
-                let mut queue = msg_queue.lock().unwrap();
-                data = queue.pop_front();
-            }
-            if let Some(mut v) = data {
-                if spliter.need_split(v.0.len(),v.1)
-                {
-                    let mut msgs = spliter.split(&mut v.0,v.1);
-                    for i in msgs.into_iter(){
-                        let (mut data,ext,tag) = i;
-                        let mut send_data = match asy.encrypt(data, ext) {
-                            EncryptRes::EncryptSucc(d) => {
-                                d
-                            }
-                            _ => { data.to_vec()}
-                        };
-                        let mut real_pkg = pakager.package_tf(send_data, ext,tag);
-                        stream.write_all(real_pkg.as_slice()).await;
-                    }
-                }else {
-                    match asy.encrypt(&v.0, v.1) {
-                        EncryptRes::EncryptSucc(d) => {
-                            v.0 = d;
-                        }
-                        EncryptRes::NotChange => {}
-                        _ => {}
-                    };
-                    let pkg = pakager.package_nor(v.0, v.1);
-                    stream.write_all(pkg.as_slice()).await;
-                }
-            }else{
-                sleep(Duration::from_millis(1)).await;
-            }
-        }
-
-        if let Ok(v) = is_runing.lock()
-        {
-            if !*v {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-    Ok(())
 }
