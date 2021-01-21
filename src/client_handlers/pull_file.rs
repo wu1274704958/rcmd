@@ -15,6 +15,7 @@ use std::fs::{OpenOptions, File};
 use async_std::io::Error;
 use std::io::Read;
 use std::ffi::OsStr;
+use crate::tools::SEND_BUF_SIZE;
 
 pub struct PullFile
 {
@@ -61,8 +62,8 @@ impl SubHandle for PullFile
                                 id_buf.extend_from_slice(filename.as_bytes());
                                 id_buf.push(TOKEN_END);
 
-                                let mut buf = Vec::with_capacity(1024 * 100);
-                                buf.resize(1024 * 100, 0);
+                                let mut buf = Vec::with_capacity(SEND_BUF_SIZE);
+                                buf.resize(SEND_BUF_SIZE, 0);
                                 let mut is_first = true;
                                 loop {
                                     let mut d = id_buf.clone();

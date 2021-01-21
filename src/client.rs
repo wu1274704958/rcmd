@@ -121,8 +121,8 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                         cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
                         head_v.push(TOKEN_END);
 
-                        let mut buf = Vec::with_capacity(1024*100);
-                        buf.resize(1024*100,0);
+                        let mut buf = Vec::with_capacity(SEND_BUF_SIZE);
+                        buf.resize(SEND_BUF_SIZE,0);
                         let mut is_first = true;
                         loop {
                             let mut d = head_v.clone();
@@ -279,8 +279,8 @@ fn handle_sub_cmd(lid:usize,mut s:String,msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,
                     cmds[2].trim().as_bytes().iter().for_each(|it|{head_v.push(*it)});
                     head_v.push(TOKEN_END);
 
-                    let mut buf = Vec::with_capacity(1024 * 100);
-                    buf.resize(1024 * 100,0);
+                    let mut buf = Vec::with_capacity(SEND_BUF_SIZE);
+                    buf.resize(SEND_BUF_SIZE,0);
                     let mut is_first = true;
                     loop {
                         let mut d = head_v.clone();
