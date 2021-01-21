@@ -60,6 +60,20 @@ impl <'a,T,A> TcpClient<T,A>
         }
     }
 
+    pub fn with_msg_queue_runing(handler:Arc<T>,parser:A,
+        msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
+        runing:Arc<Mutex<bool>>)-> Self
+    {
+        TcpClient::<T,A>{
+            msg_queue,
+            runing,
+            handler,
+            heartbeat_dur:Duration::from_secs(10),
+            nomsg_rest_dur:Duration::from_millis(1),
+            parser
+        }
+    }
+
     pub fn send(&self,data: Vec<u8>,ext:u32) {
         let mut a = self.msg_queue.lock().unwrap();
         {
