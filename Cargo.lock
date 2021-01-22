@@ -1401,6 +1401,7 @@ dependencies = [
  "futures",
  "getopts",
  "mysql",
+ "num-traits",
  "rand",
  "regex",
  "rsa",

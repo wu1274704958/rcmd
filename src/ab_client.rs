@@ -58,3 +58,63 @@ impl AbClient {
     }
 }
 
+pub trait ABClient
+{
+    type LID;
+    fn create(local_addr: SocketAddr,addr:SocketAddr,logic_id:Self::LID,form_thread:ThreadId)->Self;
+    fn push_msg(&self,d:Vec<u8>,ext:u32);
+    fn pop_msg(& self)->Option<(Vec<u8>,u32)>;
+    fn state(&self) -> State;
+    fn local_addr(&self)->SocketAddr;
+    fn addr(&self)->SocketAddr;
+    fn thread_id(&self)->ThreadId;
+    fn heartbeat_time(&self)->SystemTime;
+    fn reset_heartbeat(&mut self);
+    fn set_state(&mut self,s:State);
+}
+
+impl ABClient for AbClient
+{
+    type LID = usize;
+
+    fn create(local_addr: SocketAddr, addr: SocketAddr, logic_id: Self::LID, form_thread: ThreadId) -> Self {
+        Self::new(local_addr,addr,logic_id,form_thread)
+    }
+
+    fn push_msg(&self, d: Vec<u8>, ext: u32) {
+        self.push_msg(d,ext)
+    }
+
+    fn pop_msg(&self) -> Option<(Vec<u8>, u32)> {
+        self.pop_msg()
+    }
+
+    fn state(&self) -> State {
+        self.state
+    }
+
+    fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    fn thread_id(&self) -> ThreadId {
+        self.form_thread
+    }
+
+    fn heartbeat_time(&self) -> SystemTime {
+        self.heartbeat_time
+    }
+
+    fn reset_heartbeat(&mut self) {
+        self.heartbeat_time = SystemTime::now()
+    }
+
+    fn set_state(&mut self, s: State) {
+        self.state = s;
+    }
+}
+

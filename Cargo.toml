@@ -24,6 +24,7 @@ getopts = "0.2.21"
 subprocess = "0.2.6"
 encoding_rs = "0.8.26"
 futures = "*"
+num-traits = "0.2.14"
 
 [dependencies.mysql]
 version = "=20.1.0"

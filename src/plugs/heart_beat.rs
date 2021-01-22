@@ -19,7 +19,7 @@ impl Plug for HeartBeat
     type Id = usize;
     type Config = Config;
 
-    fn run(&self, id: Self::Id, clients: &mut Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, config: &Self::Config) where Self::Id: Copy {
+    fn run(&self, id: Self::Id, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, config: &Self::Config) where Self::Id: Copy {
         let time;
         {
             let a = clients.lock().unwrap();

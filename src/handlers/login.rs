@@ -31,11 +31,11 @@ impl SubHandle for Login
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+    fn handle(&self, data: &[u8], _len: u32, ext: u32, _clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
         if ext == EXT_LOGIN{
             {
                 let lm = self.user_map.lock().unwrap();
-                if let Some(u) = lm.get(&id)
+                if let Some(_u) = lm.get(&id)
                 {
                     return Some((vec![],EXT_ERR_ALREADY_LOGIN));
                 }
@@ -44,7 +44,7 @@ impl SubHandle for Login
             if let Ok(mu) = serde_json::from_str::<MinUser>(s.as_str()) {
                 {
                     let lm = self.login_map.lock().unwrap();
-                    if let Some(id) = lm.get(&mu.acc)
+                    if let Some(_id) = lm.get(&mu.acc)
                     {
                         return Some((vec![], EXT_ERR_ALREADY_LOGIN));
                     }
@@ -98,7 +98,7 @@ impl SubHandle for Login
                             WHERE user.id = (?);",
                                        (u.name,u.acc,u.pwd,u.is_admin,u.super_admin,u.id))
                         {
-                            Ok(l) =>{
+                            Ok(_l) =>{
                                 println!("remove login");
                                 if let Ok(mut m) = self.login_map.lock()
                                 {
@@ -145,7 +145,7 @@ impl Plug for OnDeadPlug {
     type Id = usize;
     type Config = Config;
 
-    fn run(&self, id: Self::Id, clients: &mut Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, config: &Self::Config) where Self::Id: Copy {
+    fn run(&self, id: Self::Id, _clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, _config: &Self::Config) where Self::Id: Copy {
         if let Ok(mut m) = self.user_map.lock()
         {
             if m.contains_key(&id){
@@ -158,7 +158,7 @@ impl Plug for OnDeadPlug {
                             WHERE user.id = (?);",
                                       (u.name,u.acc,u.pwd,u.is_admin,u.super_admin,u.id))
                     {
-                        Ok(l) =>{
+                        Ok(_l) =>{
                             println!("remove login");
                             if let Ok(mut m) = self.login_map.lock()
                             {

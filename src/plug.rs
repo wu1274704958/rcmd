@@ -6,14 +6,14 @@ pub trait Plug :Send + Sync{
     type Id;
     type Config;
 
-    fn run(&self,id:Self::Id,clients:&mut Arc<Mutex<HashMap<Self::Id,Box<Self::ABClient>>>>,config:&Self::Config) where Self::Id :Copy;
+    fn run(&self,id:Self::Id,clients:&Arc<Mutex<HashMap<Self::Id,Box<Self::ABClient>>>>,config:&Self::Config) where Self::Id :Copy;
 }
 
 pub trait PlugMgr<T> where T:Plug
 {
     fn run(&self,
         id:<T as Plug>::Id,
-        clients:&mut Arc<Mutex<HashMap<<T as Plug>::Id,Box<<T as Plug>::ABClient>>>>,
+        clients:&Arc<Mutex<HashMap<<T as Plug>::Id,Box<<T as Plug>::ABClient>>>>,
         config:&<T as Plug>::Config) where <T as Plug>::Id :Copy
     {
         for i in 0..self.plug_count()

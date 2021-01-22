@@ -45,7 +45,7 @@ pub fn del_client(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>, id:usize) -
     return cs_.len();
 }
 
-pub fn set_client_st(cs:& mut Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize,st:State)
+pub fn set_client_st(cs:&Arc<Mutex<HashMap<usize,Box<AbClient>>>>,id:usize,st:State)
 {
     let mut cs_ = cs.lock().unwrap();
     if let Some(c) = cs_.get_mut(&id)
