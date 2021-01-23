@@ -46,7 +46,7 @@ use crate::db::db_mgr::DBMgr;
 use crate::utils::msg_split::{DefMsgSplit, MsgSplit};
 use getopts::HasArg::No;
 use crate::utils::temp_permission::TempPermission;
-use crate::servers::tcp_server::TcpServer;
+use crate::servers::tcp_server::{TcpServer,run_in};
 //fn main(){}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,13 +57,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = tools::parse_args(config);
 
-    let rt = runtime::Builder::new_multi_thread()
-        .worker_threads(config.thread_count)
-        .build()
-        .unwrap();
-
-    let mut logic_id_ = Arc::new(Mutex::new(0usize));
-    let mut ab_clients = Arc::new(Mutex::new(HashMap::<usize,Box<AbClient>>::new()));
     let mut handler = DefHandler::<TestHandler>::new();
     let mut parser = DefParser::new();
     let mut plugs = DefPlugMgr::<HeartBeat>::new();
@@ -104,6 +97,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config
         );
 
-    server_run!(TcpServer<usize, AbClient, DefParser, TestHandler, DefHandler<TestHandler>, HeartBeat, DefPlugMgr<HeartBeat>>,ser);
+    server_run!(ser);
     Ok(())
 }

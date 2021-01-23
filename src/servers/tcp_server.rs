@@ -108,205 +108,9 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
             //     clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,socket,buf_len
             // ));
         //}
+        Ok(())
     }
-    #[allow(unused_variables)]
-    pub async fn run_in(
-        clients:Arc<Mutex<HashMap<LID,Box<ABC>>>>,
-        lid:Arc<Mutex<LID>>,
-        conf:Arc<Config>,
-        handler_cp:Arc<H>,
-        parser_cp:Arc<P>,
-        plugs_cp:Arc<PLM>,
-        dead_plugs_cp:Arc<PLM>,
-        mut socket:TcpStream,
-        buf_len:usize
-    )
-    {
-        let local_addr = socket.local_addr().unwrap();
-        let addr = socket.peer_addr().unwrap();
 
-        let logic_id = Self::new_client_ex(&clients,&lid,local_addr,addr);
-
-        socket.readable().await;
-        let mut buf = Vec::with_capacity(buf_len.clone());
-        buf.resize(buf_len.clone(),0);
-        let mut subpackager = DefSubpackage::new();
-        let mut asy = DefAsyCry::new();
-        let mut spliter = DefMsgSplit::new();
-        let mut package = None;
-        // In a loop, read data from the socket and write the data back.
-        loop {
-
-            {
-                let st = Self::get_client_st_ex(&clients,logic_id.clone());
-                if st.is_none() { println!(" begin ee1");return; }
-                match st{
-                    Some(State::WaitKill) => {
-                        dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
-                        Self::del_client_ex(&clients,&lid,logic_id.clone());
-                        return;
-                    }
-                    _ => {}
-                };
-            }
-            // read request
-            // println!(" read the request....");
-            match socket.try_read(&mut buf) {
-                Ok(0) => {
-                    //println!("ok n == 0 ----");
-                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
-                    Self::del_client_ex(&clients,&lid,logic_id.clone());
-                    return;
-                },
-                Ok(n) => {
-                    //println!("n = {}",n);
-                    Self::set_client_st_ex(&clients,logic_id.clone(), State::Busy);
-                    let b = SystemTime::now();
-                    package = subpackager.subpackage(&buf[0..n],n);
-                    let e = SystemTime::now();
-                    //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    //println!("e  WouldBlock -------");
-                }
-                Err(e) => {
-                    eprintln!("error = {}", e);
-                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
-                    Self::del_client_ex(&clients,&lid,logic_id.clone());
-                    return;
-                }
-            };
-
-            if package.is_none() && subpackager.need_check(){
-                let b = SystemTime::now();
-                package = subpackager.subpackage(&[],0);
-                //println!("subpackage check use {} ms",SystemTime::now().duration_since(b).unwrap().as_millis());
-            }
-
-            if let Some(mut d) = package
-            {
-                package = None;
-                let mut temp_data = None;
-                //handle request
-                let msg = {  parser_cp.parse_tf(&mut d) };
-                //dbg!(&msg);
-                if let Some(mut m) = msg {
-                    //----------------------------------
-                    let mut immediate_send = None;
-                    let mut override_msg = None;
-                    match asy.try_decrypt(m.msg,m.ext)
-                    {
-                        EncryptRes::EncryptSucc(d) => {
-                            override_msg = Some(d);
-                        }
-                        EncryptRes::RPubKey(d) => {
-                            immediate_send = Some(d.0);
-                            m.ext = d.1;
-                        }
-                        EncryptRes::ErrMsg(d) => {
-                            immediate_send = Some(d.0);
-                            m.ext = d.1;
-                        }
-                        EncryptRes::NotChange => {}
-                        EncryptRes::Break => {continue;}
-                    };
-                    if let Some(v) = immediate_send
-                    {
-                        let mut real_pkg = parser_cp.package_nor(v, m.ext);
-                        socket.write_all(real_pkg.as_slice()).await;
-                        continue;
-                    }
-                    if let Some(ref v) = override_msg
-                    {
-                        m.msg = v.as_slice();
-                    }
-                    let b = SystemTime::now();
-                    if spliter.need_merge(&m)
-                    {
-                        if let Some((data,ext)) = spliter.merge(&m)
-                        {
-                            temp_data = Some(data);
-                            m.ext = ext;
-                            m.msg = temp_data.as_ref().unwrap().as_slice();
-                        }else{
-                            continue;
-                        }
-                    }
-                    let respose = handler_cp.handle_ex(m, &clients, logic_id.clone());
-                    if m.ext != 9 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
-                    if let Some((mut respose,mut ext)) = respose {
-                        //---------------------------------
-                        if spliter.need_split(respose.len(),ext)
-                        {
-                            let mut msgs = spliter.split(&mut respose,ext);
-                            for i in msgs.into_iter(){
-                                let (mut data,ext,tag) = i;
-                                let mut send_data = match asy.encrypt(data, ext) {
-                                    EncryptRes::EncryptSucc(d) => {
-                                        d
-                                    }
-                                    _ => { data.to_vec()}
-                                };
-                                let mut real_pkg = parser_cp.package_tf(send_data, ext,tag);
-                                socket.write_all(real_pkg.as_slice()).await;
-                            }
-                        }else {
-                            match asy.encrypt(&respose, ext) {
-                                EncryptRes::EncryptSucc(d) => {
-                                    respose = d;
-                                    println!("send ext {}", ext);
-                                }
-                                _ => {}
-                            };
-                            let mut real_pkg = parser_cp.package_nor(respose, ext);
-                            socket.write_all(real_pkg.as_slice()).await;
-                        }
-                    }
-                }
-            }
-
-            //println!("{} handle the request....", logic_id);
-            //println!("{} check the write_buf....", logic_id);
-            let mut msg = None;
-            {
-                if let Some(mut cl) = clients.lock().unwrap().get(&logic_id)
-                {
-                    msg = cl.pop_msg();
-                }
-            }
-            //------------------------------------------------
-            if let Some((mut data,e)) = msg{
-                if spliter.need_split(data.len(),e)
-                {
-                    let mut msgs = spliter.split(&mut data,e);
-                    for i in msgs.into_iter(){
-                        let (mut data,ext,tag) = i;
-                        let mut send_data = match asy.encrypt(data, ext) {
-                            EncryptRes::EncryptSucc(d) => {
-                                d
-                            }
-                            _ => { data.to_vec()}
-                        };
-                        let mut real_pkg = parser_cp.package_tf(send_data, ext, tag);
-                        socket.write_all(real_pkg.as_slice()).await;
-                    }
-                }else {
-                    match asy.encrypt(&data, e) {
-                        EncryptRes::EncryptSucc(d) => {
-                            data = d;
-                        }
-                        _ => {}
-                    };
-                    let real_pkg = parser_cp.package_nor(data, e);
-                    socket.write_all(real_pkg.as_slice()).await;
-                }
-            }else {
-                async_std::task::sleep(conf.min_sleep_dur).await;
-            }
-            Self::set_client_st_ex(&clients,logic_id.clone(),State::Ready);
-            plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
-        }
-    }
 
     fn get_client_st(&self,id:LID)->Option<State>
     {
@@ -359,62 +163,282 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
         }
         res
     }
+}
 
-    fn get_client_st_ex(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID)->Option<State>
+fn get_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID)->Option<State>
+where
+    LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+    ABC: ABClient<LID = LID> + Send
+{
+    let mut abs = clients.lock().unwrap();
+    if let Some(a) = abs.get(&id)
+    {
+        Some(a.state())
+    }else{
+        None
+    }
+}
+
+fn set_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID,s:State)
+where
+    LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+    ABC: ABClient<LID = LID> + Send
+{
+    let mut abs = clients.lock().unwrap();
+    if let Some(mut a) = abs.get_mut(&id)
+    {
+        a.set_state(s)
+    }
+}
+
+fn new_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id_:&Arc<Mutex<LID>>,local_addr: SocketAddr, addr: SocketAddr) -> LID
+where
+    LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+    ABC: ABClient<LID = LID> + Send
+{
+    let mut logic_id = LID::zero();
+    {
+        let mut a = logic_id_.lock().unwrap();
+        a.add_assign(LID::one());
+        logic_id = *a;
+    }
+    let thread_id = std::thread::current().id();
+    let a = ABC::create(local_addr,addr,logic_id,thread_id);
     {
         let mut abs = clients.lock().unwrap();
-        if let Some(a) = abs.get(&id)
-        {
-            Some(a.state())
-        }else{
-            None
-        }
+        abs.insert(logic_id,Box::new(a));
     }
-
-    fn set_client_st_ex(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID,s:State)
+    logic_id
+}
+fn del_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id:&Arc<Mutex<LID>>,id:LID)->Option<Box<ABC>>
+    where
+        LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+        ABC: ABClient<LID = LID> + Send
+{
+    let mut res = None;
+    let mut empty = false;
     {
         let mut abs = clients.lock().unwrap();
-        if let Some(mut a) = abs.get_mut(&id)
-        {
-            a.set_state(s)
-        }
+        res = abs.remove(&id);
+        empty = abs.is_empty();
     }
+    if empty{
+        let mut a = logic_id.lock().unwrap();
+        *a = LID::zero();
+    }
+    res
+}
 
-    fn new_client_ex(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id_:&Arc<Mutex<LID>>,local_addr: SocketAddr, addr: SocketAddr) -> LID
-    {
-        let mut logic_id = LID::zero();
+#[allow(unused_must_use)]
+#[allow(unused_variables)]
+pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
+(
+    clients:Arc<Mutex<HashMap<LID,Box<ABC>>>>,
+    lid:Arc<Mutex<LID>>,
+    conf:Arc<Config>,
+    handler_cp:Arc<H>,
+    parser_cp:Arc<P>,
+    plugs_cp:Arc<PLM>,
+    dead_plugs_cp:Arc<PLM>,
+    mut socket:TcpStream,
+    buf_len:usize
+)
+    where SH : SubHandle<ABClient=ABC,Id=LID>,
+          H : Handle<SH> + Send + std::marker::Sync,
+          PL : Plug<ABClient=ABC,Id=LID,Config=Config>,
+          PLM: PlugMgr<PL> + Send + std::marker::Sync,
+          P : Agreement + Send + std::marker::Sync,
+          LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+          ABC: ABClient<LID = LID> + Send
+{
+    let local_addr = socket.local_addr().unwrap();
+    let addr = socket.peer_addr().unwrap();
+
+    let logic_id = new_client_ex(&clients,&lid,local_addr,addr);
+
+    socket.readable().await;
+    let mut buf = Vec::with_capacity(buf_len.clone());
+    buf.resize(buf_len.clone(),0);
+    let mut subpackager = DefSubpackage::new();
+    let mut asy = DefAsyCry::new();
+    let mut spliter = DefMsgSplit::new();
+    let mut package = None;
+    // In a loop, read data from the socket and write the data back.
+    loop {
+
         {
-            let mut a = logic_id_.lock().unwrap();
-            a.add_assign(LID::one());
-            logic_id = *a;
+            let st = get_client_st_ex(&clients,logic_id.clone());
+            if st.is_none() { println!(" begin ee1");return; }
+            match st{
+                Some(State::WaitKill) => {
+                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
+                    del_client_ex(&clients,&lid,logic_id.clone());
+                    return;
+                }
+                _ => {}
+            };
         }
-        let thread_id = std::thread::current().id();
-        let a = ABC::create(local_addr,addr,logic_id,thread_id);
+        // read request
+        // println!(" read the request....");
+        match socket.try_read(&mut buf) {
+            Ok(0) => {
+                //println!("ok n == 0 ----");
+                dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
+                del_client_ex(&clients,&lid,logic_id.clone());
+                return;
+            },
+            Ok(n) => {
+                //println!("n = {}",n);
+                set_client_st_ex(&clients,logic_id.clone(), State::Busy);
+                let b = SystemTime::now();
+                package = subpackager.subpackage(&buf[0..n],n);
+                let e = SystemTime::now();
+                //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                //println!("e  WouldBlock -------");
+            }
+            Err(e) => {
+                eprintln!("error = {}", e);
+                dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
+                del_client_ex(&clients,&lid,logic_id.clone());
+                return;
+            }
+        };
+
+        if package.is_none() && subpackager.need_check(){
+            let b = SystemTime::now();
+            package = subpackager.subpackage(&[],0);
+            //println!("subpackage check use {} ms",SystemTime::now().duration_since(b).unwrap().as_millis());
+        }
+
+        if let Some(mut d) = package
         {
-            let mut abs = clients.lock().unwrap();
-            abs.insert(logic_id,Box::new(a));
+            package = None;
+            let mut temp_data = None;
+            //handle request
+            let msg = {  parser_cp.parse_tf(&mut d) };
+            //dbg!(&msg);
+            if let Some(mut m) = msg {
+                //----------------------------------
+                let mut immediate_send = None;
+                let mut override_msg = None;
+                match asy.try_decrypt(m.msg,m.ext)
+                {
+                    EncryptRes::EncryptSucc(d) => {
+                        override_msg = Some(d);
+                    }
+                    EncryptRes::RPubKey(d) => {
+                        immediate_send = Some(d.0);
+                        m.ext = d.1;
+                    }
+                    EncryptRes::ErrMsg(d) => {
+                        immediate_send = Some(d.0);
+                        m.ext = d.1;
+                    }
+                    EncryptRes::NotChange => {}
+                    EncryptRes::Break => {continue;}
+                };
+                if let Some(v) = immediate_send
+                {
+                    let mut real_pkg = parser_cp.package_nor(v, m.ext);
+                    socket.write_all(real_pkg.as_slice()).await;
+                    continue;
+                }
+                if let Some(ref v) = override_msg
+                {
+                    m.msg = v.as_slice();
+                }
+                let b = SystemTime::now();
+                if spliter.need_merge(&m)
+                {
+                    if let Some((data,ext)) = spliter.merge(&m)
+                    {
+                        temp_data = Some(data);
+                        m.ext = ext;
+                        m.msg = temp_data.as_ref().unwrap().as_slice();
+                    }else{
+                        continue;
+                    }
+                }
+                let respose = handler_cp.handle_ex(m, &clients, logic_id.clone());
+                if m.ext != 9 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
+                if let Some((mut respose,mut ext)) = respose {
+                    //---------------------------------
+                    if spliter.need_split(respose.len(),ext)
+                    {
+                        let mut msgs = spliter.split(&mut respose,ext);
+                        for i in msgs.into_iter(){
+                            let (mut data,ext,tag) = i;
+                            let mut send_data = match asy.encrypt(data, ext) {
+                                EncryptRes::EncryptSucc(d) => {
+                                    d
+                                }
+                                _ => { data.to_vec()}
+                            };
+                            let mut real_pkg = parser_cp.package_tf(send_data, ext,tag);
+                            socket.write_all(real_pkg.as_slice()).await;
+                        }
+                    }else {
+                        match asy.encrypt(&respose, ext) {
+                            EncryptRes::EncryptSucc(d) => {
+                                respose = d;
+                                println!("send ext {}", ext);
+                            }
+                            _ => {}
+                        };
+                        let mut real_pkg = parser_cp.package_nor(respose, ext);
+                        socket.write_all(real_pkg.as_slice()).await;
+                    }
+                }
+            }
         }
-        logic_id
-    }
-    fn del_client_ex(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id:&Arc<Mutex<LID>>,id:LID)->Option<Box<ABC>>
-    {
-        let mut res = None;
-        let mut empty = false;
+
+        //println!("{} handle the request....", logic_id);
+        //println!("{} check the write_buf....", logic_id);
+        let mut msg = None;
         {
-            let mut abs = clients.lock().unwrap();
-            res = abs.remove(&id);
-            empty = abs.is_empty();
+            if let Some(mut cl) = clients.lock().unwrap().get(&logic_id)
+            {
+                msg = cl.pop_msg();
+            }
         }
-        if empty{
-            let mut a = logic_id.lock().unwrap();
-            *a = LID::zero();
+        //------------------------------------------------
+        if let Some((mut data,e)) = msg{
+            if spliter.need_split(data.len(),e)
+            {
+                let mut msgs = spliter.split(&mut data,e);
+                for i in msgs.into_iter(){
+                    let (mut data,ext,tag) = i;
+                    let mut send_data = match asy.encrypt(data, ext) {
+                        EncryptRes::EncryptSucc(d) => {
+                            d
+                        }
+                        _ => { data.to_vec()}
+                    };
+                    let mut real_pkg = parser_cp.package_tf(send_data, ext, tag);
+                    socket.write_all(real_pkg.as_slice()).await;
+                }
+            }else {
+                match asy.encrypt(&data, e) {
+                    EncryptRes::EncryptSucc(d) => {
+                        data = d;
+                    }
+                    _ => {}
+                };
+                let real_pkg = parser_cp.package_nor(data, e);
+                socket.write_all(real_pkg.as_slice()).await;
+            }
+        }else {
+            async_std::task::sleep(conf.min_sleep_dur).await;
         }
-        res
+        set_client_st_ex(&clients,logic_id.clone(),State::Ready);
+        plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
     }
 }
 
 macro_rules! server_run {
-    ($SerTy:ty,$ser:ident) => {
+    ($ser:ident) => {
         let listener = TcpListener::bind($ser.config.addr).await?;
         loop {
             let clients = $ser.clients.clone();
@@ -427,7 +451,7 @@ macro_rules! server_run {
             let (mut socket, _) = listener.accept().await?;
             let buf_len = $ser.buf_len;
 
-            $ser.runtime.spawn(<$SerTy>::run_in(
+            $ser.runtime.spawn(run_in(
                 clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,socket,buf_len
             ));
         }
