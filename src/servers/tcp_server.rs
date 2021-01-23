@@ -118,7 +118,7 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
         parser_cp:Arc<P>,
         plugs_cp:Arc<PLM>,
         dead_plugs_cp:Arc<PLM>,
-        mut socket:Box<TcpStream>,
+        mut socket:TcpStream,
         buf_len:usize
     )
     {
@@ -134,7 +134,6 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
         let mut asy = DefAsyCry::new();
         let mut spliter = DefMsgSplit::new();
         let mut package = None;
-        println!(" into loop....");
         // In a loop, read data from the socket and write the data back.
         loop {
 
@@ -142,7 +141,7 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
                 let st = Self::get_client_st_ex(&clients,logic_id.clone());
                 if st.is_none() { println!(" begin ee1");return; }
                 match st{
-                    Some(WaitKill) => {
+                    Some(State::WaitKill) => {
                         dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
                         Self::del_client_ex(&clients,&lid,logic_id.clone());
                         return;
@@ -151,13 +150,12 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
                 };
             }
             // read request
-            println!(" read the request....");
+            // println!(" read the request....");
             match socket.try_read(&mut buf) {
                 Ok(0) => {
                     //println!("ok n == 0 ----");
                     dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
                     Self::del_client_ex(&clients,&lid,logic_id.clone());
-                    println!(" begin ee2");
                     return;
                 },
                 Ok(n) => {
@@ -430,9 +428,8 @@ macro_rules! server_run {
             let buf_len = $ser.buf_len;
 
             $ser.runtime.spawn(<$SerTy>::run_in(
-                clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,socket.into(),buf_len
+                clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,socket,buf_len
             ));
-            println!("==================================");
         }
     };
 }
