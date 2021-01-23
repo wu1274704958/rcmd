@@ -92,24 +92,24 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
 
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>>
     {
-        let listener = TcpListener::bind(self.config.addr).await?;
-        loop {
-            let clients = self.clients.clone();
-            let lid = self.logic_id.clone();
-            let conf = self.config.clone();
-            let handler_cp = self.handler.clone();
-            let parser_cp = self.parser.clone();
-            let plugs_cp = self.plug_mgr.clone();
-            let dead_plugs_cp:Arc<_> = self.dead_plug_mgr.clone();
-            let (mut socket, _) = listener.accept().await?;
-            let buf_len = self.buf_len;
+        // let listener = TcpListener::bind(self.config.addr).await?;
+        // loop {
+        //     let clients = self.clients.clone();
+        //     let lid = self.logic_id.clone();
+        //     let conf = self.config.clone();
+        //     let handler_cp = self.handler.clone();
+        //     let parser_cp = self.parser.clone();
+        //     let plugs_cp = self.plug_mgr.clone();
+        //     let dead_plugs_cp:Arc<_> = self.dead_plug_mgr.clone();
+        //     let (mut socket, _) = listener.accept().await?;
+        //     let buf_len = self.buf_len;
 
             // self.runtime.spawn(Self::run_in(
             //     clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,socket,buf_len
             // ));
-        }
+        //}
     }
-
+    #[allow(unused_variables)]
     pub async fn run_in(
         clients:Arc<Mutex<HashMap<LID,Box<ABC>>>>,
         lid:Arc<Mutex<LID>>,
