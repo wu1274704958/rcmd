@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::collections::HashMap;
 use crate::model::user;
 use crate::handler::SubHandle;
@@ -7,6 +7,9 @@ use crate::ext_code::*;
 use std::collections::hash_map::RandomState;
 use std::mem::size_of;
 use crate::utils::temp_permission::TempPermission;
+use tokio::sync::Mutex;
+use async_trait::async_trait;
+
 
 pub struct PullFile{
     user_map:Arc<Mutex<HashMap<usize,user::User>>>,
@@ -24,23 +27,23 @@ impl PullFile {
     }
 }
 
-
+#[async_trait]
 impl SubHandle for PullFile
 {
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
         match ext
         {
             EXT_PULL_FILE_S => {
-                let has_permission = if let Ok(u) = self.user_map.lock()
-                {
+                let has_permission = {
+                    let u = self.user_map.lock().await;
                     if let Some(user) = u.get(&id)
                     {
                         user.super_admin
                     } else { false }
-                } else { false };
+                };
                 if !has_permission {
                     return Some((vec![], EXT_ERR_PERMISSION_DENIED));
                 }
@@ -52,7 +55,7 @@ impl SubHandle for PullFile
                 buf.copy_from_slice(&data[0..size_of::<usize>()]);
                 let lid = usize::from_be_bytes(buf);
                 let mut id_buf = id.to_be_bytes();
-                if let Ok(mut cls) = clients.lock()
+                let mut cls = clients.lock().await;
                 {
                     if let Some(cl) = cls.get_mut(&lid)
                     {
@@ -74,7 +77,7 @@ impl SubHandle for PullFile
                 id_buf.copy_from_slice(&data[0..size_of::<usize>()]);
                 let lid = usize::from_be_bytes(id_buf);
                 self.temp_permission.take_permission(lid,id);
-                if let Ok(mut cls) = clients.lock()
+                let mut cls = clients.lock().await;
                 {
                     if let Some(cl) = cls.get_mut(&lid)
                     {

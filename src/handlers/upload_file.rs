@@ -2,7 +2,7 @@ use crate::handler::{Handle, SubHandle};
 use std::collections::hash_map::RandomState;
 use async_std::sync::Arc;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use crate::ab_client::AbClient;
 use std::time::SystemTime;
 use crate::ext_code::*;
@@ -10,6 +10,7 @@ use crate::tools::{TOKEN_BEGIN, TOKEN_END};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use crate::model::user;
+use async_trait::async_trait;
 
 pub struct UploadHandler
 {
@@ -26,21 +27,23 @@ impl UploadHandler {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for UploadHandler
 {
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>,u32)> where Self::Id: Copy {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>,u32)> where Self::Id: Copy {
         if ext != EXT_UPLOAD_FILE_CREATE && ext != EXT_UPLOAD_FILE && ext != EXT_UPLOAD_FILE_ELF {return  None;}
-        let has_permission = if let Ok(u) = self.user_map.lock()
-        {
-            if let Some(user) = u.get(&id)
+        let has_permission = {
+            let u = self.user_map.lock().await;
             {
-                user.super_admin
-            }else{false}
-        }else{false};
+                if let Some(user) = u.get(&id)
+                {
+                    user.super_admin
+                } else { false }
+            }
+        };
         if !has_permission{
             return Some((vec![],EXT_ERR_PERMISSION_DENIED));
         }
@@ -71,19 +74,19 @@ impl SubHandle for UploadHandler
         let mut rd = name.as_bytes().to_vec();
 
         if ext == EXT_UPLOAD_FILE_CREATE{
-
-            if let Ok(m) = self.file_map.lock(){
-                if let Some(v) = m.get(&name)
+            {
+                let m = self.file_map.lock().await;
                 {
-                    if v.0 != id
+                    if let Some(v) = m.get(&name)
                     {
-                        return Some((rd, EXT_ERR_NO_ACCESS_PERMISSION));
-                    }else{
-                        return Some((rd, EXT_ERR_ALREADY_CREATED));
+                        if v.0 != id
+                        {
+                            return Some((rd, EXT_ERR_NO_ACCESS_PERMISSION));
+                        } else {
+                            return Some((rd, EXT_ERR_ALREADY_CREATED));
+                        }
                     }
                 }
-            }else{
-                return Some((rd, EXT_LOCK_ERR_CODE));
             }
 
             if let Ok(mut f) = OpenOptions::new().create(true).append(false).write(true).open(name.clone())
@@ -92,13 +95,13 @@ impl SubHandle for UploadHandler
                 {
                     let b = (l as u32).to_be_bytes();
                     b.iter().for_each(|it|{rd.push(*it)});
-                    return if let Ok(mut fm) = self.file_map.lock()
-                    {
-                        fm.insert(name.clone(), (id,f));
-                        Some((rd, EXT_UPLOAD_FILE_CREATE))
-                    } else {
-                        Some((rd, EXT_LOCK_ERR_CODE))
-                    }
+                    return {
+                        let mut fm = self.file_map.lock().await;
+                        {
+                            fm.insert(name.clone(), (id, f));
+                            Some((rd, EXT_UPLOAD_FILE_CREATE))
+                        }
+                    };
                 }else{
                     return Some((rd,EXT_ERR_WRITE_FILE_FAILED));
                 }
@@ -107,7 +110,7 @@ impl SubHandle for UploadHandler
             }
         } else if ext == EXT_UPLOAD_FILE{
 
-            if let Ok(mut fm) = self.file_map.lock()
+            let mut fm = self.file_map.lock().await;
             {
                 if let Some(f) = fm.get_mut(&name)
                 {
@@ -126,12 +129,10 @@ impl SubHandle for UploadHandler
                         return Some((rd,EXT_ERR_WRITE_FILE_FAILED));
                     }
                 }else { return Some((rd,EXT_ERR_FILE_NAME_NOT_EXITS)); }
-            }else{
-                return Some((rd,EXT_LOCK_ERR_CODE));
             }
 
         }else if ext == EXT_UPLOAD_FILE_ELF{
-            if let Ok(mut fm) = self.file_map.lock()
+            let mut fm = self.file_map.lock().await;
             {
                 if let Some(f) = fm.get_mut(&name)
                 {
@@ -148,8 +149,6 @@ impl SubHandle for UploadHandler
                 {
                     return Some((rd,EXT_UPLOAD_FILE_ELF));
                 }
-            }else{
-                return Some((rd,EXT_LOCK_ERR_CODE));
             }
         }
         Some((rd,EXT_DEFAULT_ERR_CODE))

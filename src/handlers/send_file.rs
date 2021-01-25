@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use crate::model::user;
 use crate::handler::SubHandle;
@@ -7,6 +8,7 @@ use crate::ext_code::*;
 use std::collections::hash_map::RandomState;
 use std::mem::size_of;
 use crate::utils::temp_permission::TempPermission;
+use async_trait::async_trait;
 
 pub struct SendFile{
     user_map:Arc<Mutex<HashMap<usize,user::User>>>,
@@ -24,13 +26,13 @@ impl SendFile {
     }
 }
 
-
+#[async_trait]
 impl SubHandle for SendFile
 {
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
 
         match ext
         {
@@ -41,13 +43,13 @@ impl SubHandle for SendFile
                 buf.copy_from_slice(&data[0..size_of::<usize>()]);
                 let lid = usize::from_be_bytes(buf);
 
-                let mut has_permission = if let Ok(u) = self.user_map.lock()
-                {
+                let mut has_permission = {
+                    let u = self.user_map.lock().await;
                     if let Some(user) = u.get(&id)
                     {
                         user.super_admin
                     } else { false }
-                } else { false };
+                };
                 if !has_permission {
                     has_permission = self.temp_permission.has_temp_permission(lid,id);
                 }
@@ -61,7 +63,7 @@ impl SubHandle for SendFile
                 }
 
                 let mut id_buf = id.to_be_bytes();
-                if let Ok(mut cls) = clients.lock()
+                let mut cls = clients.lock().await;
                 {
                     if let Some(cl) = cls.get_mut(&lid)
                     {
@@ -85,7 +87,7 @@ impl SubHandle for SendFile
                 let mut id_buf = [0u8;size_of::<usize>()];
                 id_buf.copy_from_slice(&data[0..size_of::<usize>()]);
                 let id = usize::from_be_bytes(id_buf);
-                if let Ok(mut cls) = clients.lock()
+                let mut cls = clients.lock().await;
                 {
                     if let Some(cl) = cls.get_mut(&id)
                     {

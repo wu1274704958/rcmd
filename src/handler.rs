@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::collections::HashMap;
 use crate::ab_client::AbClient;
 use std::collections::hash_map::RandomState;
@@ -10,25 +9,30 @@ use tokio::macros::support::{Pin, Poll};
 use std::marker::PhantomData;
 use std::ops::{DerefMut, Deref};
 use std::time::SystemTime;
+use tokio::sync::Mutex;
+use async_trait::async_trait;
 
-
+#[async_trait]
 pub trait SubHandle:Send + Sync {
     type ABClient;
     type Id;
-    fn handle(&self,data:&[u8],len:u32,ext:u32,clients:&Arc<Mutex<HashMap<Self::Id,Box<Self::ABClient>>>>,id:Self::Id)-> Option<(Vec<u8>,u32)>
+    async fn handle(&self,data:&[u8],len:u32,ext:u32,clients:&Arc<Mutex<HashMap<Self::Id,Box<Self::ABClient>>>>,id:Self::Id)-> Option<(Vec<u8>,u32)>
         where Self::Id :Copy;
 }
 
+#[async_trait]
 pub trait Handle<T> where T:SubHandle
 {
-    fn handle_ex(&self,data:Message<'_>,
+    async fn handle_ex(&self,data:Message<'_>,
                  clients:&Arc<Mutex<HashMap<<T as SubHandle>::Id,Box<<T as SubHandle>::ABClient>>>>,
-                 id:<T as SubHandle>::Id)-> Option<(Vec<u8>,u32)> where <T as SubHandle>::Id:Copy
+                 id:<T as SubHandle>::Id)-> Option<(Vec<u8>,u32)>
+        where <T as SubHandle>::Id:Copy + Send,
+        <T as SubHandle>::ABClient : Send,T: 'async_trait
     {
         for i in 0..self.handler_count()
         {
             let handler = self.get_handler(i);
-            if let Some((v,ext)) = handler.handle(data.msg,data.len,data.ext,clients,id)
+            if let Some((v,ext)) = handler.handle(data.msg,data.len,data.ext,clients,id).await
             {
                 return Some((v,ext));
             }
@@ -54,7 +58,7 @@ impl<T> DefHandler<T>  where T:SubHandle {
         }
     }
 }
-
+#[async_trait]
 impl<T> Handle<T> for DefHandler<T> where T:SubHandle{
 
     fn add_handler(&mut self, h: Arc<dyn SubHandle<ABClient = <T as SubHandle>::ABClient, Id = <T as SubHandle>::Id>>) {
@@ -74,14 +78,15 @@ impl<T> Handle<T> for DefHandler<T> where T:SubHandle{
 pub struct TestHandler{
 }
 
+#[async_trait]
 impl  SubHandle for TestHandler  {
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], len: u32, ext: u32,
+    async fn handle(&self, data: &[u8], len: u32, ext: u32,
               clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>>>>,
               id: Self::Id) -> Option<(Vec<u8>,u32)> where Self::Id: Copy {
-        let mut a = clients.lock().unwrap();
+        let mut a = clients.lock().await;
         if let Some(c) = a.get_mut(&id)
         {
             c.heartbeat_time = SystemTime::now();

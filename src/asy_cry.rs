@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use crate::ext_code::*;
 use async_trait::async_trait;
 use tokio::runtime;
+use std::cell::Cell;
 
 #[derive(Debug)]
 pub enum EncryptRes {
@@ -57,7 +58,7 @@ pub struct DefAsyCry{
     ignore_map: HashSet<u32>,
     oth_ready: bool,
     state:u32,
-    rt:runtime::Runtime
+    rt:Cell<Option<runtime::Runtime>>
 }
 
 impl DefAsyCry
@@ -80,7 +81,7 @@ impl DefAsyCry
             oth_ready:false,
             state:10,
             ignore_map,
-            rt:runtime
+            rt:Cell::new(Some(runtime))
         }
     }
 
@@ -102,7 +103,7 @@ impl DefAsyCry
             oth_ready:false,
             state:10,
             ignore_map,
-            rt:runtime
+            rt:Cell::new(Some(runtime))
         }
     }
 
@@ -116,7 +117,7 @@ impl AsyCry for DefAsyCry{
 
     async fn build_pub_key(&mut self) -> Result<Vec<u8>,u32> {
 
-        if let Ok(key)= self.rt.spawn(Self::real_build_pub_key(4096)).await
+        if let Ok(key)= self.rt.get_mut().as_ref().unwrap().spawn(Self::real_build_pub_key(4096)).await
         {
             match key {
                 Ok((k_data,k)) => {
@@ -303,5 +304,12 @@ impl AsyCry for DefAsyCry{
 
     fn can_encrypt(&self) -> bool {
         self.oth_ready && self.pub_key.is_some() && self.pri_key.is_some()
+    }
+}
+
+impl Drop for DefAsyCry{
+    fn drop(&mut self) {
+        let rt = self.rt.replace(None);
+        rt.unwrap().shutdown_background();
     }
 }

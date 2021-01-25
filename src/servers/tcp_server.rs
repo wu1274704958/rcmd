@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, sync::{Arc,Mutex}};
+use std::{collections::HashMap, marker::PhantomData, sync::{Arc}};
 use tokio::runtime::{self, Runtime};
 use crate::{handler::{self, Handle, SubHandle}, plug};
 use crate::config_build::Config;
@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 use tokio::io;
 use tokio::io::AsyncWriteExt;
-
+use tokio::sync::Mutex;
 
 pub struct TcpServer<LID,ABC,P,SH,H,PL,PLM>
     where SH : SubHandle<ABClient=ABC,Id=LID>,
@@ -112,9 +112,9 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
     }
 
 
-    fn get_client_st(&self,id:LID)->Option<State>
+    async fn get_client_st(&self,id:LID)->Option<State>
     {
-        let mut abs = self.clients.lock().unwrap();
+        let mut abs = self.clients.lock().await;
         if let Some(a) = abs.get(&id)
         {
             Some(a.state())
@@ -123,54 +123,54 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
         }
     }
 
-    fn set_client_st(&self,id:LID,s:State)
+    async fn set_client_st(&self,id:LID,s:State)
     {
-        let mut abs = self.clients.lock().unwrap();
+        let mut abs = self.clients.lock().await;
         if let Some(mut a) = abs.get_mut(&id)
         {
             a.set_state(s)
         }
     }
 
-    fn new_client(&self,local_addr: SocketAddr, addr: SocketAddr) -> LID
+    async fn new_client(&self,local_addr: SocketAddr, addr: SocketAddr) -> LID
     {
         let mut logic_id = LID::zero();
         {
-            let mut a = self.logic_id.lock().unwrap();
+            let mut a = self.logic_id.lock().await;
             a.add_assign(LID::one());
             logic_id = *a;
         }
         let thread_id = std::thread::current().id();
         let a = ABC::create(local_addr,addr,logic_id,thread_id);
         {
-            let mut abs = self.clients.lock().unwrap();
+            let mut abs = self.clients.lock().await;
             abs.insert(logic_id,Box::new(a));
         }
         logic_id
     }
-    fn del_client(&self,id:LID)->Option<Box<ABC>>
+    async fn del_client(&self,id:LID)->Option<Box<ABC>>
     {
         let mut res = None;
         let mut empty = false;
         {
-            let mut abs = self.clients.lock().unwrap();
+            let mut abs = self.clients.lock().await;
             res = abs.remove(&id);
             empty = abs.is_empty();
         }
         if empty{
-            let mut a = self.logic_id.lock().unwrap();
+            let mut a = self.logic_id.lock().await;
             *a = LID::zero();
         }
         res
     }
 }
 
-fn get_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID)->Option<State>
+pub async fn get_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID)->Option<State>
 where
     LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
     ABC: ABClient<LID = LID> + Send
 {
-    let mut abs = clients.lock().unwrap();
+    let mut abs = clients.lock().await;
     if let Some(a) = abs.get(&id)
     {
         Some(a.state())
@@ -179,38 +179,38 @@ where
     }
 }
 
-fn set_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID,s:State)
+pub async fn set_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID,s:State)
 where
     LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
     ABC: ABClient<LID = LID> + Send
 {
-    let mut abs = clients.lock().unwrap();
+    let mut abs = clients.lock().await;
     if let Some(mut a) = abs.get_mut(&id)
     {
         a.set_state(s)
     }
 }
 
-fn new_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id_:&Arc<Mutex<LID>>,local_addr: SocketAddr, addr: SocketAddr) -> LID
+async fn new_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id_:&Arc<Mutex<LID>>,local_addr: SocketAddr, addr: SocketAddr) -> LID
 where
     LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
     ABC: ABClient<LID = LID> + Send
 {
     let mut logic_id = LID::zero();
     {
-        let mut a = logic_id_.lock().unwrap();
+        let mut a = logic_id_.lock().await;
         a.add_assign(LID::one());
         logic_id = *a;
     }
     let thread_id = std::thread::current().id();
     let a = ABC::create(local_addr,addr,logic_id,thread_id);
     {
-        let mut abs = clients.lock().unwrap();
+        let mut abs = clients.lock().await;
         abs.insert(logic_id,Box::new(a));
     }
     logic_id
 }
-fn del_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id:&Arc<Mutex<LID>>,id:LID)->Option<Box<ABC>>
+async fn del_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id:&Arc<Mutex<LID>>,id:LID)->Option<Box<ABC>>
     where
         LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
         ABC: ABClient<LID = LID> + Send
@@ -218,12 +218,12 @@ fn del_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id:&A
     let mut res = None;
     let mut empty = false;
     {
-        let mut abs = clients.lock().unwrap();
+        let mut abs = clients.lock().await;
         res = abs.remove(&id);
         empty = abs.is_empty();
     }
     if empty{
-        let mut a = logic_id.lock().unwrap();
+        let mut a = logic_id.lock().await;
         *a = LID::zero();
     }
     res
@@ -254,7 +254,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     let local_addr = socket.local_addr().unwrap();
     let addr = socket.peer_addr().unwrap();
 
-    let logic_id = new_client_ex(&clients,&lid,local_addr,addr);
+    let logic_id = new_client_ex(&clients,&lid,local_addr,addr).await;
 
     socket.readable().await;
     let mut buf = Vec::with_capacity(buf_len.clone());
@@ -267,12 +267,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     loop {
 
         {
-            let st = get_client_st_ex(&clients,logic_id.clone());
+            let st = get_client_st_ex(&clients,logic_id.clone()).await;
             if st.is_none() { println!(" begin ee1");return; }
             match st{
                 Some(State::WaitKill) => {
-                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
-                    del_client_ex(&clients,&lid,logic_id.clone());
+                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                    del_client_ex(&clients,&lid,logic_id.clone()).await;
                     return;
                 }
                 _ => {}
@@ -283,13 +283,13 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         match socket.try_read(&mut buf) {
             Ok(0) => {
                 //println!("ok n == 0 ----");
-                dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
-                del_client_ex(&clients,&lid,logic_id.clone());
+                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                del_client_ex(&clients,&lid,logic_id.clone()).await;
                 return;
             },
             Ok(n) => {
                 //println!("n = {}",n);
-                set_client_st_ex(&clients,logic_id.clone(), State::Busy);
+                set_client_st_ex(&clients,logic_id.clone(), State::Busy).await;
                 let b = SystemTime::now();
                 package = subpackager.subpackage(&buf[0..n],n);
                 let e = SystemTime::now();
@@ -300,8 +300,8 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
             }
             Err(e) => {
                 eprintln!("error = {}", e);
-                dead_plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
-                del_client_ex(&clients,&lid,logic_id.clone());
+                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                del_client_ex(&clients,&lid,logic_id.clone()).await;
                 return;
             }
         };
@@ -361,7 +361,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                         continue;
                     }
                 }
-                let respose = handler_cp.handle_ex(m, &clients, logic_id.clone());
+                let respose = handler_cp.handle_ex(m, &clients, logic_id.clone()).await;
                 if m.ext != 9 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
                 if let Some((mut respose,mut ext)) = respose {
                     //---------------------------------
@@ -398,7 +398,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         //println!("{} check the write_buf....", logic_id);
         let mut msg = None;
         {
-            if let Some(mut cl) = clients.lock().unwrap().get(&logic_id)
+            if let Some(mut cl) = clients.lock().await.get(&logic_id)
             {
                 msg = cl.pop_msg();
             }
@@ -432,8 +432,8 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         }else {
             async_std::task::sleep(conf.min_sleep_dur).await;
         }
-        set_client_st_ex(&clients,logic_id.clone(),State::Ready);
-        plugs_cp.run(logic_id.clone(),&clients,conf.as_ref());
+        set_client_st_ex(&clients,logic_id.clone(),State::Ready).await;
+        plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
     }
 }
 

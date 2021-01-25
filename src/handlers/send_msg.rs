@@ -1,5 +1,5 @@
 use std::sync::{Arc, PoisonError, MutexGuard};
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use crate::model;
 use crate::model::user;
@@ -9,6 +9,7 @@ use std::collections::hash_map::RandomState;
 use crate::ext_code::*;
 use crate::model::user::User;
 use crate::tools::real_package;
+use async_trait::async_trait;
 
 pub struct SendMsg
 {
@@ -27,17 +28,18 @@ impl SendMsg {
     }
 }
 
+#[async_trait]
 impl SubHandle for SendMsg
 {
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
         if ext != EXT_SEND_BROADCAST && ext != EXT_SEND_MSG { return None;}
 
         let mut self_name = None;
         {
-            let lm = self.user_map.lock().unwrap();
+            let lm = self.user_map.lock().await;
             match lm.get(&id){
                 None => {return Some((vec![],EXT_ERR_NOT_LOGIN));}
                 Some(u) => { self_name = Some(u.name.clone())}
@@ -49,7 +51,7 @@ impl SubHandle for SendMsg
                 if mu.lid == id{
                     return Some((vec![], EXT_ERR_BAD_TARGET));
                 }
-                let mut cls = clients.lock().unwrap();
+                let mut cls = clients.lock().await;
                 match cls.get_mut(&mu.lid){
                     None => {
                         return Some((vec![], EXT_ERR_NOT_FOUND_LID));
@@ -70,7 +72,7 @@ impl SubHandle for SendMsg
             let v = serde_json::to_string(&msg).unwrap().into_bytes();
 
             {
-                let mut cls = clients.lock().unwrap();
+                let mut cls = clients.lock().await;
                 cls.iter_mut().for_each(|(it,cl)|{
                     if it != &id{
                         cl.push_msg(v.clone(),EXT_RECV_MSG);

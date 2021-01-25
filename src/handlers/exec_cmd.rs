@@ -1,5 +1,5 @@
 use async_std::sync::Arc;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use crate::handler::SubHandle;
 use std::collections::hash_map::RandomState;
@@ -9,6 +9,7 @@ use std::ops::AddAssign;
 use crate::model::user;
 use crate::model;
 use crate::tools;
+use async_trait::async_trait;
 
 pub enum ExecState{
     Init,
@@ -49,81 +50,84 @@ impl ExecCmd{
         }
     }
 
-    pub fn next_id(&self) ->usize
+    pub async fn next_id(&self) ->usize
     {
-        if let Ok(mut l) = self.logic_id.lock(){
-            l.add_assign(1);
-            return *l;
-        }
-        0
+        let mut l = self.logic_id.lock().await;
+        l.add_assign(1);
+        return *l;
     }
 
-    pub fn del_data(&self,i:usize) -> Option<ExecData>
+    pub async fn del_data(&self,i:usize) -> Option<ExecData>
     {
-        if let Ok(mut d) = self.data.lock(){
+        let mut d = self.data.lock().await;
+        {
             let res = if d.contains_key(&i) {
                 d.remove(&i)
             }else{None};
             if d.len() == 0
             {
-                if let Ok(mut l) = self.logic_id.lock(){
-                    *l = 0;
-                }
+                let mut l = self.logic_id.lock().await;
+                *l = 0;
             }
             res
-        }else{None}
+        }
     }
 
-    pub fn set_st(&self,i:usize,st:ExecState)
+    pub async fn set_st(&self,i:usize,st:ExecState)
     {
-        if let Ok(mut d) = self.data.lock(){
+        let mut d = self.data.lock().await;
+        {
             if d.contains_key(&i) {
                 d.get_mut(&i).unwrap().st = st;
             }
         }
     }
 
-    pub fn push(&self,i:usize,data:ExecData)
+    pub async fn push(&self,i:usize,data:ExecData)
     {
-        if let Ok(mut d) = self.data.lock(){
+        let mut d = self.data.lock().await;
+        {
             d.insert(i,data);
         }
     }
 }
 
+#[async_trait]
 impl SubHandle for ExecCmd
 {
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
         if ext == EXT_RUN_CMD{
-            let is_su = if let Ok(um) = self.user_map.lock()
-            {
-                if let Some(u) = um.get(&id){
-                    u.super_admin
-                }else{
-                    return Some((vec![],EXT_ERR_NOT_LOGIN));
+            let is_su = {
+                let um = self.user_map.lock().await;
+                {
+                    if let Some(u) = um.get(&id) {
+                        u.super_admin
+                    } else {
+                        return Some((vec![], EXT_ERR_NOT_LOGIN));
+                    }
                 }
-            }else { false };
+            };
             if !is_su { return Some((vec![],EXT_ERR_PERMISSION_DENIED)); }
 
             let s = String::from_utf8_lossy(data).to_string();
             if let Ok(msg) = serde_json::from_str::<model::SendMsg>(&s)
             {
-                if let Ok(mut cls) = clients.lock()
+                let mut cls = clients.lock().await;
                 {
                     if let Some(cl) = cls.get_mut(&msg.lid){
                         let sm = model::SendMsg {
-                            lid: self.next_id(),
+                            lid: self.next_id().await,
                             msg: msg.msg.clone()
                         };
                         let mut st = ExecData::new(msg.lid.clone(),id.clone());
                         st.st = ExecState::SendToTarget;
-                        self.push(sm.lid,st);
+                        self.push(sm.lid,st).await;
                         cl.push_msg(serde_json::to_string(&sm).unwrap().into_bytes(),EXT_EXEC_CMD);
                     }else{ return Some((vec![],EXT_ERR_NOT_FOUND_LID));}
-                }else{ return Some((vec![],EXT_ERR_NOT_KNOW));}
+                }
             }else{ return Some((vec![],EXT_ERR_PARSE_ARGS));}
 
         }else if ext == EXT_EXEC_CMD{
@@ -134,14 +138,12 @@ impl SubHandle for ExecCmd
                     println!("parse exec cmd return msg failed! {:?}",e);
                 }
                 Ok(mut m) =>{
-                    if let Some(ed) = self.del_data(m.lid){
-                        if let Ok(mut cls) = clients.lock()
+                    if let Some(ed) = self.del_data(m.lid).await{
+                        let mut cls = clients.lock().await;
+                        if let Some(cl) = cls.get_mut(&ed.su)
                         {
-                            if let Some(cl) = cls.get_mut(&ed.su)
-                            {
-                                m.lid = ed.tar;
-                                cl.push_msg(serde_json::to_string(&m).unwrap().into_bytes(),EXT_RUN_CMD);
-                            }
+                            m.lid = ed.tar;
+                            cl.push_msg(serde_json::to_string(&m).unwrap().into_bytes(),EXT_RUN_CMD);
                         }
                     }
                 }

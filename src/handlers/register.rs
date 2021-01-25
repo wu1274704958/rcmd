@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use crate::model::user;
 use crate::handler::SubHandle;
@@ -11,7 +11,7 @@ use regex::Regex;
 use crate::db::db_mgr::DBMgr;
 use mysql::{Error, PooledConn};
 use mysql::prelude::Queryable;
-
+use async_trait::async_trait;
 pub struct Register
 {
     db_mgr:Arc<DBMgr>,
@@ -27,13 +27,13 @@ impl Register {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for Register
 {
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
         if ext != EXT_REGISTER { return None; }
 
         let s = String::from_utf8_lossy(data).to_string();

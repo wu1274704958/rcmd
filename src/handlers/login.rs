@@ -4,7 +4,7 @@ use crate::model::user;
 use std::collections::hash_map::RandomState;
 use async_std::sync::Arc;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use crate::ext_code::{EXT_LOGIN, EXT_LOGOUT, EXT_ERR_PARSE_ARGS, EXT_ERR_ALREADY_LOGIN, EXT_ERR_NOT_KNOW, EXT_ERR_WRONG_PASSWORD, EXT_ERR_NOT_FOUND_ACC, EXT_ERR_NOT_LOGIN};
 use crate::db::db_mgr::DBMgr;
 use crate::model::user::{User, MinUser};
@@ -12,6 +12,7 @@ use mysql::prelude::Queryable;
 use crate::plug::Plug;
 use crate::config_build::Config;
 use crate::utils::temp_permission::TempPermission;
+use async_trait::async_trait;
 
 pub struct Login{
     db_mgr:Arc<DBMgr>,
@@ -26,15 +27,16 @@ impl Login {
     }
 }
 
+#[async_trait]
 impl SubHandle for Login
 {
     type ABClient = AbClient;
     type Id = usize;
 
-    fn handle(&self, data: &[u8], _len: u32, ext: u32, _clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+    async fn handle(&self, data: &[u8], _len: u32, ext: u32, _clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
         if ext == EXT_LOGIN{
             {
-                let lm = self.user_map.lock().unwrap();
+                let lm = self.user_map.lock().await;
                 if let Some(_u) = lm.get(&id)
                 {
                     return Some((vec![],EXT_ERR_ALREADY_LOGIN));
@@ -43,7 +45,7 @@ impl SubHandle for Login
             let s = String::from_utf8_lossy(data).to_string();
             if let Ok(mu) = serde_json::from_str::<MinUser>(s.as_str()) {
                 {
-                    let lm = self.login_map.lock().unwrap();
+                    let lm = self.login_map.lock().await;
                     if let Some(_id) = lm.get(&mu.acc)
                     {
                         return Some((vec![], EXT_ERR_ALREADY_LOGIN));
@@ -59,14 +61,14 @@ impl SubHandle for Login
                             return Some((vec![], EXT_ERR_WRONG_PASSWORD));
                         }
                         println!("insert login map");
-                        if let Ok(mut m) = self.login_map.lock()
                         {
-                            m.insert(mu.acc,id.clone());
+                            let mut m = self.login_map.lock().await;
+                            m.insert(mu.acc, id.clone());
                         }
                         println!("insert user map");
-                        if let Ok(mut m) = self.user_map.lock()
                         {
-                            m.insert(id,user.clone());
+                            let mut m = self.user_map.lock().await;
+                            m.insert(id, user.clone());
                         }
                         println!("return the user info");
                         user.pwd.clear();
@@ -83,7 +85,7 @@ impl SubHandle for Login
                 return Some((vec![],EXT_ERR_PARSE_ARGS));
             }
         }else if ext == EXT_LOGOUT{
-            if let Ok(mut m) = self.user_map.lock()
+            let mut m = self.user_map.lock().await;
             {
                 if !m.contains_key(&id)
                 {
@@ -100,11 +102,9 @@ impl SubHandle for Login
                         {
                             Ok(_l) =>{
                                 println!("remove login");
-                                if let Ok(mut m) = self.login_map.lock()
                                 {
+                                    let mut m = self.login_map.lock().await;
                                     m.remove(&acc);
-                                }else{
-                                    return Some((vec![], EXT_ERR_NOT_KNOW));
                                 }
                                 return Some((vec![], EXT_LOGOUT));
                             }
@@ -139,14 +139,14 @@ impl OnDeadPlug{
     OnDeadPlug{db_mgr,login_map,user_map,temp_permission}
 }
 }
-
+#[async_trait]
 impl Plug for OnDeadPlug {
     type ABClient = AbClient;
     type Id = usize;
     type Config = Config;
 
-    fn run(&self, id: Self::Id, _clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, _config: &Self::Config) where Self::Id: Copy {
-        if let Ok(mut m) = self.user_map.lock()
+    async fn run(&self, id: Self::Id, _clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, _config: Arc<Self::Config>) where Self::Id: Copy {
+        let mut m = self.user_map.lock().await;
         {
             if m.contains_key(&id){
                 println!("remove user");
@@ -160,8 +160,8 @@ impl Plug for OnDeadPlug {
                     {
                         Ok(_l) =>{
                             println!("remove login");
-                            if let Ok(mut m) = self.login_map.lock()
                             {
+                                let mut m = self.login_map.lock().await;
                                 m.remove(&acc);
                             }
                         }
