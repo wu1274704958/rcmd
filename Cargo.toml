@@ -25,6 +25,7 @@ subprocess = "0.2.6"
 encoding_rs = "0.8.26"
 futures = "*"
 num-traits = "0.2.14"
+async-trait = "0.1.42"
 
 [dependencies.mysql]
 version = "=20.1.0"

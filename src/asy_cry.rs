@@ -10,6 +10,8 @@ use rsa::errors::Error;
 use crate::tools::*;
 use std::collections::HashSet;
 use crate::ext_code::*;
+use async_trait::async_trait;
+use tokio::runtime;
 
 #[derive(Debug)]
 pub enum EncryptRes {
@@ -19,20 +21,23 @@ pub enum EncryptRes {
     NotChange,
     Break,
 }
-
+#[async_trait]
 pub trait AsyCry{
 
-    fn build_pub_key(&mut self)->Result<Vec<u8>,u32>
+    async fn build_pub_key(&mut self)->Result<Vec<u8>,u32>
     {
         Err(20) // 20 not impl
     }
+
+    async fn real_build_pub_key(bit_size:usize) -> Result<(Vec<u8>,Option<RSAPrivateKey>),u32>;
+
 
     fn pub_key_from(&self,d:&[u8],ext:u32) ->Result<RSAPublicKey,u32>
     {
         Err(20)
     }
 
-    fn try_decrypt(&mut self, d:&[u8],ext:u32) -> EncryptRes {
+    async fn try_decrypt(&mut self, d:&[u8],ext:u32) -> EncryptRes {
         EncryptRes::NotChange
     }
 
@@ -51,7 +56,8 @@ pub struct DefAsyCry{
     pub_key: Option<RSAPublicKey>,
     ignore_map: HashSet<u32>,
     oth_ready: bool,
-    state:u32
+    state:u32,
+    rt:runtime::Runtime
 }
 
 impl DefAsyCry
@@ -59,6 +65,10 @@ impl DefAsyCry
     pub fn new() ->DefAsyCry
     {
         let mut ignore_map = HashSet::new();
+        let runtime = runtime::Builder::new_multi_thread()
+            .worker_threads(6)
+            .build()
+            .unwrap();
         ignore_map.extend([9,
             EXT_SEND_FILE_CREATE,EXT_SEND_FILE,EXT_SEND_FILE_ELF,
             EXT_SAVE_FILE_CREATE,EXT_SAVE_FILE,EXT_SAVE_FILE_ELF,
@@ -69,7 +79,30 @@ impl DefAsyCry
             pub_key:None,
             oth_ready:false,
             state:10,
-            ignore_map
+            ignore_map,
+            rt:runtime
+        }
+    }
+
+    pub fn with_thread_count(thread_count:usize) ->DefAsyCry
+    {
+        let mut ignore_map = HashSet::new();
+        let runtime = runtime::Builder::new_multi_thread()
+            .worker_threads(thread_count)
+            .build()
+            .unwrap();
+        ignore_map.extend([9,
+            EXT_SEND_FILE_CREATE,EXT_SEND_FILE,EXT_SEND_FILE_ELF,
+            EXT_SAVE_FILE_CREATE,EXT_SAVE_FILE,EXT_SAVE_FILE_ELF,
+            EXT_SAVE_FILE_RET,EXT_SAVE_FILE_CREATE_RET,EXT_SAVE_FILE_ELF_RET,
+            EXT_UPLOAD_FILE_CREATE,EXT_UPLOAD_FILE,EXT_UPLOAD_FILE_ELF].iter());
+        DefAsyCry{
+            pri_key:None,
+            pub_key:None,
+            oth_ready:false,
+            state:10,
+            ignore_map,
+            rt:runtime
         }
     }
 
@@ -78,18 +111,37 @@ impl DefAsyCry
         self.ignore_map.contains(&ext)
     }
 }
-
+#[async_trait]
 impl AsyCry for DefAsyCry{
 
-    fn build_pub_key(&mut self) -> Result<Vec<u8>,u32> {
+    async fn build_pub_key(&mut self) -> Result<Vec<u8>,u32> {
+
+        if let Ok(key)= self.rt.spawn(Self::real_build_pub_key(4096)).await
+        {
+            match key {
+                Ok((k_data,k)) => {
+                    self.pri_key = k;
+                    Ok(k_data)
+                }
+                Err(e) => {
+                    Err(e)
+                }
+            }
+        }else{
+            Err(EXT_ASY_CRY_ERR_GEN_KEY_UNKNOW)
+        }
+    }
+
+    async fn real_build_pub_key(bit_size:usize) -> Result<(Vec<u8>,Option<RSAPrivateKey>),u32>
+    {
         let mut rng = rand::rngs::OsRng;
-        let priv_key = RSAPrivateKey::new(&mut rng, 4096);
+        let priv_key = RSAPrivateKey::new(&mut rng, bit_size);
         if priv_key.is_err()
         {
             return Err(21); //21 gen private key failed
         }
-        self.pri_key = priv_key.ok();
-        let pk = RSAPublicKey::from(self.pri_key.as_ref().unwrap());
+        let pri_key = priv_key.ok();
+        let pk = RSAPublicKey::from(pri_key.as_ref().unwrap());
         let mut n_bs = pk.n().to_bytes_be();
         let mut l_bs = pk.e().to_bytes_be();
 
@@ -105,7 +157,7 @@ impl AsyCry for DefAsyCry{
             res.push(*it)
         });
         res.append(&mut l_bs);
-        Ok(res)
+        Ok((res,pri_key))
     }
 
     fn pub_key_from(&self, d: &[u8], ext: u32) -> Result<RSAPublicKey, u32> {
@@ -141,7 +193,7 @@ impl AsyCry for DefAsyCry{
 
 
     ///ext
-    fn try_decrypt(&mut self, d: &[u8], ext: u32) -> EncryptRes {
+    async fn try_decrypt(&mut self, d: &[u8], ext: u32) -> EncryptRes {
         if self.ignore(ext) {
             EncryptRes::NotChange
         }else {
@@ -157,7 +209,7 @@ impl AsyCry for DefAsyCry{
                         return EncryptRes::ErrMsg((vec![],e));
                     }
                 }
-                let pk = self.build_pub_key();
+                let pk = self.build_pub_key().await;
                 match pk {
                     Ok(d) => {
                         self.state = 11;

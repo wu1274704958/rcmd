@@ -10,6 +10,7 @@ pub const EXT_DEFAULT:u32 = 0;
 pub const EXT_ASY_CRY_BEGIN:u32 = 10;
 pub const EXT_ASY_CRY_END:u32 = 19;
 pub const EXT_ASY_CRY_ERR_BEGIN:u32 = 20;
+pub const EXT_ASY_CRY_ERR_GEN_KEY_UNKNOW:u32 = 38;
 pub const EXT_ASY_CRY_ERR_END:u32 = 39;
 pub const EXT_UPLOAD_FILE:u32 = 40;
 pub const EXT_UPLOAD_FILE_ELF:u32 = 41;

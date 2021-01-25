@@ -118,7 +118,7 @@ impl <'a,T,A> TcpClient<T,A>
         let mut package = None;
 
 
-        if let Ok(pub_key_data) = asy.build_pub_key(){
+        if let Ok(pub_key_data) = asy.build_pub_key().await{
             self.write_msg(&mut stream, pub_key_data, 10).await;
         }
 
@@ -160,7 +160,7 @@ impl <'a,T,A> TcpClient<T,A>
                     //----------------------------------
                     let mut immediate_send = None;
                     let mut override_msg = None;
-                    match asy.try_decrypt(m.msg, m.ext)
+                    match asy.try_decrypt(m.msg, m.ext).await
                     {
                         EncryptRes::EncryptSucc(d) => {
                             override_msg = Some(d);

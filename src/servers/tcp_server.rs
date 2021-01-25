@@ -323,7 +323,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 //----------------------------------
                 let mut immediate_send = None;
                 let mut override_msg = None;
-                match asy.try_decrypt(m.msg,m.ext)
+                match asy.try_decrypt(m.msg,m.ext).await
                 {
                     EncryptRes::EncryptSucc(d) => {
                         override_msg = Some(d);
