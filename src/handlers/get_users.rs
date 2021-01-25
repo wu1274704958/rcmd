@@ -43,20 +43,16 @@ impl SubHandle for GetUser
         let mut res = vec![];
         let um = self.user_map.lock().await;
         {
-
             let ns:Vec<_> = um.iter().map(|(i,it)|{
-                it.name.clone()
+                it.acc.clone()
             }).collect();
 
             for i in ns{
-                let lid = {
-                    let v = self.login_map.lock().await;
-                    v.get(&i).unwrap().clone()
-                };
+                let v = self.login_map.lock().await;
+                let lid = v.get(&i).unwrap().clone();
                 let u = user::GetUser{name:i,lid};
                 res.push(serde_json::to_value(&u).unwrap());
             }
-
         }
         Some((serde_json::Value::Array(res).to_string().into_bytes(),EXT_GET_USERS))
     }
