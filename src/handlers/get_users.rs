@@ -50,8 +50,10 @@ impl SubHandle for GetUser
             for i in ns{
                 let v = self.login_map.lock().await;
                 let lid = v.get(&i).unwrap().clone();
-                let u = user::GetUser{name:i,lid};
-                res.push(serde_json::to_value(&u).unwrap());
+                if lid != id {
+                    let u = user::GetUser { name: i, lid };
+                    res.push(serde_json::to_value(&u).unwrap());
+                }
             }
         }
         Some((serde_json::Value::Array(res).to_string().into_bytes(),EXT_GET_USERS))
