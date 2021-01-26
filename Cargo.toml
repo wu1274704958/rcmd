@@ -26,6 +26,7 @@ encoding_rs = "0.8.26"
 futures = "*"
 num-traits = "0.2.14"
 async-trait = "0.1.42"
+ahash = "0.6.3"
 
 [dependencies.mysql]
 version = "=20.1.0"
@@ -73,3 +74,11 @@ path = "src/scl.rs"
 [[example]]
 name = "gen_cnf"
 path = "src/test/gen_cnf.rs"
+
+[[example]]
+name = "test_udp"
+path = "src/test_udp.rs"
+
+[[example]]
+name = "udp_c"
+path = "src/udp_client.rs"
