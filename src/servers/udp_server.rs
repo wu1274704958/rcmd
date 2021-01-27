@@ -279,8 +279,11 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                     //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
                 }
             }
+            Err(mpsc::error::TryRecvError::Empty) =>{
+
+            }
             Err(e) => {
-                eprintln!("error = {}", e);
+                eprintln!("recv error = {}", e);
                 dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
                 del_client_ex(&clients,&lid,logic_id.clone()).await;
                 del_linker(&linker_map,link_id).await;
@@ -419,8 +422,58 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     }
 }
 
-macro_rules! server_run {
+macro_rules! udp_server_run {
     ($ser:ident) => {
+        let channel_buf = $ser.channel_buf;
+        let sock = Arc::new(UdpSocket::bind($ser.config.addr).await?);
 
+        let linker_map = Arc::new(Mutex::new(HashMap::<u64,mpsc::Sender<Vec<u8>>>::new()));
+        let mut hash_builder = RandomState::new();
+
+        loop {
+            let mut buf = Vec::with_capacity($ser.buf_len);
+            buf.resize($ser.buf_len,0);
+            match sock.recv_from(&mut buf[..]).await
+            {
+                Ok((len,addr)) => {
+
+                    let id = CallHasher::get_hash(&addr, hash_builder.build_hasher());
+                    let has = {
+                        let map = linker_map.lock().await;
+                        if let Some(link) = map.get(&id){
+                            link.send(buf[0..len].to_vec()).await;
+                            true
+                        }else { false }
+                    };
+                    if !has
+                    {
+                        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(channel_buf);
+                        tx.send(buf[0..len].to_vec());
+                        {
+                            let mut map = linker_map.lock().await;
+                            map.insert(id, tx);
+                        }
+                        {
+                            let linker_map_cp = linker_map.clone();
+                            let clients = $ser.clients.clone();
+                            let lid = $ser.logic_id.clone();
+                            let conf = $ser.config.clone();
+                            let handler_cp = $ser.handler.clone();
+                            let parser_cp = $ser.parser.clone();
+                            let plugs_cp = $ser.plug_mgr.clone();
+                            let dead_plugs_cp:Arc<_> = $ser.dead_plug_mgr.clone();
+                            let sock_cp = sock.clone();
+                            $ser.runtime.spawn(run_in(
+                            clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,rx,
+                            addr,id,linker_map_cp
+                        ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("err = {:?}",e);
+                }
+            }
+        }
     }
 }

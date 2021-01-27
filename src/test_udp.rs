@@ -129,7 +129,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                 if !has
                 {
                     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(channel_buf);
-                    tx.send(buf[0..len].to_vec());
                     {
                         let mut map = linker_map.lock().await;
                         map.insert(id, tx);
@@ -148,6 +147,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                         clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,rx,
                         addr,id,linker_map_cp
                     ));
+                    }
+                    {
+                        let mut map = linker_map.lock().await;
+                        let tx = map.get(&id).unwrap();
+                        tx.send(buf[0..len].to_vec()).await;
                     }
                 }
             }
