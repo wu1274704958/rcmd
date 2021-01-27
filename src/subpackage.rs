@@ -152,7 +152,7 @@ impl UdpSubpackage{
     pub fn check(data:&[u8])->bool
     {
         let o2 = size_of::<u8>() * 2 + size_of::<u32>() + size_of::<usize>();
-        let o3 = o2 + size_of::<u8>() + size_of::<u32>();
+        let o3 = o2 + size_of::<u8>() + size_of::<u32>() + size_of::<u8>();
         data[o2] == Self::mn_2() && data[o3] == Self::mn_3()
     }
 
