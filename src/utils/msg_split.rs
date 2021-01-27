@@ -220,7 +220,7 @@ impl UdpMsgSplit{
         self.unit_size = n;
     }
 
-    pub fn need_split(&self,len:usize,ext:u32) ->bool {
+    pub fn need_split(&self,len:usize) ->bool {
         self.open() && len > self.max_unit_size()
     }
 
@@ -265,11 +265,11 @@ impl UdpMsgSplit{
         res
     }
 
-    fn need_merge<'a>(&self, tag:u8) -> bool {
+    pub fn need_merge<'a>(&self, tag:u8) -> bool {
         tag >= TOKEN_SUBPACKAGE_BEGIN && tag <= TOKEN_SUBPACKAGE_END
     }
 
-    fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8) -> Option<Vec<u8>> {
+    pub fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8) -> Option<Vec<u8>> {
         match tag {
             TOKEN_SUBPACKAGE_BEGIN => {
                 let (id,idx) = Self::parse_ext(ext);

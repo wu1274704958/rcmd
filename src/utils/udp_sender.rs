@@ -14,8 +14,8 @@ use crate::utils::msg_split::UdpMsgSplit;
 
 #[async_trait]
 pub trait UdpSender{
-    async fn send(&self,v:Vec<u8>);
-    async fn check_recv(&self,data:&[u8],len:usize)-> Option<Vec<u8>>;
+    async fn send(&mut self,v:Vec<u8>);
+    async fn check_recv(&mut self,data:&[u8],len:usize)-> Option<Vec<u8>>;
     fn need_check(&self)->bool;
     fn create(sock:Arc<UdpSocket>,addr:SocketAddr) ->Self;
     fn set_max_msg_len(&mut self,len:u16);
@@ -35,13 +35,12 @@ pub struct DefUdpSender{
     cache_size:u16,
     mid: usize,
     queue: VecDeque<usize>,
-    msg_map: HashMap<usize,Vec<u8>>,
+    msg_map: HashMap<usize,(Vec<u8>,SystemTime)>,
     recv_cache: HashMap<usize,(Vec<u8>,u32,u8)>,
     expect_id: usize,
     addr:SocketAddr,
     subpacker: UdpSubpackage,
     timeout: Duration,
-    timeout_map: HashMap<usize,SystemTime>,
     msg_split: UdpMsgSplit
 }
 
@@ -101,23 +100,24 @@ impl DefUdpSender
             self.drop_one_cache();
         }
         self.queue.push_back(id);
-        self.msg_map.insert(id,v);
+        self.msg_map.insert(id,(v,SystemTime::now()));
     }
 
-    fn get_cache(&self,mid:usize)->Option<Vec<u8>>
+    async fn send_again(&mut self,mid:usize)
     {
-        if let Some(v) = self.msg_map.get(&mid)
+        if let Some(v) = self.msg_map.get_mut(&mid)
         {
-            Some(v.clone())
+            self.send(v.0.as_slice()).await;
+            v.1 = SystemTime::now();
         }else{
-            None
+            eprintln!("send_again not found mid = {}",mid);
         }
     }
 
-    fn unwarp(&mut self,data:&[u8])-> Option<Vec<u8>>
+    async fn unwarp(&mut self,data:&[u8])-> Option<Vec<u8>>
     {
         let mut d = None;
-        if self.need_check_in()
+        if data.is_empty() && self.need_check_in()
         {
             match self.recv_cache.remove(&self.expect_id){
                 None => {}
@@ -133,7 +133,7 @@ impl DefUdpSender
                 None => { None }
                 Some(v) => {
                     let (msg, id, ext,tag) = self.unwarp_ex(v.as_slice());
-                    self.send_recv(id);
+                    self.send_recv(id).await;
                     if id > self.expect_id
                     {
                         self.recv_cache.insert(id, (msg.to_vec(), ext,tag));
@@ -145,7 +145,14 @@ impl DefUdpSender
             };
         }
         if let Some((msg,ext,tag)) = d{
-
+            if self.msg_split.need_merge(tag){
+                if let Some(v) = self.msg_split.merge(msg.as_slice(),ext,tag)
+                {
+                    return Some(v);
+                }
+            }else{
+                return Some(msg);
+            }
         }
         None
     }
@@ -153,7 +160,7 @@ impl DefUdpSender
     async fn send_recv(&self,id:usize)
     {
         let v = Self::warp_ex(&[199],Self::mn_send_recv(),TOKEN_NORMAL,id);
-        self.send(v.as_slice());
+        self.send(v.as_slice()).await;
     }
 
     async fn send(&self,d:&[u8])
@@ -213,17 +220,20 @@ impl DefUdpSender
 #[async_trait]
 impl UdpSender for DefUdpSender
 {
-    async fn send(&self, v: Vec<u8>) {
+    async fn send(&mut self, v: Vec<u8>) {
+        if self.msg_split.need_split(v.len())
+        {
 
+        }
     }
 
-    async fn check_recv(&self, data: &[u8], len: usize) -> Option<Vec<u8>> {
-        unimplemented!()
+    async fn check_recv(&mut self, data: &[u8], len: usize) -> Option<Vec<u8>> {
+        self.unwarp(data)
     }
 
 
     fn need_check(&self) -> bool {
-        unimplemented!()
+        self.need_check()
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
@@ -243,7 +253,6 @@ impl UdpSender for DefUdpSender
             recv_cache: HashMap::new(),
             subpacker: UdpSubpackage::new(),
             timeout: Duration::from_millis(10),
-            timeout_map: HashMap::new(),
             msg_split: UdpMsgSplit::with_max_unit_size(max_len,min_len)
         }
     }
