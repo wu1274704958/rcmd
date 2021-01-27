@@ -105,13 +105,16 @@ impl DefUdpSender
 
     async fn send_again(&mut self,mid:usize)
     {
-        if let Some(v) = self.msg_map.get_mut(&mid)
-        {
-            self.send(v.0.as_slice()).await;
-            v.1 = SystemTime::now();
-        }else{
-            eprintln!("send_again not found mid = {}",mid);
-        }
+        let v = {
+            if let Some(v) = self.msg_map.get_mut(&mid)
+            {
+                Self::send_ex(self.sock.clone(),self.addr,v.0.as_slice()).await;
+                v.1 = SystemTime::now();
+            } else {
+                eprintln!("send_again not found mid = {}", mid);
+            }
+        };
+
     }
 
     async fn unwarp(&mut self,data:&[u8])-> Option<Vec<u8>>
@@ -177,6 +180,20 @@ impl DefUdpSender
         if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
     }
 
+    async fn send_ex(sock:Arc<UdpSocket>,addr:SocketAddr,d:&[u8])
+    {
+        let len = match sock.send_to(d,addr).await{
+            Ok(l) => {
+                l
+            }
+            Err(e) => {
+                eprintln!("udp send msg failed {:?}",e);
+                0
+            }
+        };
+        if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
+    }
+
     fn unwarp_ex<'a>(&self,data: &'a [u8])->(&'a[u8],usize,u32,u8)
     {
         let id_p = size_of::<u8>() + size_of::<u32>();
@@ -228,7 +245,7 @@ impl UdpSender for DefUdpSender
     }
 
     async fn check_recv(&mut self, data: &[u8], len: usize) -> Option<Vec<u8>> {
-        self.unwarp(data)
+        self.unwarp(data).await
     }
 
 
