@@ -46,7 +46,7 @@ use crate::db::db_mgr::DBMgr;
 use crate::utils::msg_split::{DefMsgSplit, MsgSplit};
 use getopts::HasArg::No;
 use crate::utils::temp_permission::TempPermission;
-use crate::servers::udp_server::{UdpServer,run_in};
+use crate::servers::udp_server::{UdpServer,run_in,platform_handle};
 
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
@@ -55,6 +55,8 @@ use ab_client::ABClient;
 use std::hash::BuildHasher;
 use ahash::RandomState;
 use ahash::CallHasher;
+use async_std::io::{Error, ErrorKind};
+use std::env::consts::OS;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>>{
@@ -97,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
             temp_permission.clone())));
     }
 
-    let ser = UdpServer::new(
+    let server = UdpServer::new(
         handler.into(),
         parser.into(),
         plugs.into(),
@@ -105,61 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         config
     );
 
-    let channel_buf = ser.channel_buf;
-    let sock = Arc::new(UdpSocket::bind(ser.config.addr).await?);
-
-    let linker_map = Arc::new(Mutex::new(HashMap::<u64,mpsc::Sender<Vec<u8>>>::new()));
-    let mut hash_builder = RandomState::new();
-
-    loop {
-        let mut buf = Vec::with_capacity(ser.buf_len);
-        buf.resize(ser.buf_len,0);
-        match sock.recv_from(&mut buf[..]).await
-        {
-            Ok((len,addr)) => {
-
-                let id = CallHasher::get_hash(&addr, hash_builder.build_hasher());
-                let has = {
-                    let map = linker_map.lock().await;
-                    if let Some(link) = map.get(&id){
-                        link.send(buf[0..len].to_vec()).await;
-                        true
-                    }else { false }
-                };
-                if !has
-                {
-                    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(channel_buf);
-                    {
-                        let mut map = linker_map.lock().await;
-                        map.insert(id, tx);
-                    }
-                    {
-                        let linker_map_cp = linker_map.clone();
-                        let clients = ser.clients.clone();
-                        let lid = ser.logic_id.clone();
-                        let conf = ser.config.clone();
-                        let handler_cp = ser.handler.clone();
-                        let parser_cp = ser.parser.clone();
-                        let plugs_cp = ser.plug_mgr.clone();
-                        let dead_plugs_cp:Arc<_> = ser.dead_plug_mgr.clone();
-                        let sock_cp = sock.clone();
-                        ser.runtime.spawn(run_in(
-                        clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,rx,
-                        addr,id,linker_map_cp
-                    ));
-                    }
-                    {
-                        let mut map = linker_map.lock().await;
-                        let tx = map.get(&id).unwrap();
-                        tx.send(buf[0..len].to_vec()).await;
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("err = {:?}",e);
-            }
-        }
-    }
+    udp_server_run!(server);
 
     Ok(())
 }

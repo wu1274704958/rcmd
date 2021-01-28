@@ -14,8 +14,8 @@ use crate::utils::msg_split::UdpMsgSplit;
 
 #[async_trait]
 pub trait UdpSender{
-    async fn send(&mut self,v:Vec<u8>);
-    async fn check_recv(&mut self,data:&[u8],len:usize)-> Option<Vec<u8>>;
+    async fn send_msg(&mut self,v:Vec<u8>);
+    async fn check_recv(&mut self,data:&[u8])-> Option<Vec<u8>>;
     fn need_check(&self)->bool;
     fn create(sock:Arc<UdpSocket>,addr:SocketAddr) ->Self;
     fn set_max_msg_len(&mut self,len:u16);
@@ -35,7 +35,7 @@ pub struct DefUdpSender{
     cache_size:u16,
     mid: usize,
     queue: VecDeque<usize>,
-    msg_map: HashMap<usize,(Vec<u8>,SystemTime)>,
+    msg_map: HashMap<usize,(Vec<u8>,SystemTime,u16)>,
     recv_cache: HashMap<usize,(Vec<u8>,u32,u8)>,
     expect_id: usize,
     addr:SocketAddr,
@@ -90,7 +90,7 @@ impl DefUdpSender
     {
         if let Some(id) = self.queue.pop_front()
         {
-            self.msg_map.remove(&id).unwrap();
+            self.msg_map.remove(&id);
         }
     }
 
@@ -100,21 +100,30 @@ impl DefUdpSender
             self.drop_one_cache();
         }
         self.queue.push_back(id);
-        self.msg_map.insert(id,(v,SystemTime::now()));
+        self.msg_map.insert(id,(v,SystemTime::now(),1));
+    }
+
+    fn remove_cache(&mut self,mid:usize)-> Option<(Vec<u8>,SystemTime,u16)>
+    {
+        self.msg_map.remove(&mid)
     }
 
     async fn send_again(&mut self,mid:usize)
     {
-        let v = {
-            if let Some(v) = self.msg_map.get_mut(&mid)
-            {
-                Self::send_ex(self.sock.clone(),self.addr,v.0.as_slice()).await;
-                v.1 = SystemTime::now();
-            } else {
-                eprintln!("send_again not found mid = {}", mid);
-            }
+        let rm = if let Some(v) = self.msg_map.get_mut(&mid)
+        {
+            Self::send_ex(self.sock.clone(),self.addr,v.0.as_slice()).await;
+            v.1 = SystemTime::now();
+            v.2 += 1;
+            v.2 == u16::max_value()
+        } else {
+            eprintln!("send_again not found mid = {}", mid);
+            return;
         };
-
+        if rm {
+            eprintln!("send_again times max will remove id = {}", mid);
+            self.remove_cache(mid);
+        }
     }
 
     async fn unwarp(&mut self,data:&[u8])-> Option<Vec<u8>>
@@ -208,7 +217,7 @@ impl DefUdpSender
         ext_buf.copy_from_slice(&data[ext_p..(ext_p + size_of::<u32>())]);
 
 
-        (&data[msg_p..(data.len()-1)],usize::from_be_bytes(id_buf),u32::from_be_bytes(ext_buf),tag)
+        (&data[msg_p..data.len()],usize::from_be_bytes(id_buf),u32::from_be_bytes(ext_buf),tag)
     }
 
     fn need_check_in(&self)-> bool
@@ -232,19 +241,32 @@ impl DefUdpSender
     {
         size_of::<u8>() * 4 + size_of::<usize>() + size_of::<u32>() * 2
     }
+
+    fn adjust_unit_size(&mut self,times_frequency:HashMap<u16,u32>)
+    {
+
+    }
 }
 
 #[async_trait]
 impl UdpSender for DefUdpSender
 {
-    async fn send(&mut self, v: Vec<u8>) {
+    async fn send_msg(&mut self, v: Vec<u8>) {
         if self.msg_split.need_split(v.len())
         {
-
+            let vs = self.msg_split.split(&v);
+            for (d,ext,tag) in vs
+            {
+                let v = self.warp(d,ext,tag);
+                self.send(v.as_slice()).await;
+            }
+        }else{
+            let a = self.warp(v.as_slice(),0,TOKEN_NORMAL);
+            self.send(a.as_slice()).await;
         }
     }
 
-    async fn check_recv(&mut self, data: &[u8], len: usize) -> Option<Vec<u8>> {
+    async fn check_recv(&mut self, data: &[u8]) -> Option<Vec<u8>> {
         self.unwarp(data).await
     }
 
@@ -305,7 +327,24 @@ impl UdpSender for DefUdpSender
     }
 
     async fn check_send(&mut self) {
-        unimplemented!()
+        let now = SystemTime::now();
+        let mut times_frequency = HashMap::<u16,u32>::new();
+        for (id,(v,t,times)) in self.msg_map.iter_mut(){
+            if let Ok(dur) = now.duration_since(*t)
+            {
+                if dur > self.timeout
+                {
+                    *times += 1;
+                    *t = SystemTime::now();
+                    Self::send_ex(self.sock.clone(),self.addr,v.as_slice()).await;
+                }
+            }
+            let mut freq = *(times_frequency.get(times).unwrap_or(&0));
+            freq += 1;
+            times_frequency.insert(*times,freq);
+        }
+
+        self.adjust_unit_size(times_frequency);
     }
 }
 

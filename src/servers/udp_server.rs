@@ -11,6 +11,7 @@ use crate::subpackage::{DefSubpackage,Subpackage};
 use crate::asy_cry::{DefAsyCry,AsyCry,EncryptRes};
 use crate::MsgSplit;
 use crate::DefMsgSplit;
+use crate::utils::udp_sender::{DefUdpSender,UdpSender};
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use tokio::io;
@@ -249,6 +250,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     let mut asy = DefAsyCry::new();
     let mut spliter = DefMsgSplit::new();
     let mut package = None;
+    let mut sender = DefUdpSender::create(socket.clone(),addr);
     // In a loop, read data from the socket and write the data back.
     loop {
 
@@ -274,7 +276,9 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 {
                     set_client_st_ex(&clients,logic_id.clone(), State::Busy).await;
                     let b = SystemTime::now();
-                    package = subpackager.subpackage(&buf[..],buf.len());
+                    if let Some(v) = sender.check_recv(&buf[..]).await {
+                        package = subpackager.subpackage(&v[..], v.len());
+                    }
                     let e = SystemTime::now();
                     //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
                 }
@@ -290,6 +294,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 return;
             }
         };
+
+        if package.is_none() && sender.need_check(){
+            if let Some(v) = sender.check_recv(&[]).await{
+                package = subpackager.subpackage(&v[..],v.len());
+            }
+        }
 
         if package.is_none() && subpackager.need_check(){
             let b = SystemTime::now();
@@ -326,8 +336,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 };
                 if let Some(v) = immediate_send
                 {
-                    let mut real_pkg = parser_cp.package_nor(v, m.ext);
-                    socket.send_to(real_pkg.as_slice(),addr).await;
+                    sender.send_msg(parser_cp.package_nor(v, m.ext)).await;
                     continue;
                 }
                 if let Some(ref v) = override_msg
@@ -347,7 +356,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                     }
                 }
                 let respose = handler_cp.handle_ex(m, &clients, logic_id.clone()).await;
-                if m.ext != 9 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
+                 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
                 if let Some((mut respose,mut ext)) = respose {
                     //---------------------------------
                     if spliter.need_split(respose.len(),ext)
@@ -361,8 +370,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                                 }
                                 _ => { data.to_vec()}
                             };
-                            let mut real_pkg = parser_cp.package_tf(send_data, ext,tag);
-                            socket.send_to(real_pkg.as_slice(),addr).await;
+                            sender.send_msg(parser_cp.package_tf(send_data, ext,tag)).await;
                         }
                     }else {
                         match asy.encrypt(&respose, ext) {
@@ -372,11 +380,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                             }
                             _ => {}
                         };
-                        let mut real_pkg = parser_cp.package_nor(respose, ext);
-                        socket.send_to(real_pkg.as_slice(),addr).await;
+                        sender.send_msg(parser_cp.package_nor(respose, ext)).await;
                     }
                 }
             }
+        }else{
+            sender.check_send().await;
         }
 
         //println!("{} handle the request....", logic_id);
@@ -401,8 +410,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                         }
                         _ => { data.to_vec()}
                     };
-                    let mut real_pkg = parser_cp.package_tf(send_data, ext, tag);
-                    socket.send_to(real_pkg.as_slice(),addr).await;
+                    sender.send_msg(parser_cp.package_tf(send_data, ext, tag)).await;
                 }
             }else {
                 match asy.encrypt(&data, e) {
@@ -411,8 +419,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                     }
                     _ => {}
                 };
-                let real_pkg = parser_cp.package_nor(data, e);
-                socket.send_to(real_pkg.as_slice(),addr).await;
+                sender.send_msg(parser_cp.package_nor(data, e)).await;
             }
         }else {
             async_std::task::sleep(conf.min_sleep_dur).await;
@@ -422,17 +429,54 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     }
 }
 
+#[cfg(target_os = "windows")]
+use winapi::um::winsock2::{SOCKET,WSAIoctl,LPWSAOVERLAPPED,WSAOVERLAPPED};
+#[cfg(target_os = "windows")]
+use winapi::ctypes::{c_void,c_ulong};
+#[cfg(target_os = "windows")]
+use std::ptr::null;
+#[cfg(target_os = "windows")]
+use std::os::windows::prelude::*;
+#[cfg(target_os = "windows")]
+pub fn platform_handle(s:&UdpSocket)
+{
+    let s = s.as_raw_socket();
+
+    let mut bEnalbeConnRestError = 0u32;
+    let ptr = &mut bEnalbeConnRestError as *mut u32 as *mut c_void;
+    let mut dwBytesReturned:c_ulong = 0;
+    let p2 = &mut dwBytesReturned as *mut c_ulong;
+
+    unsafe { WSAIoctl(
+        s as usize,
+        2550136844,
+        ptr,
+        4,
+        null::<c_void>() as *mut c_void,
+        0,
+        p2,
+        null::<WSAOVERLAPPED>() as *mut WSAOVERLAPPED,
+        None); }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn platform_handle(s:&UdpSocket)
+{
+
+}
+
 macro_rules! udp_server_run {
-    ($ser:ident) => {
-        let channel_buf = $ser.channel_buf;
-        let sock = Arc::new(UdpSocket::bind($ser.config.addr).await?);
+    ($server:ident) => {
+        let channel_buf = $server.channel_buf;
+        let sock = Arc::new(UdpSocket::bind($server.config.addr).await?);
+        platform_handle(sock.as_ref());
 
         let linker_map = Arc::new(Mutex::new(HashMap::<u64,mpsc::Sender<Vec<u8>>>::new()));
         let mut hash_builder = RandomState::new();
 
         loop {
-            let mut buf = Vec::with_capacity($ser.buf_len);
-            buf.resize($ser.buf_len,0);
+            let mut buf = Vec::with_capacity($server.buf_len);
+            buf.resize($server.buf_len,0);
             match sock.recv_from(&mut buf[..]).await
             {
                 Ok((len,addr)) => {
@@ -448,25 +492,29 @@ macro_rules! udp_server_run {
                     if !has
                     {
                         let (tx, mut rx) = mpsc::channel::<Vec<u8>>(channel_buf);
-                        tx.send(buf[0..len].to_vec());
                         {
                             let mut map = linker_map.lock().await;
                             map.insert(id, tx);
                         }
                         {
                             let linker_map_cp = linker_map.clone();
-                            let clients = $ser.clients.clone();
-                            let lid = $ser.logic_id.clone();
-                            let conf = $ser.config.clone();
-                            let handler_cp = $ser.handler.clone();
-                            let parser_cp = $ser.parser.clone();
-                            let plugs_cp = $ser.plug_mgr.clone();
-                            let dead_plugs_cp:Arc<_> = $ser.dead_plug_mgr.clone();
+                            let clients = $server.clients.clone();
+                            let lid = $server.logic_id.clone();
+                            let conf = $server.config.clone();
+                            let handler_cp = $server.handler.clone();
+                            let parser_cp = $server.parser.clone();
+                            let plugs_cp = $server.plug_mgr.clone();
+                            let dead_plugs_cp:Arc<_> = $server.dead_plug_mgr.clone();
                             let sock_cp = sock.clone();
-                            $ser.runtime.spawn(run_in(
+                            $server.runtime.spawn(run_in(
                             clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,rx,
                             addr,id,linker_map_cp
                         ));
+                        }
+                        {
+                            let mut map = linker_map.lock().await;
+                            let tx = map.get(&id).unwrap();
+                            tx.send(buf[0..len].to_vec()).await;
                         }
                     }
                 }

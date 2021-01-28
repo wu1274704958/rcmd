@@ -17,6 +17,8 @@ use std::net::SocketAddr;
 use std::env::args;
 use std::ops::AddAssign;
 use crate::agreement::{DefParser,Agreement};
+use crate::utils::udp_sender::{DefUdpSender,UdpSender};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>>{
@@ -28,12 +30,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     addr.add_assign(port.as_str());
     dbg!(&addr);
     let sock = UdpSocket::bind(addr.parse::<SocketAddr>().unwrap()).await?;
-    sock.connect("127.0.0.1:8080".parse::<SocketAddr>().unwrap()).await?;
+    let s_addr = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
+
+    let mut sender = DefUdpSender::create(Arc::new(sock),s_addr);
 
     let parser = DefParser::new();
-    let data = parser.package_nor(vec![9],9);
+    sender.send_msg( dbg!(parser.package_nor(vec![9],9))).await;
 
-    sock.send(data.as_slice()).await;
     loop{}
     Ok(())
 }
