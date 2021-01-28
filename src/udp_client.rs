@@ -109,6 +109,9 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
         let cmds:Vec<&str> = cmd.split(" ").collect();
 
         match cmds[0] {
+            "-" => {
+                return Ok(());
+            }
             "0" => {
                 if cmds.len() < 2 {continue;}
                 send(&msg_queue,cmds[1].into(),0);
