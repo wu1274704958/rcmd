@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use crate::ab_client::{AbClient, State};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UdpSocket};
 use crate::handler::{Handle, SubHandle, DefHandler};
 use crate::agreement::{Agreement, Message, DataTransform};
 use crate::config_build::Config;
@@ -317,5 +317,39 @@ pub fn decompress(s:&Vec<u8>)->String
     String::from_utf8_lossy(res.as_ref()).to_string()
 }
 
+#[cfg(target_os = "windows")]
+use winapi::um::winsock2::{SOCKET,WSAIoctl,LPWSAOVERLAPPED,WSAOVERLAPPED};
+#[cfg(target_os = "windows")]
+use winapi::ctypes::{c_void,c_ulong};
+#[cfg(target_os = "windows")]
+use std::ptr::null;
+#[cfg(target_os = "windows")]
+use std::os::windows::prelude::*;
+#[cfg(target_os = "windows")]
+pub fn platform_handle(s:&UdpSocket)
+{
+    let s = s.as_raw_socket();
 
+    let mut bEnalbeConnRestError = 0u32;
+    let ptr = &mut bEnalbeConnRestError as *mut u32 as *mut c_void;
+    let mut dwBytesReturned:c_ulong = 0;
+    let p2 = &mut dwBytesReturned as *mut c_ulong;
+
+    unsafe { WSAIoctl(
+        s as usize,
+        2550136844,
+        ptr,
+        4,
+        null::<c_void>() as *mut c_void,
+        0,
+        p2,
+        null::<WSAOVERLAPPED>() as *mut WSAOVERLAPPED,
+        None); }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn platform_handle(s:&UdpSocket)
+{
+
+}
 

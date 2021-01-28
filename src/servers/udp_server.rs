@@ -8,7 +8,7 @@ use tokio::net::{UdpSocket};
 use std::ops::{Add, AddAssign};
 use crate::ab_client::{ABClient,State};
 use crate::subpackage::{DefSubpackage,Subpackage};
-use crate::asy_cry::{DefAsyCry,AsyCry,EncryptRes};
+use crate::asy_cry::{DefAsyCry,AsyCry,EncryptRes,NoAsyCry};
 use crate::MsgSplit;
 use crate::DefMsgSplit;
 use crate::utils::udp_sender::{DefUdpSender,UdpSender};
@@ -247,7 +247,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     let logic_id = new_client_ex(&clients,&lid,local_addr,addr).await;
 
     let mut subpackager = DefSubpackage::new();
-    let mut asy = DefAsyCry::new();
+    let mut asy = NoAsyCry::create();
     let mut spliter = DefMsgSplit::new();
     let mut package = None;
     let mut sender = DefUdpSender::create(socket.clone(),addr);
@@ -427,42 +427,6 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         set_client_st_ex(&clients,logic_id.clone(),State::Ready).await;
         plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
     }
-}
-
-#[cfg(target_os = "windows")]
-use winapi::um::winsock2::{SOCKET,WSAIoctl,LPWSAOVERLAPPED,WSAOVERLAPPED};
-#[cfg(target_os = "windows")]
-use winapi::ctypes::{c_void,c_ulong};
-#[cfg(target_os = "windows")]
-use std::ptr::null;
-#[cfg(target_os = "windows")]
-use std::os::windows::prelude::*;
-#[cfg(target_os = "windows")]
-pub fn platform_handle(s:&UdpSocket)
-{
-    let s = s.as_raw_socket();
-
-    let mut bEnalbeConnRestError = 0u32;
-    let ptr = &mut bEnalbeConnRestError as *mut u32 as *mut c_void;
-    let mut dwBytesReturned:c_ulong = 0;
-    let p2 = &mut dwBytesReturned as *mut c_ulong;
-
-    unsafe { WSAIoctl(
-        s as usize,
-        2550136844,
-        ptr,
-        4,
-        null::<c_void>() as *mut c_void,
-        0,
-        p2,
-        null::<WSAOVERLAPPED>() as *mut WSAOVERLAPPED,
-        None); }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn platform_handle(s:&UdpSocket)
-{
-
 }
 
 macro_rules! udp_server_run {

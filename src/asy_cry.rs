@@ -30,7 +30,7 @@ pub trait AsyCry{
         Err(20) // 20 not impl
     }
 
-    async fn real_build_pub_key(bit_size:usize) -> Result<(Vec<u8>,Option<RSAPrivateKey>),u32>;
+    async fn real_build_pub_key(bit_size:usize) -> Result<(Vec<u8>,Option<RSAPrivateKey>),u32> { Err(20) }
 
 
     fn pub_key_from(&self,d:&[u8],ext:u32) ->Result<RSAPublicKey,u32>
@@ -50,6 +50,8 @@ pub trait AsyCry{
     {
         true
     }
+
+    fn create()->Self;
 }
 
 pub struct DefAsyCry{
@@ -305,11 +307,26 @@ impl AsyCry for DefAsyCry{
     fn can_encrypt(&self) -> bool {
         self.oth_ready && self.pub_key.is_some() && self.pri_key.is_some()
     }
+
+    fn create() -> Self {
+        Self::new()
+    }
 }
 
 impl Drop for DefAsyCry{
     fn drop(&mut self) {
         let rt = self.rt.replace(None);
         rt.unwrap().shutdown_background();
+    }
+}
+
+pub struct NoAsyCry{
+
+}
+
+#[async_trait]
+impl AsyCry for NoAsyCry{
+    fn create() -> Self {
+        NoAsyCry{}
     }
 }

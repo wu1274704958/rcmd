@@ -60,6 +60,7 @@ impl DefUdpSender
     fn warp(&mut self,v:&[u8],ext:u32,tag:u8)->Vec<u8>
     {
         let mid = self.get_mid();
+        println!("send id {} {:?}",mid,v);
         let res = Self::warp_ex(v,ext,tag,mid);
         self.push_cache(mid,res.clone());
         res
@@ -145,12 +146,18 @@ impl DefUdpSender
                 None => { None }
                 Some(v) => {
                     let (msg, id, ext,tag) = self.unwarp_ex(v.as_slice());
+                    if self.check_send_recv(msg,ext,tag,id)
+                    {
+                        return None;
+                    }
+                    //println!("recv msg {} {:?}",id,msg);
                     self.send_recv(id).await;
                     if id > self.expect_id
                     {
                         self.recv_cache.insert(id, (msg.to_vec(), ext,tag));
                         None
                     } else if id == self.expect_id {
+                        self.expect_id += 1;
                         Some((msg.to_vec(),ext,tag))
                     }else { None }
                 }
@@ -167,6 +174,17 @@ impl DefUdpSender
             }
         }
         None
+    }
+
+    fn check_send_recv(&mut self,msg:&[u8],ext:u32,tag:u8,id:usize) -> bool
+    {
+        if msg.len() == 1 && msg[0] == 199 && ext == Self::mn_send_recv() && tag == TOKEN_NORMAL {
+            println!("op recv msg {}",id);
+            self.remove_cache(id);
+            true
+        }else{
+            false
+        }
     }
 
     async fn send_recv(&self,id:usize)
