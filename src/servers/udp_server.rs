@@ -336,7 +336,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 };
                 if let Some(v) = immediate_send
                 {
-                    sender.send_msg(parser_cp.package_nor(v, m.ext)).await;
+                    if let Err(_) = sender.send_msg(parser_cp.package_nor(v, m.ext)).await{
+                        dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                        del_client_ex(&clients,&lid,logic_id.clone()).await;
+                        del_linker(&linker_map,link_id).await;
+                        return;
+                    }
                     continue;
                 }
                 if let Some(ref v) = override_msg
@@ -370,7 +375,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                                 }
                                 _ => { data.to_vec()}
                             };
-                            sender.send_msg(parser_cp.package_tf(send_data, ext,tag)).await;
+                            if let Err(_) = sender.send_msg(parser_cp.package_tf(send_data, ext,tag)).await{
+                                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                                del_client_ex(&clients,&lid,logic_id.clone()).await;
+                                del_linker(&linker_map,link_id).await;
+                                return;
+                            }
                         }
                     }else {
                         match asy.encrypt(&respose, ext) {
@@ -380,12 +390,22 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                             }
                             _ => {}
                         };
-                        sender.send_msg(parser_cp.package_nor(respose, ext)).await;
+                        if let Err(_) = sender.send_msg(parser_cp.package_nor(respose, ext)).await{
+                            dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                            del_client_ex(&clients,&lid,logic_id.clone()).await;
+                            del_linker(&linker_map,link_id).await;
+                            return;
+                        }
                     }
                 }
             }
         }else{
-            sender.check_send().await;
+            if let Err(_) = sender.check_send().await{
+                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                del_client_ex(&clients,&lid,logic_id.clone()).await;
+                del_linker(&linker_map,link_id).await;
+                return;
+            }
         }
 
         //println!("{} handle the request....", logic_id);
@@ -410,7 +430,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                         }
                         _ => { data.to_vec()}
                     };
-                    sender.send_msg(parser_cp.package_tf(send_data, ext, tag)).await;
+                    if let Err(_) = sender.send_msg(parser_cp.package_tf(send_data, ext, tag)).await{
+                        dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                        del_client_ex(&clients,&lid,logic_id.clone()).await;
+                        del_linker(&linker_map,link_id).await;
+                        return;
+                    };
                 }
             }else {
                 match asy.encrypt(&data, e) {
@@ -419,7 +444,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                     }
                     _ => {}
                 };
-                sender.send_msg(parser_cp.package_nor(data, e)).await;
+                if let Err(_) = sender.send_msg(parser_cp.package_nor(data, e)).await{
+                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                    del_client_ex(&clients,&lid,logic_id.clone()).await;
+                    del_linker(&linker_map,link_id).await;
+                    return;
+                };
             }
         }else {
             async_std::task::sleep(conf.min_sleep_dur).await;

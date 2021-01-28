@@ -4,7 +4,7 @@ use std::vec::Vec;
 use tokio::{io::AsyncWriteExt, net::{UdpSocket}, time::sleep};
 
 use crate::{agreement::{Agreement, Message}, asy_cry::{DefAsyCry,AsyCry,EncryptRes,NoAsyCry}, client_handlers::def_handler::{Handle}, subpackage::{DefSubpackage,Subpackage}, utils::msg_split::{DefMsgSplit,MsgSplit}};
-use crate::utils::udp_sender::{DefUdpSender,UdpSender};
+use crate::utils::udp_sender::{DefUdpSender,UdpSender,USErr};
 use crate::tools::platform_handle;
 use async_std::io::Error;
 use async_std::future::Future;
@@ -113,12 +113,12 @@ impl <'a,T,A> UdpClient<T,A>
     }
 
 
-    async fn write_msg(&self, sender:&mut DefUdpSender, data: Vec<u8>, ext:u32){
-        sender.send_msg(self.parser.package_nor(data,ext)).await;
+    async fn write_msg(&self, sender:&mut DefUdpSender, data: Vec<u8>, ext:u32)->Result<(),USErr>{
+        sender.send_msg(self.parser.package_nor(data,ext)).await
     }
 
     #[allow(unused_must_use)]
-    pub async fn run(&self,ip:Ipv4Addr,port:u16) -> io::Result<()>
+    pub async fn run(&self,ip:Ipv4Addr,port:u16) -> Result<(),USErr>
     {
         let sock = Arc::new( UdpSocket::bind(self.bind_addr).await? );
         platform_handle(sock.as_ref());
@@ -135,7 +135,7 @@ impl <'a,T,A> UdpClient<T,A>
 
         let mut sender = DefUdpSender::create(sock.clone(),addr);
         if let Ok(pub_key_data) = asy.build_pub_key().await{
-            self.write_msg(&mut sender, pub_key_data, 10).await;
+            self.write_msg(&mut sender, pub_key_data, 10).await?;
         }
 
         let mut subpackager = DefSubpackage::new();
@@ -198,7 +198,7 @@ impl <'a,T,A> UdpClient<T,A>
                     };
                     if let Some(v) = immediate_send
                     {
-                        self.write_msg(&mut sender, v, m.ext).await;
+                        self.write_msg(&mut sender, v, m.ext).await?;
                         continue;
                     }
                     if let Some(ref v) = override_msg
@@ -225,7 +225,7 @@ impl <'a,T,A> UdpClient<T,A>
                 }
                 package = None;
             }else{
-                sender.check_send().await;
+                sender.check_send().await?;
             }
 
             if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
@@ -233,7 +233,7 @@ impl <'a,T,A> UdpClient<T,A>
                 if n > self.heartbeat_dur
                 {
                     heartbeat_t = SystemTime::now();
-                    self.write_msg(&mut sender, vec![9], 9).await;
+                    self.write_msg(&mut sender, vec![9], 9).await?;
                 }
             }
 
@@ -252,7 +252,7 @@ impl <'a,T,A> UdpClient<T,A>
                                 _ => { data.to_vec()}
                             };
                             let real_pkg = self.parser.package_tf(send_data, ext,tag);
-                            sender.send_msg(real_pkg).await;
+                            sender.send_msg(real_pkg).await?;
                         }
                     }else {
                         match asy.encrypt(&v.0, v.1) {
@@ -262,7 +262,7 @@ impl <'a,T,A> UdpClient<T,A>
                             EncryptRes::NotChange => {}
                             _ => {}
                         };
-                        self.write_msg(&mut sender, v.0, v.1).await;
+                        self.write_msg(&mut sender, v.0, v.1).await?;
                     }
                 }else{
                     sleep(Duration::from_millis(1)).await;

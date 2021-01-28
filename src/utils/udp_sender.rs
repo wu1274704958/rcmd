@@ -14,7 +14,7 @@ use crate::utils::msg_split::UdpMsgSplit;
 
 #[async_trait]
 pub trait UdpSender{
-    async fn send_msg(&mut self,v:Vec<u8>);
+    async fn send_msg(&mut self,v:Vec<u8>)->Result<(),USErr>;
     async fn check_recv(&mut self,data:&[u8])-> Option<Vec<u8>>;
     fn need_check(&self)->bool;
     fn create(sock:Arc<UdpSocket>,addr:SocketAddr) ->Self;
@@ -25,7 +25,9 @@ pub trait UdpSender{
     fn cache_size(&self)->u16;
     fn set_cache_size(&mut self,s:u16);
     fn set_time_out(&mut self,dur:Duration);
-    async fn check_send(&mut self);
+    async fn check_send(&mut self)->Result<(),USErr>;
+    fn set_retry_times(&mut self,v:u16);
+    fn retry_times(&self)->u16;
 }
 
 pub struct DefUdpSender{
@@ -41,7 +43,21 @@ pub struct DefUdpSender{
     addr:SocketAddr,
     subpacker: UdpSubpackage,
     timeout: Duration,
-    msg_split: UdpMsgSplit
+    msg_split: UdpMsgSplit,
+    max_retry_times: u16
+}
+
+pub enum USErr{
+    EmptyMsg,
+    MsgCacheOverflow,
+    RetryTimesLimit
+}
+
+impl From<std::io::Error> for USErr
+{
+    fn from(_: Error) -> Self {
+        USErr::EmptyMsg
+    }
 }
 
 impl DefUdpSender
@@ -57,13 +73,13 @@ impl DefUdpSender
         self.mid
     }
 
-    fn warp(&mut self,v:&[u8],ext:u32,tag:u8)->Vec<u8>
+    fn warp(&mut self,v:&[u8],ext:u32,tag:u8)->Result<Vec<u8>,USErr>
     {
         let mid = self.get_mid();
-        println!("send id {} {:?}",mid,v);
+        //println!("send id {} {:?}",mid,v);
         let res = Self::warp_ex(v,ext,tag,mid);
-        self.push_cache(mid,res.clone());
-        res
+        self.push_cache(mid,res.clone())?;
+        Ok(res)
     }
 
     fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize)->Vec<u8>
@@ -95,17 +111,28 @@ impl DefUdpSender
         }
     }
 
-    fn push_cache(&mut self,id:usize,v:Vec<u8>)
+    fn push_cache(&mut self,id:usize,v:Vec<u8>) -> Result<(),USErr>
     {
         if self.queue.len() == self.cache_size as usize  {
-            self.drop_one_cache();
+            return Err(USErr::MsgCacheOverflow);
+            //self.drop_one_cache();
         }
         self.queue.push_back(id);
         self.msg_map.insert(id,(v,SystemTime::now(),1));
+        Ok(())
     }
 
     fn remove_cache(&mut self,mid:usize)-> Option<(Vec<u8>,SystemTime,u16)>
     {
+        let mut rmi = None;
+        for (i,v) in self.queue.iter().enumerate(){
+            if *v == mid
+            {
+                rmi = Some(i);
+                break;
+            }
+        }
+        self.queue.remove(rmi.unwrap());
         self.msg_map.remove(&mid)
     }
 
@@ -179,7 +206,7 @@ impl DefUdpSender
     fn check_send_recv(&mut self,msg:&[u8],ext:u32,tag:u8,id:usize) -> bool
     {
         if msg.len() == 1 && msg[0] == 199 && ext == Self::mn_send_recv() && tag == TOKEN_NORMAL {
-            println!("op recv msg {}",id);
+            //println!("op recv msg {}",id);
             self.remove_cache(id);
             true
         }else{
@@ -269,18 +296,20 @@ impl DefUdpSender
 #[async_trait]
 impl UdpSender for DefUdpSender
 {
-    async fn send_msg(&mut self, v: Vec<u8>) {
+    async fn send_msg(&mut self, v: Vec<u8>) -> Result<(),USErr> {
         if self.msg_split.need_split(v.len())
         {
             let vs = self.msg_split.split(&v);
             for (d,ext,tag) in vs
             {
-                let v = self.warp(d,ext,tag);
+                let v = self.warp(d,ext,tag)?;
                 self.send(v.as_slice()).await;
             }
+            Ok(())
         }else{
-            let a = self.warp(v.as_slice(),0,TOKEN_NORMAL);
+            let a = self.warp(v.as_slice(),0,TOKEN_NORMAL)?;
             self.send(a.as_slice()).await;
+            Ok(())
         }
     }
 
@@ -310,7 +339,8 @@ impl UdpSender for DefUdpSender
             recv_cache: HashMap::new(),
             subpacker: UdpSubpackage::new(),
             timeout: Duration::from_millis(10),
-            msg_split: UdpMsgSplit::with_max_unit_size(max_len,min_len)
+            msg_split: UdpMsgSplit::with_max_unit_size(max_len,min_len),
+            max_retry_times: 30,
         }
     }
 
@@ -344,10 +374,13 @@ impl UdpSender for DefUdpSender
         self.timeout = dur;
     }
 
-    async fn check_send(&mut self) {
+    async fn check_send(&mut self) -> Result<(),USErr> {
         let now = SystemTime::now();
         let mut times_frequency = HashMap::<u16,u32>::new();
         for (id,(v,t,times)) in self.msg_map.iter_mut(){
+            if *times > self.max_retry_times {
+                return Err(USErr::RetryTimesLimit);
+            }
             if let Ok(dur) = now.duration_since(*t)
             {
                 if dur > self.timeout
@@ -363,6 +396,15 @@ impl UdpSender for DefUdpSender
         }
 
         self.adjust_unit_size(times_frequency);
+        Ok(())
+    }
+
+    fn set_retry_times(&mut self, v: u16) {
+        self.max_retry_times = v;
+    }
+
+    fn retry_times(&self) -> u16 {
+        self.max_retry_times
     }
 }
 
