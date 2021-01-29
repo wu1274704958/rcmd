@@ -44,7 +44,8 @@ pub struct DefUdpSender{
     subpacker: UdpSubpackage,
     timeout: Duration,
     msg_split: UdpMsgSplit,
-    max_retry_times: u16
+    max_retry_times: u16,
+    msg_cache_queue: VecDeque<(usize,Vec<u8>)>
 }
 
 pub enum USErr{
@@ -111,15 +112,16 @@ impl DefUdpSender
         }
     }
 
-    fn push_cache(&mut self,id:usize,v:Vec<u8>) -> Result<(),USErr>
+    fn push_cache(&mut self, id:usize, v:Vec<u8>) -> Result<&[u8], USErr>
     {
         if self.queue.len() == self.cache_size as usize  {
+            self.msg_cache_queue.push_back((id,v));
             return Err(USErr::MsgCacheOverflow);
             //self.drop_one_cache();
         }
         self.queue.push_back(id);
         self.msg_map.insert(id,(v,SystemTime::now(),1));
-        Ok(())
+        Ok((self.msg_map.get(&id).unwrap().0.as_slice()))
     }
 
     fn remove_cache(&mut self,mid:usize)-> Option<(Vec<u8>,SystemTime,u16)>
@@ -132,7 +134,14 @@ impl DefUdpSender
                 break;
             }
         }
-        self.queue.remove(rmi.unwrap());
+        match rmi {
+            None => {
+                //eprintln!("remove_cache not found mid {}",mid);
+            }
+            Some(v) => {
+                self.queue.remove(v);
+            }
+        }
         self.msg_map.remove(&mid)
     }
 
@@ -162,7 +171,7 @@ impl DefUdpSender
             match self.recv_cache.remove(&self.expect_id){
                 None => {}
                 Some(v) => {
-                    self.expect_id += 1;
+                    self.next_expect();
                     d = Some(v);
                 }
             }
@@ -184,7 +193,7 @@ impl DefUdpSender
                         self.recv_cache.insert(id, (msg.to_vec(), ext,tag));
                         None
                     } else if id == self.expect_id {
-                        self.expect_id += 1;
+                        self.next_expect();
                         Some((msg.to_vec(),ext,tag))
                     }else { None }
                 }
@@ -212,6 +221,17 @@ impl DefUdpSender
         }else{
             false
         }
+    }
+
+    fn next_expect(&mut self)->usize
+    {
+        if self.expect_id == usize::max_value()
+        {
+            self.expect_id = usize::one();
+        }else{
+            self.expect_id += usize::one();
+        }
+        self.expect_id
     }
 
     async fn send_recv(&self,id:usize)
@@ -291,6 +311,20 @@ impl DefUdpSender
     {
 
     }
+
+    async fn check_msg_cache_queue(&mut self)
+    {
+        if self.queue.len() < self.cache_size as usize
+        {
+            if let Some((id, v)) = self.msg_cache_queue.pop_front()
+            {
+                let sock = self.sock.clone();
+                let addr = self.addr;
+                let a = { self.push_cache(id,v).ok().unwrap() };
+                Self::send_ex(sock,addr,a).await;
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -302,13 +336,20 @@ impl UdpSender for DefUdpSender
             let vs = self.msg_split.split(&v);
             for (d,ext,tag) in vs
             {
-                let v = self.warp(d,ext,tag)?;
+                let v = match self.warp(d,ext,tag){
+                    Ok(v) => {v}
+                    Err(USErr::MsgCacheOverflow) => { continue; }
+                    Err(e) => {return Err(e);}
+                };
                 self.send(v.as_slice()).await;
             }
             Ok(())
         }else{
-            let a = self.warp(v.as_slice(),0,TOKEN_NORMAL)?;
-            self.send(a.as_slice()).await;
+            match self.warp(v.as_slice(),0,TOKEN_NORMAL){
+                Ok(v) => {self.send(v.as_slice()).await;}
+                Err(USErr::MsgCacheOverflow) => {}
+                Err(e) => { return Err(e);}
+            }
             Ok(())
         }
     }
@@ -338,9 +379,10 @@ impl UdpSender for DefUdpSender
             expect_id: 1,
             recv_cache: HashMap::new(),
             subpacker: UdpSubpackage::new(),
-            timeout: Duration::from_millis(10),
+            timeout: Duration::from_millis(200),
             msg_split: UdpMsgSplit::with_max_unit_size(max_len,min_len),
             max_retry_times: 30,
+            msg_cache_queue: VecDeque::new()
         }
     }
 
@@ -379,6 +421,7 @@ impl UdpSender for DefUdpSender
         let mut times_frequency = HashMap::<u16,u32>::new();
         for (id,(v,t,times)) in self.msg_map.iter_mut(){
             if *times > self.max_retry_times {
+                eprintln!("msg {} retry times reach the maximum!",id);
                 return Err(USErr::RetryTimesLimit);
             }
             if let Ok(dur) = now.duration_since(*t)
@@ -396,6 +439,7 @@ impl UdpSender for DefUdpSender
         }
 
         self.adjust_unit_size(times_frequency);
+        self.check_msg_cache_queue().await;
         Ok(())
     }
 
