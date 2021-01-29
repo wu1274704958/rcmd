@@ -7,10 +7,11 @@ use crate::ab_client::AbClient;
 use std::time::SystemTime;
 use crate::ext_code::*;
 use crate::tools::{TOKEN_BEGIN, TOKEN_END};
-use std::fs::{File, OpenOptions};
+use tokio::fs::{File, OpenOptions};
 use std::io::Write;
 use crate::model::user;
 use async_trait::async_trait;
+use tokio::prelude::io::AsyncWriteExt;
 
 pub struct UploadHandler
 {
@@ -89,12 +90,13 @@ impl SubHandle for UploadHandler
                 }
             }
 
-            if let Ok(mut f) = OpenOptions::new().create(true).append(false).write(true).open(name.clone())
+            if let Ok(mut f) = OpenOptions::new().create(true).append(false).write(true).open(name.clone()).await
             {
-                if let Ok(l) = f.write(&data[(name_e+1)..])
+                let buf = &data[(name_e+1)..];
+                if let Ok(()) = f.write_all(buf).await
                 {
-                    let b = (l as u32).to_be_bytes();
-                    b.iter().for_each(|it|{rd.push(*it)});
+                    let b = (buf.len() as u32).to_be_bytes();
+                    rd.extend_from_slice(b.as_ref());
                     return {
                         let mut fm = self.file_map.lock().await;
                         {
@@ -119,10 +121,10 @@ impl SubHandle for UploadHandler
                         return Some((rd, EXT_ERR_NO_ACCESS_PERMISSION));
                     }
                     let file_data = &data[(name_e.clone()+1)..];
-                    if let Ok(l) = f.1.write(file_data)
+                    if let Ok(()) = f.1.write_all(file_data).await
                     {
-                        let b = (l as u32).to_be_bytes();
-                        b.iter().for_each(|it|{rd.push(*it)});
+                        let b = (file_data.len() as u32).to_be_bytes();
+                        rd.extend_from_slice(b.as_ref());
                         //f.1.sync_all().unwrap();
                         return Some((rd,EXT_UPLOAD_FILE));
                     }else{
@@ -140,7 +142,7 @@ impl SubHandle for UploadHandler
                     {
                         return Some((rd, EXT_ERR_NO_ACCESS_PERMISSION));
                     }
-                    f.1.sync_all().unwrap();
+                    f.1.sync_all().await.unwrap();
                 }else{
                     return Some((rd,EXT_ERR_FILE_NAME_NOT_EXITS));
                 }
