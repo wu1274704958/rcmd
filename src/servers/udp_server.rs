@@ -247,7 +247,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     let logic_id = new_client_ex(&clients,&lid,local_addr,addr).await;
 
     let mut subpackager = DefSubpackage::new();
-    let mut asy = NoAsyCry::create();
+    let mut asy = DefAsyCry::create();
     let mut spliter = DefMsgSplit::new();
     let mut package = None;
     let mut sender = DefUdpSender::create(socket.clone(),addr);
@@ -361,7 +361,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                     }
                 }
                 let respose = handler_cp.handle_ex(m, &clients, logic_id.clone()).await;
-                 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
+                if m.ext != 9 {println!("handle ext {} use {} ms",m.ext,SystemTime::now().duration_since(b).unwrap().as_millis());}
                 if let Some((mut respose,mut ext)) = respose {
                     //---------------------------------
                     if spliter.need_split(respose.len(),ext)
@@ -500,6 +500,7 @@ macro_rules! udp_server_run {
                             let plugs_cp = $server.plug_mgr.clone();
                             let dead_plugs_cp:Arc<_> = $server.dead_plug_mgr.clone();
                             let sock_cp = sock.clone();
+                            dbg!(&addr);
                             $server.runtime.spawn(run_in(
                             clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,rx,
                             addr,id,linker_map_cp

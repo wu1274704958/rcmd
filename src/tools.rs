@@ -210,6 +210,7 @@ pub fn parse_args(mut p0: Config) ->Config {
 pub struct ClientArgs{
     pub ip : Ipv4Addr,
     pub port : u16,
+    pub bind_port : u16,
     pub acc : Option<String>,
     pub pwd : Option<String>,
     pub thread_num:u16
@@ -235,6 +236,12 @@ pub fn parse_c_args_ex<C: IntoIterator>(input:C) -> Result<ClientArgs, ArgsError
                 "PORT",
                 Occur::Optional,
                 Some(String::from("8080")));
+    args.option("b",
+                "bind port",
+                "Port of will be bind",
+                "BIND PORT",
+                Occur::Optional,
+                Some(String::from("8081")));
     args.option("a",
                 "Account",
                 "Account for auto login",
@@ -263,6 +270,7 @@ pub fn parse_c_args_ex<C: IntoIterator>(input:C) -> Result<ClientArgs, ArgsError
     }
     let mut ip = Ipv4Addr::new(127,0,0,1);
     let mut port = 8080u16;
+    let mut bind_port = 8081u16;
     let mut acc = None;
     let mut pwd = None;
     let mut thread_num = 1u16;
@@ -279,6 +287,13 @@ pub fn parse_c_args_ex<C: IntoIterator>(input:C) -> Result<ClientArgs, ArgsError
                 match u16::from_str(v.as_str())
                 {
                     Ok(i) => { port = i;}
+                    Err(e) => { }
+                }
+            }
+            "bind port" => {
+                match u16::from_str(v.as_str())
+                {
+                    Ok(i) => { bind_port = i;}
                     Err(e) => { }
                 }
             }
@@ -299,7 +314,7 @@ pub fn parse_c_args_ex<C: IntoIterator>(input:C) -> Result<ClientArgs, ArgsError
 
     if acc.is_none() || pwd.is_none() {  acc = None; pwd = None;  }
     Ok(ClientArgs{
-        ip,port,acc,pwd,thread_num
+        ip,port,acc,pwd,thread_num,bind_port
     })
 }
 

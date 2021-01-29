@@ -26,7 +26,7 @@ use std::io::*;
 use ext_code::*;
 use crate::client_handlers::def_handler::Handle;
 use clients::udp_client::UdpClient;
-use async_std::net::{SocketAddr, IpAddr};
+use async_std::net::{SocketAddr, IpAddr, SocketAddrV4, Ipv4Addr};
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -68,7 +68,7 @@ async fn main() -> io::Result<()>
     {
         let msg_queue = msg_queue.clone();
         let client = UdpClient::with_msg_queue_runing(
-            "0.0.0.0:8081".parse::<SocketAddr>().unwrap(),
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0,0,0,0),args.bind_port)),
             Arc::new(handler),
             DefParser::new(),
             msg_queue.clone(),

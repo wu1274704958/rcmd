@@ -129,7 +129,7 @@ impl <'a,T,A> UdpClient<T,A>
         buf.resize(self.buf_size,0);
         // In a loop, read data from the socket and write the data back.
         let mut heartbeat_t = SystemTime::now();
-        let mut asy = NoAsyCry::create();
+        let mut asy = DefAsyCry::create();
         let mut spliter = DefMsgSplit::new();
         let mut package = None;
 
