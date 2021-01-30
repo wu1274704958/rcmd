@@ -51,13 +51,39 @@ pub struct DefUdpSender{
 pub enum USErr{
     EmptyMsg,
     MsgCacheOverflow,
-    RetryTimesLimit
+    RetryTimesLimit,
+    Warp(std::io::Error)
+}
+
+impl USErr {
+    pub fn code(&self)->i32
+    {
+        match self {
+            USErr::EmptyMsg => { 0 }
+            USErr::MsgCacheOverflow => {-1}
+            USErr::RetryTimesLimit => {-2}
+            USErr::Warp(e) => { match e.raw_os_error() {
+                None => {-3}
+                Some(v) => {v}
+            }}
+        }
+    }
+
+    pub fn err_str(&self)->String
+    {
+        match self {
+            USErr::EmptyMsg => {"Empty Message".to_string()}
+            USErr::MsgCacheOverflow => {"Message cache overflow".to_string()}
+            USErr::RetryTimesLimit => {"Retry times reach the maximum".to_string()}
+            USErr::Warp(e) => {  format!("{}",e) }
+        }
+    }
 }
 
 impl From<std::io::Error> for USErr
 {
-    fn from(_: Error) -> Self {
-        USErr::EmptyMsg
+    fn from(e: Error) -> Self {
+        USErr::Warp(e)
     }
 }
 
@@ -234,24 +260,24 @@ impl DefUdpSender
         self.expect_id
     }
 
-    async fn send_recv(&self,id:usize)
+    async fn send_recv(&self,id:usize) -> Result<usize,USErr>
     {
         let v = Self::warp_ex(&[199],Self::mn_send_recv(),TOKEN_NORMAL,id);
-        self.send(v.as_slice()).await;
+        self.send(v.as_slice()).await
     }
 
-    async fn send(&self,d:&[u8])
+    async fn send(&self,d:&[u8]) -> Result<usize,USErr>
     {
-        let len = match self.sock.send_to(d,self.addr).await{
+        match self.sock.send_to(d,self.addr).await{
             Ok(l) => {
-                l
+                Ok(l)
             }
             Err(e) => {
                 eprintln!("udp send msg failed {:?}",e);
-                0
+                Err(USErr::Warp(e))
             }
-        };
-        if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
+        }
+        //if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
     }
 
     async fn send_ex(sock:Arc<UdpSocket>,addr:SocketAddr,d:&[u8])
@@ -341,12 +367,12 @@ impl UdpSender for DefUdpSender
                     Err(USErr::MsgCacheOverflow) => { continue; }
                     Err(e) => {return Err(e);}
                 };
-                self.send(v.as_slice()).await;
+                self.send(v.as_slice()).await?;
             }
             Ok(())
         }else{
             match self.warp(v.as_slice(),0,TOKEN_NORMAL){
-                Ok(v) => {self.send(v.as_slice()).await;}
+                Ok(v) => {self.send(v.as_slice()).await?;}
                 Err(USErr::MsgCacheOverflow) => {}
                 Err(e) => { return Err(e);}
             }
