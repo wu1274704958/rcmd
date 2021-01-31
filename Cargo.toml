@@ -20,6 +20,7 @@ serde = { version = "1.0.61",features=["serde_derive"]}
 serde_json = "1.0.61"
 lazy_static = "1.4.0"
 ahash = "0.6.3"
+futures = "*"
 
 [dependencies.rcmd-suit]
 path = "rcmd-suit"

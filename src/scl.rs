@@ -2,6 +2,9 @@ use tokio::{ time::{ sleep}};
 mod extc;
 mod model;
 mod client_handlers;
+#[macro_use]
+extern crate lazy_static;
+mod comm;
 
 use std::{sync::{Arc, Mutex}, time::Duration, io};
 use std::time::SystemTime;
@@ -9,10 +12,10 @@ use std::collections::VecDeque;
 use std::fs::{OpenOptions};
 use std::io::*;
 use extc::*;
-use rcmd_suit::{SubHandle, tools};
-use rcmd_suit::client_handler::SubHandle;
+use rcmd_suit::client_handler::{SubHandle, DefHandler, Handle};
 use rcmd_suit::clients::tcp_client::TcpClient;
 use rcmd_suit::agreement::DefParser;
+use rcmd_suit::tools;
 
 
 struct AutoLogin{
@@ -91,7 +94,7 @@ async fn main() -> io::Result<()>
         send(&msg_queue,s.into_bytes(),EXT_LOGIN);
     }
     
-    let mut handler = client_handlers::def_handler::DefHandler::new();
+    let mut handler = DefHandler::new();
 
     {
         handler.add_handler(Arc::new(client_handlers::err::Err{}));
@@ -112,7 +115,9 @@ async fn main() -> io::Result<()>
         DefParser::new(),
             msg_queue.clone()
         );
-        client.run(args.ip, args.port).await;
+        lazy_static::initialize(&comm::IGNORE_EXT);
+        let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
+        client.run(args.ip, args.port,msg_split_ignore,msg_split_ignore).await;
         println!("next times...");
         if let Ok(mut mq) = msg_queue.lock(){
             mq.clear();

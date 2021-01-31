@@ -119,7 +119,8 @@ impl <'a,T,A> UdpClient<T,A>
     }
 
     #[allow(unused_must_use)]
-    pub async fn run(&self,ip:Ipv4Addr,port:u16) -> Result<(),USErr>
+    pub async fn run(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
+                     msg_split_ignore:Option<&Vec<u32>>) -> Result<(),USErr>
     {
         let sock = Arc::new( UdpSocket::bind(self.bind_addr).await? );
         platform_handle(sock.as_ref());
@@ -131,7 +132,13 @@ impl <'a,T,A> UdpClient<T,A>
         // In a loop, read data from the socket and write the data back.
         let mut heartbeat_t = SystemTime::now();
         let mut asy = DefAsyCry::create();
+        if let Some(v) = asy_cry_ignore{
+            asy.extend_ignore(v);
+        }
         let mut spliter = DefMsgSplit::new();
+        if let Some(v) = msg_split_ignore{
+            asy.extend_ignore(v);
+        }
         let mut package = None;
 
         let mut sender = DefUdpSender::create(sock.clone(),addr);

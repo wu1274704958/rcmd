@@ -2,9 +2,10 @@ use tokio::prelude::*;
 mod extc;
 mod model;
 mod client_handlers;
+#[macro_use]
+extern crate lazy_static;
+mod comm;
 
-use tools::*;
-use agreement::*;
 use std::sync::{Arc, Mutex};
 use std::str::FromStr;
 
@@ -15,9 +16,10 @@ use std::io::*;
 use extc::*;
 use std::io;
 use rcmd_suit::tools;
-use crate::client_handlers::def_handler::Handle;
 use rcmd_suit::clients::tcp_client::TcpClient;
 use rcmd_suit::agreement::DefParser;
+use rcmd_suit::client_handler::{DefHandler, Handle};
+use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE};
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -38,7 +40,7 @@ async fn main() -> io::Result<()>
         send(&msg_queue,s.into_bytes(),EXT_LOGIN);
     }
     let is_runing = Arc::new(Mutex::new(true));
-    let mut handler = client_handlers::def_handler::DefHandler::new();
+    let mut handler = DefHandler::new();
 
     {
         handler.add_handler(Arc::new(client_handlers::get_users::GetUser::new()));
@@ -64,7 +66,9 @@ async fn main() -> io::Result<()>
             msg_queue.clone(),
             is_runing
         );
-        let run = client.run(args.ip,args.port);
+        lazy_static::initialize(&comm::IGNORE_EXT);
+        let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
+        let run = client.run(args.ip,args.port,msg_split_ignore,msg_split_ignore);
         futures::join!(console,run);
     }
     

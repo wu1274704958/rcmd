@@ -106,7 +106,8 @@ impl <'a,T,A> TcpClient<T,A>
     }
     
     #[allow(unused_must_use)]
-    pub async fn run(&self,ip:Ipv4Addr,port:u16) -> io::Result<()>
+    pub async fn run(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
+                     msg_split_ignore:Option<&Vec<u32>>) -> io::Result<()>
     {
         let sock = TcpSocket::new_v4().unwrap();
         let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), port)).await?;
@@ -115,7 +116,15 @@ impl <'a,T,A> TcpClient<T,A>
         // In a loop, read data from the socket and write the data back.
         let mut heartbeat_t = SystemTime::now();
         let mut asy = DefAsyCry::new();
+        if let Some(v) = asy_cry_ignore
+        {
+            asy.extend_ignore(v);
+        }
         let mut spliter = DefMsgSplit::new();
+        if let Some(v) = msg_split_ignore
+        {
+            spliter.extend_ignore(v);
+        }
         let mut package = None;
 
 
