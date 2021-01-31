@@ -25,11 +25,7 @@ pub struct DefMsgSplit{
 impl DefMsgSplit{
     pub fn new()->DefMsgSplit{
         let mut ignore_map = HashSet::new();
-        ignore_map.extend([9,
-            EXT_SEND_FILE_CREATE,EXT_SEND_FILE,EXT_SEND_FILE_ELF,
-            EXT_SAVE_FILE_CREATE,EXT_SAVE_FILE,EXT_SAVE_FILE_ELF,
-            EXT_SAVE_FILE_RET,EXT_SAVE_FILE_CREATE_RET,EXT_SAVE_FILE_ELF_RET,
-            EXT_UPLOAD_FILE_CREATE,EXT_UPLOAD_FILE,EXT_UPLOAD_FILE_ELF].iter());
+        ignore_map.extend([9].iter());
         DefMsgSplit{
             msg_cache:HashMap::new(),
             logic_id:0,
@@ -54,6 +50,11 @@ impl DefMsgSplit{
         f.copy_from_slice(&buf[0..size_of::<u16>()]);
         s.copy_from_slice(&buf[size_of::<u16>()..]);
         (u16::from_be_bytes(f),u16::from_be_bytes(s))
+    }
+
+    pub fn extend_ignore(&mut self,v:&Vec<u32>)
+    {
+        self.ignore_map.extend(v.iter());
     }
 }
 

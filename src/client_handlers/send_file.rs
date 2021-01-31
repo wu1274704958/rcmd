@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use crate::client_handlers::def_handler::SubHandle;
-use crate::ext_code::*;
-use crate::tools::{TOKEN_BEGIN,TOKEN_END};
+use crate::extc::*;
+use rcmd_suit::tools::{TOKEN_BEGIN,TOKEN_END};
 use std::mem::size_of;
-use crate::tools::{u32_form_bytes,set_slices_form_u32};
+use rcmd_suit::tools::{u32_form_bytes,set_slices_form_u32};
+use rcmd_suit::client_handler::SubHandle;
 
 pub struct SendFile
 {

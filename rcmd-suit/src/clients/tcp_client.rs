@@ -1,15 +1,13 @@
 
 use std::{collections::VecDeque, io, net::{IpAddr, Ipv4Addr, SocketAddr}, sync::{Arc,Mutex}, time::{Duration, SystemTime}};
 use std::vec::Vec;
-use tokio::{io::AsyncWriteExt, net::{UdpSocket}, time::sleep};
+use tokio::{io::AsyncWriteExt, net::{TcpSocket, TcpStream}, time::sleep};
 
-use crate::{agreement::{Agreement, Message}, asy_cry::{DefAsyCry,AsyCry,EncryptRes,NoAsyCry}, client_handlers::def_handler::{Handle}, subpackage::{DefSubpackage,Subpackage}, utils::msg_split::{DefMsgSplit,MsgSplit}};
-use crate::utils::udp_sender::{DefUdpSender,UdpSender,USErr};
-use crate::tools::platform_handle;
-use async_std::io::Error;
-use async_std::future::Future;
+use crate::{agreement::{Agreement, Message}, asy_cry::{DefAsyCry,AsyCry,EncryptRes}, subpackage::{DefSubpackage,Subpackage}, utils::msg_split::{DefMsgSplit,MsgSplit}};
+use crate::client_handler::Handle;
 
-pub struct UdpClient<T,A>
+
+pub struct TcpClient<T,A>
     where T:Handle
 {
     msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
@@ -17,73 +15,63 @@ pub struct UdpClient<T,A>
     handler:Arc<T>,
     pub heartbeat_dur:Duration,
     pub nomsg_rest_dur:Duration,
-    bind_addr:SocketAddr,
-    pub buf_size:usize,
     parser:A
 }
 
-impl <'a,T,A> UdpClient<T,A>
+impl <'a,T,A> TcpClient<T,A>
     where T:Handle,
-          A : Agreement
+    A : Agreement
 {
-    pub fn new(bind_addr:SocketAddr,handler:Arc<T>,parser:A)-> Self
+    pub fn new(handler:Arc<T>,parser:A)-> Self
     {
-        UdpClient::<T,A>{
+        TcpClient::<T,A>{
             msg_queue : Arc::new(Mutex::new(VecDeque::new())),
             runing:Arc::new(Mutex::new(true)),
             handler,
             heartbeat_dur:Duration::from_secs(10),
             nomsg_rest_dur:Duration::from_millis(1),
-            parser,
-            bind_addr,
-            buf_size:1024 * 1024 * 10
+            parser
         }
     }
 
-    pub fn with_dur(bind_addr:SocketAddr,handler:Arc<T>,parser:A,
-                    heartbeat_dur:Duration,
-                    nomsg_rest_dur:Duration)-> Self
+    pub fn with_dur(handler:Arc<T>,parser:A,
+        heartbeat_dur:Duration,
+        nomsg_rest_dur:Duration)-> Self
     {
-        UdpClient::<T,A>{
+        TcpClient::<T,A>{
             msg_queue : Arc::new(Mutex::new(VecDeque::new())),
             runing:Arc::new(Mutex::new(true)),
             handler,
             heartbeat_dur,
             nomsg_rest_dur,
-            parser,
-            bind_addr,
-            buf_size:1024 * 1024 * 10
+            parser
         }
     }
 
-    pub fn with_msg_queue(bind_addr:SocketAddr,handler:Arc<T>,parser:A,
-                          msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>)-> Self
+    pub fn with_msg_queue(handler:Arc<T>,parser:A,
+        msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>)-> Self
     {
-        UdpClient::<T,A>{
+        TcpClient::<T,A>{
             msg_queue,
             runing:Arc::new(Mutex::new(true)),
             handler,
             heartbeat_dur:Duration::from_secs(10),
             nomsg_rest_dur:Duration::from_millis(1),
-            parser,
-            bind_addr,
-            buf_size:1024 * 1024 * 10
+            parser
         }
     }
 
-    pub fn with_msg_queue_runing(bind_addr:SocketAddr,handler:Arc<T>,parser:A,
-                                 msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
-                                 runing:Arc<Mutex<bool>>)-> Self
+    pub fn with_msg_queue_runing(handler:Arc<T>,parser:A,
+        msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
+        runing:Arc<Mutex<bool>>)-> Self
     {
-        UdpClient::<T,A>{
+        TcpClient::<T,A>{
             msg_queue,
             runing,
             handler,
             heartbeat_dur:Duration::from_secs(10),
             nomsg_rest_dur:Duration::from_millis(1),
-            parser,
-            bind_addr,
-            buf_size:1024 * 1024 * 10
+            parser
         }
     }
 
@@ -99,7 +87,7 @@ impl <'a,T,A> UdpClient<T,A>
         let mut b = self.runing.lock().unwrap();
         *b = false;
     }
-
+    
     pub fn still_runing(&self)->bool
     {
         let b = self.runing.lock().unwrap();
@@ -112,30 +100,27 @@ impl <'a,T,A> UdpClient<T,A>
         queue.pop_front()
     }
 
-
-    async fn write_msg(&self, sender:&mut DefUdpSender, data: Vec<u8>, ext:u32)->Result<(),USErr>{
-        sender.send_msg(self.parser.package_nor(data,ext)).await
+    
+    async fn write_msg(&self,stream:&mut TcpStream,data: Vec<u8>,ext:u32)->std::result::Result<(), std::io::Error>{
+        return stream.write_all(self.parser.package_nor(data,ext).as_slice()).await;
     }
-
+    
     #[allow(unused_must_use)]
-    pub async fn run(&self,ip:Ipv4Addr,port:u16) -> Result<(),USErr>
+    pub async fn run(&self,ip:Ipv4Addr,port:u16) -> io::Result<()>
     {
-        let sock = Arc::new( UdpSocket::bind(self.bind_addr).await? );
-        platform_handle(sock.as_ref());
-        let addr = SocketAddr::new(IpAddr::V4(ip), port);
-        sock.connect(addr).await?;
-
-        let mut buf = Vec::with_capacity(self.buf_size);
-        buf.resize(self.buf_size,0);
+        let sock = TcpSocket::new_v4().unwrap();
+        let mut stream = sock.connect(SocketAddr::new(IpAddr::V4(ip), port)).await?;
+        let mut buf = Vec::with_capacity(1024 * 1024 * 10);
+        buf.resize(1024 * 1024 * 10,0);
         // In a loop, read data from the socket and write the data back.
         let mut heartbeat_t = SystemTime::now();
-        let mut asy = DefAsyCry::create();
+        let mut asy = DefAsyCry::new();
         let mut spliter = DefMsgSplit::new();
         let mut package = None;
 
-        let mut sender = DefUdpSender::create(sock.clone(),addr);
+
         if let Ok(pub_key_data) = asy.build_pub_key().await{
-            self.write_msg(&mut sender, pub_key_data, 10).await?;
+            self.write_msg(&mut stream, pub_key_data, 10).await;
         }
 
         let mut subpackager = DefSubpackage::new();
@@ -143,30 +128,26 @@ impl <'a,T,A> UdpClient<T,A>
         loop {
             // read request
             //println!("read the request....");
-            match sock.try_recv_from(&mut buf) {
-                Ok((len,addr_)) => {
-                    if addr_ == addr{
-                        if let Some(v) = sender.check_recv(&buf[0..len]).await {
-                            package = subpackager.subpackage(&v[..], v.len());
-                        }
-                    }
+            match stream.try_read(&mut buf[..]) {
+                Ok(0) => {
+                    println!("ok n == 0 ----");
+                    break;
+                }
+                Ok(n) => {
+                    //println!("n = {}", n);
+                    package = subpackager.subpackage(&buf[0..n],n);
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-
+                    //async_std::task::sleep(Duration::from_millis(10)).await;
+                    //println!("e  WouldBlock -------");
                 }
                 Err(e) => {
                     eprintln!("error = {}", e);
                     break;
                 }
-            }
-
+            };
             // handle request
             //dbg!(&buf_rest);
-            if package.is_none() && sender.need_check(){
-                if let Some(v) = sender.check_recv(&[]).await{
-                    package = subpackager.subpackage(&v[..],v.len());
-                }
-            }
             if package.is_none() && subpackager.need_check(){
                 package = subpackager.subpackage(&[],0);
             }
@@ -198,7 +179,7 @@ impl <'a,T,A> UdpClient<T,A>
                     };
                     if let Some(v) = immediate_send
                     {
-                        self.write_msg(&mut sender, v, m.ext).await?;
+                        self.write_msg(&mut stream, v, m.ext).await;
                         continue;
                     }
                     if let Some(ref v) = override_msg
@@ -224,8 +205,6 @@ impl <'a,T,A> UdpClient<T,A>
                     }
                 }
                 package = None;
-            }else{
-                sender.check_send().await?;
             }
 
             if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
@@ -233,7 +212,7 @@ impl <'a,T,A> UdpClient<T,A>
                 if n > self.heartbeat_dur
                 {
                     heartbeat_t = SystemTime::now();
-                    self.write_msg(&mut sender, vec![9], 9).await?;
+                    self.write_msg(&mut stream, vec![9], 9).await;
                 }
             }
 
@@ -252,7 +231,7 @@ impl <'a,T,A> UdpClient<T,A>
                                 _ => { data.to_vec()}
                             };
                             let real_pkg = self.parser.package_tf(send_data, ext,tag);
-                            sender.send_msg(real_pkg).await?;
+                            stream.write_all(real_pkg.as_slice()).await;
                         }
                     }else {
                         match asy.encrypt(&v.0, v.1) {
@@ -262,18 +241,18 @@ impl <'a,T,A> UdpClient<T,A>
                             EncryptRes::NotChange => {}
                             _ => {}
                         };
-                        self.write_msg(&mut sender, v.0, v.1).await?;
+                        self.write_msg(&mut stream, v.0, v.1).await;
                     }
                 }else{
                     sleep(Duration::from_millis(1)).await;
                 }
             }
-
+            
             if !self.still_runing()
             {
                 break;
             }
-
+        
         }
         Ok(())
     }

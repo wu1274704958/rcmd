@@ -1,53 +1,40 @@
 #![allow(unused_imports)]
-mod config_build;
-mod ab_client;
-mod handler;
-mod utils;
-mod agreement;
-mod plug;
-mod plugs;
 mod handlers;
-mod asy_cry;
-mod data_transform;
-mod ext_code;
-mod subpackage;
-mod db;
+mod extc;
 mod model;
-mod tools;
+mod comm;
 #[macro_use]
-mod servers;
+extern crate rcmd_suit;
+#[macro_use]
+extern crate lazy_static;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 use std::thread::{ThreadId, Thread};
 use tokio::runtime;
-use crate::config_build::{ConfigBuilder};
-use crate::ab_client::{AbClient, State};
 use std::sync::{Arc};
-use tokio::sync::Mutex;
 use std::cell::RefCell;
 use std::ops::AddAssign;
-use crate::ab_client::State::{Dead, Busy, Ready, WaitKill};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use tokio::time::Duration;
-use crate::handler::{Handle, TestHandler, DefHandler};
-use crate::tools::{read_form_buf, set_client_st, del_client, get_client_write_buf, handle_request, TOKEN_BEGIN, TOKEN_END, get_client_st};
-use crate::agreement::{DefParser, Agreement,TestDataTransform,Test2DataTransform};
-use crate::plug::{DefPlugMgr, PlugMgr};
-use crate::plugs::heart_beat::HeartBeat;
 use std::env;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
-use crate::asy_cry::{DefAsyCry, AsyCry, EncryptRes};
-use crate::data_transform::def_compress::DefCompress;
-use crate::subpackage::{DefSubpackage, Subpackage};
 use std::time::SystemTime;
-use crate::db::db_mgr::DBMgr;
-use crate::utils::msg_split::{DefMsgSplit, MsgSplit};
 use getopts::HasArg::No;
-use crate::utils::temp_permission::TempPermission;
-use crate::servers::tcp_server::{TcpServer,run_in};
+use rcmd_suit::config_build::ConfigBuilder;
+use rcmd_suit::tools;
+use rcmd_suit::handler::{DefHandler, TestHandler, Handle};
+use rcmd_suit::agreement::DefParser;
+use rcmd_suit::plug::{DefPlugMgr, PlugMgr};
+use rcmd_suit::plugs::heart_beat::HeartBeat;
+use rcmd_suit::db::db_mgr::DBMgr;
+use rcmd_suit::utils::temp_permission::TempPermission;
+
+use rcmd_suit::servers::tcp_server::{TcpServer,run_in};
+use tokio::sync::Mutex;
+
 //fn main(){}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -97,7 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dead_plugs.into(),
         config
         );
+    lazy_static::initialize(&comm::IGNORE_EXT);
+    let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
 
-    server_run!(ser);
+    server_run!(ser,msg_split_ignore,msg_split_ignore);
     Ok(())
 }

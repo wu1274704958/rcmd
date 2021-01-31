@@ -4,25 +4,25 @@ use crate::{handler::{self, Handle, SubHandle}, plug};
 use crate::config_build::Config;
 use crate::plug::{PlugMgr,Plug};
 use crate::agreement::Agreement;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{UdpSocket};
 use std::ops::{Add, AddAssign};
 use crate::ab_client::{ABClient,State};
 use crate::subpackage::{DefSubpackage,Subpackage};
-use crate::asy_cry::{DefAsyCry,AsyCry,EncryptRes};
-use crate::MsgSplit;
-use crate::DefMsgSplit;
+use crate::asy_cry::{DefAsyCry,AsyCry,EncryptRes,NoAsyCry};
+use crate::utils::udp_sender::{DefUdpSender,UdpSender};
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use tokio::io;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex,mpsc};
+use crate::utils::msg_split::{DefMsgSplit, MsgSplit};
 
-pub struct TcpServer<LID,ABC,P,SH,H,PL,PLM>
+pub struct UdpServer<LID,ABC,P,SH,H,PL,PLM>
     where SH : SubHandle<ABClient=ABC,Id=LID>,
-    H : Handle<SH>,
-    PL : Plug,
-    PLM: PlugMgr<PL>,
-    ABC: ABClient<LID = LID>
+          H : Handle<SH>,
+          PL : Plug,
+          PLM: PlugMgr<PL>,
+          ABC: ABClient<LID = LID>
 {
     _a:PhantomData<SH>,
     _b:PhantomData<PL>,
@@ -34,33 +34,34 @@ pub struct TcpServer<LID,ABC,P,SH,H,PL,PLM>
     pub handler:Arc<H>,
     pub plug_mgr:Arc<PLM>,
     pub dead_plug_mgr:Arc<PLM>,
-    pub buf_len:usize
+    pub buf_len:usize,
+    pub channel_buf:usize,
 }
 
-impl<LID,ABC,P,SH,H,PL,PLM> TcpServer<LID,ABC,P,SH,H,PL,PLM>
-where SH : SubHandle<ABClient=ABC,Id=LID>,
-    H : Handle<SH> + Send + std::marker::Sync,
-    PL : Plug<ABClient=ABC,Id=LID,Config=Config>,
-    PLM: PlugMgr<PL> + Send + std::marker::Sync,
-    P : Agreement + Send + std::marker::Sync,
-    LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
-      ABC: ABClient<LID = LID> + Send
+impl<LID,ABC,P,SH,H,PL,PLM> UdpServer<LID,ABC,P,SH,H,PL,PLM>
+    where SH : SubHandle<ABClient=ABC,Id=LID>,
+          H : Handle<SH> + Send + std::marker::Sync,
+          PL : Plug<ABClient=ABC,Id=LID,Config=Config>,
+          PLM: PlugMgr<PL> + Send + std::marker::Sync,
+          P : Agreement + Send + std::marker::Sync,
+          LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+          ABC: ABClient<LID = LID> + Send
 {
     pub fn new(
         handler:Arc<H>,
         parser:Arc<P>,
         plug_mgr:Arc<PLM>,
-        dead_plug_mgr:Arc<PLM>,   
+        dead_plug_mgr:Arc<PLM>,
         config:Config,
     )
-         -> TcpServer<LID,ABC,P,SH,H,PL,PLM>
+        -> UdpServer<LID,ABC,P,SH,H,PL,PLM>
     {
         let runtime = runtime::Builder::new_multi_thread()
-        .worker_threads(config.thread_count)
-        .build()
-        .unwrap();
+            .worker_threads(config.thread_count)
+            .build()
+            .unwrap();
         let logic_id = Arc::new(Mutex::new(LID::zero()));
-        TcpServer::<LID,ABC,P,SH,H,PL,PLM>{
+        UdpServer::<LID,ABC,P,SH,H,PL,PLM>{
             _a: Default::default(),
             _b: Default::default(),
             handler,
@@ -71,7 +72,8 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
             runtime,
             logic_id,
             clients: Arc::new(Mutex::new(HashMap::new())),
-            buf_len: 1024*1024*10
+            buf_len: 1024*1024*10,
+            channel_buf : 10000,
         }
     }
 
@@ -83,32 +85,11 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
         config:Config,
         buf_len:usize
     )
-        -> TcpServer<LID,ABC,P,SH,H,PL,PLM>
+        -> UdpServer<LID,ABC,P,SH,H,PL,PLM>
     {
         let mut v = Self::new(handler,parser,plug_mgr,dead_plug_mgr,config);
         if buf_len > 0 { v.buf_len = buf_len; }
         v
-    }
-
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>>
-    {
-        // let listener = TcpListener::bind(self.config.addr).await?;
-        // loop {
-        //     let clients = self.clients.clone();
-        //     let lid = self.logic_id.clone();
-        //     let conf = self.config.clone();
-        //     let handler_cp = self.handler.clone();
-        //     let parser_cp = self.parser.clone();
-        //     let plugs_cp = self.plug_mgr.clone();
-        //     let dead_plugs_cp:Arc<_> = self.dead_plug_mgr.clone();
-        //     let (mut socket, _) = listener.accept().await?;
-        //     let buf_len = self.buf_len;
-
-            // self.runtime.spawn(Self::run_in(
-            //     clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,socket,buf_len
-            // ));
-        //}
-        Ok(())
     }
 
 
@@ -166,9 +147,9 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
 }
 
 pub async fn get_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID)->Option<State>
-where
-    LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
-    ABC: ABClient<LID = LID> + Send
+    where
+        LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+        ABC: ABClient<LID = LID> + Send
 {
     let mut abs = clients.lock().await;
     if let Some(a) = abs.get(&id)
@@ -180,9 +161,9 @@ where
 }
 
 pub async fn set_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,id:LID,s:State)
-where
-    LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
-    ABC: ABClient<LID = LID> + Send
+    where
+        LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+        ABC: ABClient<LID = LID> + Send
 {
     let mut abs = clients.lock().await;
     if let Some(mut a) = abs.get_mut(&id)
@@ -192,9 +173,9 @@ where
 }
 
 async fn new_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic_id_:&Arc<Mutex<LID>>,local_addr: SocketAddr, addr: SocketAddr) -> LID
-where
-    LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
-    ABC: ABClient<LID = LID> + Send
+    where
+        LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+        ABC: ABClient<LID = LID> + Send
 {
     let mut logic_id = LID::zero();
     {
@@ -229,6 +210,12 @@ async fn del_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic
     res
 }
 
+async fn del_linker(linker_map:&Arc<Mutex<HashMap<u64,mpsc::Sender<Vec<u8>>>>>,id:u64)
+{
+    let mut abs = linker_map.lock().await;
+    abs.remove(&id);
+}
+
 #[allow(unused_must_use)]
 #[allow(unused_variables)]
 pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
@@ -240,8 +227,13 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     parser_cp:Arc<P>,
     plugs_cp:Arc<PLM>,
     dead_plugs_cp:Arc<PLM>,
-    mut socket:TcpStream,
-    buf_len:usize
+    socket:Arc<UdpSocket>,
+    mut rx:mpsc::Receiver<Vec<u8>>,
+    addr:SocketAddr,
+    link_id:u64,
+    linker_map:Arc<Mutex<HashMap<u64,mpsc::Sender<Vec<u8>>>>>,
+    asy_cry_ignore:Option<&Vec<u32>>,
+    msg_split_ignore:Option<&Vec<u32>>
 )
     where SH : SubHandle<ABClient=ABC,Id=LID>,
           H : Handle<SH> + Send + std::marker::Sync,
@@ -252,17 +244,22 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
           ABC: ABClient<LID = LID> + Send
 {
     let local_addr = socket.local_addr().unwrap();
-    let addr = socket.peer_addr().unwrap();
 
     let logic_id = new_client_ex(&clients,&lid,local_addr,addr).await;
 
-    socket.readable().await;
-    let mut buf = Vec::with_capacity(buf_len.clone());
-    buf.resize(buf_len.clone(),0);
     let mut subpackager = DefSubpackage::new();
-    let mut asy = DefAsyCry::new();
+    let mut asy = DefAsyCry::create();
+    if let Some(v) = asy_cry_ignore
+    {
+        asy.extend_ignore(v);
+    }
     let mut spliter = DefMsgSplit::new();
+    if let Some(v) = msg_split_ignore
+    {
+        spliter.extend_ignore(v);
+    }
     let mut package = None;
+    let mut sender = DefUdpSender::create(socket.clone(),addr);
     // In a loop, read data from the socket and write the data back.
     loop {
 
@@ -273,6 +270,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 Some(State::WaitKill) => {
                     dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
                     del_client_ex(&clients,&lid,logic_id.clone()).await;
+                    del_linker(&linker_map,link_id).await;
                     return;
                 }
                 _ => {}
@@ -280,31 +278,37 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         }
         // read request
         // println!(" read the request....");
-        match socket.try_read(&mut buf) {
-            Ok(0) => {
-                //println!("ok n == 0 ----");
-                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                del_client_ex(&clients,&lid,logic_id.clone()).await;
-                return;
-            },
-            Ok(n) => {
+        match rx.try_recv() {
+            Ok(buf) => {
                 //println!("n = {}",n);
-                set_client_st_ex(&clients,logic_id.clone(), State::Busy).await;
-                let b = SystemTime::now();
-                package = subpackager.subpackage(&buf[0..n],n);
-                let e = SystemTime::now();
-                //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
+                if !buf.is_empty()
+                {
+                    set_client_st_ex(&clients,logic_id.clone(), State::Busy).await;
+                    let b = SystemTime::now();
+                    if let Some(v) = sender.check_recv(&buf[..]).await {
+                        package = subpackager.subpackage(&v[..], v.len());
+                    }
+                    let e = SystemTime::now();
+                    //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
+                }
             }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                //println!("e  WouldBlock -------");
+            Err(mpsc::error::TryRecvError::Empty) =>{
+
             }
             Err(e) => {
-                eprintln!("error = {}", e);
+                eprintln!("recv error = {}", e);
                 dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
                 del_client_ex(&clients,&lid,logic_id.clone()).await;
+                del_linker(&linker_map,link_id).await;
                 return;
             }
         };
+
+        if package.is_none() && sender.need_check(){
+            if let Some(v) = sender.check_recv(&[]).await{
+                package = subpackager.subpackage(&v[..],v.len());
+            }
+        }
 
         if package.is_none() && subpackager.need_check(){
             let b = SystemTime::now();
@@ -341,8 +345,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 };
                 if let Some(v) = immediate_send
                 {
-                    let mut real_pkg = parser_cp.package_nor(v, m.ext);
-                    socket.write_all(real_pkg.as_slice()).await;
+                    if let Err(_) = sender.send_msg(parser_cp.package_nor(v, m.ext)).await{
+                        dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                        del_client_ex(&clients,&lid,logic_id.clone()).await;
+                        del_linker(&linker_map,link_id).await;
+                        return;
+                    }
                     continue;
                 }
                 if let Some(ref v) = override_msg
@@ -376,8 +384,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                                 }
                                 _ => { data.to_vec()}
                             };
-                            let mut real_pkg = parser_cp.package_tf(send_data, ext,tag);
-                            socket.write_all(real_pkg.as_slice()).await;
+                            if let Err(_) = sender.send_msg(parser_cp.package_tf(send_data, ext,tag)).await{
+                                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                                del_client_ex(&clients,&lid,logic_id.clone()).await;
+                                del_linker(&linker_map,link_id).await;
+                                return;
+                            }
                         }
                     }else {
                         match asy.encrypt(&respose, ext) {
@@ -387,10 +399,21 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                             }
                             _ => {}
                         };
-                        let mut real_pkg = parser_cp.package_nor(respose, ext);
-                        socket.write_all(real_pkg.as_slice()).await;
+                        if let Err(_) = sender.send_msg(parser_cp.package_nor(respose, ext)).await{
+                            dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                            del_client_ex(&clients,&lid,logic_id.clone()).await;
+                            del_linker(&linker_map,link_id).await;
+                            return;
+                        }
                     }
                 }
+            }
+        }else{
+            if let Err(_) = sender.check_send().await{
+                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                del_client_ex(&clients,&lid,logic_id.clone()).await;
+                del_linker(&linker_map,link_id).await;
+                return;
             }
         }
 
@@ -416,8 +439,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                         }
                         _ => { data.to_vec()}
                     };
-                    let mut real_pkg = parser_cp.package_tf(send_data, ext, tag);
-                    socket.write_all(real_pkg.as_slice()).await;
+                    if let Err(_) = sender.send_msg(parser_cp.package_tf(send_data, ext, tag)).await{
+                        dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                        del_client_ex(&clients,&lid,logic_id.clone()).await;
+                        del_linker(&linker_map,link_id).await;
+                        return;
+                    };
                 }
             }else {
                 match asy.encrypt(&data, e) {
@@ -426,8 +453,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                     }
                     _ => {}
                 };
-                let real_pkg = parser_cp.package_nor(data, e);
-                socket.write_all(real_pkg.as_slice()).await;
+                if let Err(_) = sender.send_msg(parser_cp.package_nor(data, e)).await{
+                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+                    del_client_ex(&clients,&lid,logic_id.clone()).await;
+                    del_linker(&linker_map,link_id).await;
+                    return;
+                };
             }
         }else {
             async_std::task::sleep(conf.min_sleep_dur).await;
@@ -436,24 +467,65 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
     }
 }
+#[macro_export]
+macro_rules! udp_server_run {
+    ($server:ident,$asy_cry_ignore:ident,$msg_split_ignore:ident) => {
+        let channel_buf = $server.channel_buf;
+        let sock = Arc::new(UdpSocket::bind($server.config.addr).await?);
+        platform_handle(sock.as_ref());
 
-macro_rules! server_run {
-    ($ser:ident) => {
-        let listener = TcpListener::bind($ser.config.addr).await?;
+        let linker_map = Arc::new(Mutex::new(HashMap::<u64,mpsc::Sender<Vec<u8>>>::new()));
+        let mut hash_builder = RandomState::new();
+
         loop {
-            let clients = $ser.clients.clone();
-            let lid = $ser.logic_id.clone();
-            let conf = $ser.config.clone();
-            let handler_cp = $ser.handler.clone();
-            let parser_cp = $ser.parser.clone();
-            let plugs_cp = $ser.plug_mgr.clone();
-            let dead_plugs_cp:Arc<_> = $ser.dead_plug_mgr.clone();
-            let (mut socket, _) = listener.accept().await?;
-            let buf_len = $ser.buf_len;
+            let mut buf = Vec::with_capacity($server.buf_len);
+            buf.resize($server.buf_len,0);
+            match sock.recv_from(&mut buf[..]).await
+            {
+                Ok((len,addr)) => {
 
-            $ser.runtime.spawn(run_in(
-                clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,socket,buf_len
-            ));
+                    let id = CallHasher::get_hash(&addr, hash_builder.build_hasher());
+                    let has = {
+                        let map = linker_map.lock().await;
+                        if let Some(link) = map.get(&id){
+                            link.send(buf[0..len].to_vec()).await;
+                            true
+                        }else { false }
+                    };
+                    if !has
+                    {
+                        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(channel_buf);
+                        {
+                            let mut map = linker_map.lock().await;
+                            map.insert(id, tx);
+                        }
+                        {
+                            let linker_map_cp = linker_map.clone();
+                            let clients = $server.clients.clone();
+                            let lid = $server.logic_id.clone();
+                            let conf = $server.config.clone();
+                            let handler_cp = $server.handler.clone();
+                            let parser_cp = $server.parser.clone();
+                            let plugs_cp = $server.plug_mgr.clone();
+                            let dead_plugs_cp:Arc<_> = $server.dead_plug_mgr.clone();
+                            let sock_cp = sock.clone();
+                            dbg!(&addr);
+                            $server.runtime.spawn(run_in(
+                            clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,rx,
+                            addr,id,linker_map_cp,$asy_cry_ignore,$msg_split_ignore
+                        ));
+                        }
+                        {
+                            let mut map = linker_map.lock().await;
+                            let tx = map.get(&id).unwrap();
+                            tx.send(buf[0..len].to_vec()).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("err = {:?}",e);
+                }
+            }
         }
-    };
+    }
 }

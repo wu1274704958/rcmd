@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use crate::model;
 use crate::model::user;
 use std::collections::hash_map::RandomState;
-use crate::ext_code::*;
-use crate::client_handlers::def_handler::SubHandle;
+use crate::extc::*;
 use terminal::Color;
+use rcmd_suit::client_handler::SubHandle;
 
 pub struct GetUser
 {

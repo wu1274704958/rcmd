@@ -1,10 +1,10 @@
-use crate::client_handlers::def_handler::SubHandle;
 use async_std::sync::Arc;
 use std::sync::Mutex;
-use crate::utils::rcmd::*;
-use crate::ext_code::*;
+use crate::extc::*;
 use crate::model;
 use terminal::Color;
+use rcmd_suit::client_handler::SubHandle;
+use rcmd_suit::utils::rcmd::CmdRes;
 
 pub struct RunCmd
 {

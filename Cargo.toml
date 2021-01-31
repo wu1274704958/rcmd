@@ -7,35 +7,26 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["mysql"]
+default = ["mysql","mysql2"]
+mysql2 = ["rcmd-suit/mysql"]
 
 [dependencies]
 tokio = { version="0.3.5", features = ["full"]}
-async-std = "1.8.0"
-rsa = "0.3.0"
-rand = { version = "0.7.0", default-features = false }
-flate2 = { version = "1.0.19", features = ["zlib"], default-features = false }
+async-trait = "0.1.42"
+getopts = "0.2.21"
+regex = "1.4.2"
 terminal = { version = "0.2" , features = ["crossterm-backend"] }
 serde = { version = "1.0.61",features=["serde_derive"]}
 serde_json = "1.0.61"
-regex = "1.4.2"
-args = "2.2.0"
-getopts = "0.2.21"
-subprocess = "0.2.6"
-encoding_rs = "0.8.26"
-futures = "*"
-num-traits = "0.2.14"
-async-trait = "0.1.42"
+lazy_static = "1.4.0"
 ahash = "0.6.3"
 
-
-[target.'cfg(target_os = "windows")'.dependencies]
-winapi = "0.3.9"
+[dependencies.rcmd-suit]
+path = "rcmd-suit"
 
 [dependencies.mysql]
 version = "=20.1.0"
 optional = true
-
 
 [[example]]
 name = "client"

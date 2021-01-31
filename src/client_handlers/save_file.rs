@@ -1,13 +1,12 @@
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use crate::client_handlers::def_handler::SubHandle;
-use crate::tools::ext_content;
-use crate::ext_code::*;
+use crate::extc::*;
 use std::io::Write;
-use crate::tools::{TOKEN_BEGIN,TOKEN_END};
 use std::mem::size_of;
 use getopts::HasArg::No;
+use rcmd_suit::tools::{ext_content, TOKEN_BEGIN, TOKEN_END};
+use rcmd_suit::client_handler::SubHandle;
 
 pub struct SaveFile
 {

@@ -1,27 +1,19 @@
-use tokio::{io, time::{ sleep}};
-mod config_build;
-mod ab_client;
-mod handler;
-mod utils;
-mod agreement;
-mod asy_cry;
-mod data_transform;
-mod ext_code;
-mod subpackage;
+use tokio::{ time::{ sleep}};
+mod extc;
 mod model;
 mod client_handlers;
-mod tools;
-mod clients;
 
-use agreement::*;
-use std::{sync::{Arc, Mutex}, time::Duration};
+use std::{sync::{Arc, Mutex}, time::Duration, io};
 use std::time::SystemTime;
 use std::collections::VecDeque;
 use std::fs::{OpenOptions};
 use std::io::*;
-use ext_code::*;
-use crate::client_handlers::def_handler::{ Handle,SubHandle};
-use crate::clients::tcp_client::TcpClient;
+use extc::*;
+use rcmd_suit::{SubHandle, tools};
+use rcmd_suit::client_handler::SubHandle;
+use rcmd_suit::clients::tcp_client::TcpClient;
+use rcmd_suit::agreement::DefParser;
+
 
 struct AutoLogin{
     acc:String,

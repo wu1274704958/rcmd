@@ -1,18 +1,8 @@
 use tokio::{io};
 use tokio::prelude::*;
-mod config_build;
-mod ab_client;
-mod handler;
-mod utils;
-mod agreement;
-mod asy_cry;
-mod data_transform;
-mod ext_code;
-mod subpackage;
+mod extc;
 mod model;
 mod client_handlers;
-mod tools;
-mod clients;
 
 use tools::*;
 use agreement::*;
@@ -23,10 +13,14 @@ use std::str::FromStr;
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::*;
-use ext_code::*;
+use extc::*;
 use crate::client_handlers::def_handler::Handle;
 use clients::udp_client::UdpClient;
 use async_std::net::{SocketAddr, IpAddr, SocketAddrV4, Ipv4Addr};
+use rcmd_suit::tools;
+use rcmd_suit::clients::udp_client::UdpClient;
+use std::net::{SocketAddr, Ipv4Addr, SocketAddrV4};
+use rcmd_suit::agreement::DefParser;
 
 #[tokio::main]
 async fn main() -> io::Result<()>

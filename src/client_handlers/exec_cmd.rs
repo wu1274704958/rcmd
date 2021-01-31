@@ -1,11 +1,11 @@
-use crate::client_handlers::def_handler::SubHandle;
 use async_std::sync::Arc;
-use std::sync::Mutex;
-use crate::utils::rcmd::*;
-use crate::ext_code::*;
-use crate::model;
-use crate::tools;
+use std::sync::{Mutex, Arc};
+use crate::extc::*;
 use std::time::Duration;
+use rcmd_suit::utils::rcmd::{Rcmd, CmdRes};
+use rcmd_suit::client_handler::SubHandle;
+use crate::model;
+use rcmd_suit::tools;
 
 pub struct Exec
 {
