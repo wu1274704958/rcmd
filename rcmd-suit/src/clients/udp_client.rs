@@ -133,11 +133,11 @@ impl <'a,T,A> UdpClient<T,A>
         let mut heartbeat_t = SystemTime::now();
         let mut asy = DefAsyCry::create();
         if let Some(v) = asy_cry_ignore{
-            asy.extend_ignore(v);
+            asy.extend_ignore(v.as_slice());
         }
         let mut spliter = DefMsgSplit::new();
         if let Some(v) = msg_split_ignore{
-            asy.extend_ignore(v);
+            asy.extend_ignore(v.as_slice());
         }
         let mut package = None;
 
@@ -154,8 +154,12 @@ impl <'a,T,A> UdpClient<T,A>
             match sock.try_recv_from(&mut buf) {
                 Ok((len,addr_)) => {
                     if addr_ == addr{
-                        if let Some(v) = sender.check_recv(&buf[0..len]).await {
-                            package = subpackager.subpackage(&v[..], v.len());
+                        match sender.check_recv(&buf[0..len]).await{
+                            Ok(v) => {
+                                package = subpackager.subpackage(&v[..], v.len());
+                            }
+                            Err(USErr::EmptyMsg) => {}
+                            Err(e) => {return Err(e);}
                         }
                     }
                 }
@@ -171,8 +175,12 @@ impl <'a,T,A> UdpClient<T,A>
             // handle request
             //dbg!(&buf_rest);
             if package.is_none() && sender.need_check(){
-                if let Some(v) = sender.check_recv(&[]).await{
-                    package = subpackager.subpackage(&v[..],v.len());
+                match sender.check_recv(&[]).await{
+                    Ok(v) => {
+                        package = subpackager.subpackage(&v[..], v.len());
+                    }
+                    Err(USErr::EmptyMsg) => {}
+                    Err(e) => {return Err(e);}
                 }
             }
             if package.is_none() && subpackager.need_check(){

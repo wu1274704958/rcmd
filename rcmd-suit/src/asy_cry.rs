@@ -52,6 +52,8 @@ pub trait AsyCry{
     }
 
     fn create()->Self;
+
+    fn extend_ignore(&mut self,v:&[u32]){}
 }
 
 pub struct DefAsyCry{
@@ -106,10 +108,6 @@ impl DefAsyCry
         self.ignore_map.contains(&ext)
     }
 
-    pub fn extend_ignore(&mut self,v:&Vec<u32>)
-    {
-        self.ignore_map.extend(v.iter());
-    }
 }
 #[async_trait]
 impl AsyCry for DefAsyCry{
@@ -307,6 +305,10 @@ impl AsyCry for DefAsyCry{
 
     fn create() -> Self {
         Self::new()
+    }
+
+    fn extend_ignore(&mut self, v: &[u32]) {
+        self.ignore_map.extend(v.iter());
     }
 }
 

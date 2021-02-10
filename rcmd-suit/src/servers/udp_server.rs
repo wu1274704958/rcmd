@@ -9,7 +9,7 @@ use std::ops::{Add, AddAssign};
 use crate::ab_client::{ABClient,State};
 use crate::subpackage::{DefSubpackage,Subpackage};
 use crate::asy_cry::{DefAsyCry,AsyCry,EncryptRes,NoAsyCry};
-use crate::utils::udp_sender::{DefUdpSender,UdpSender};
+use crate::utils::udp_sender::{DefUdpSender, UdpSender, USErr};
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use tokio::io;
@@ -216,6 +216,25 @@ async fn del_linker(linker_map:&Arc<Mutex<HashMap<u64,mpsc::Sender<Vec<u8>>>>>,i
     abs.remove(&id);
 }
 
+async fn clean<LID,ABC,PL,PLM>(
+    dead_plugs_cp:Arc<PLM>,
+    logic_id:LID,
+    clients:Arc<Mutex<HashMap<LID, Box<ABC>>>>,
+    conf:Arc<Config>,
+    lid:Arc<Mutex<LID>>,
+    link_id:u64,
+    linker_map:Arc<Mutex<HashMap<u64,mpsc::Sender<Vec<u8>>>>>
+)
+    where PL : Plug<ABClient=ABC,Id=LID,Config=Config>,
+          PLM: PlugMgr<PL> + Send + std::marker::Sync,
+          LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+          ABC: ABClient<LID = LID> + Send
+{
+    dead_plugs_cp.run(logic_id.clone(),&clients,conf).await;
+    del_client_ex(&clients,&lid,logic_id).await;
+    del_linker(&linker_map,link_id).await;
+}
+
 #[allow(unused_must_use)]
 #[allow(unused_variables)]
 pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
@@ -268,9 +287,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
             if st.is_none() { println!(" begin ee1");return; }
             match st{
                 Some(State::WaitKill) => {
-                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                    del_client_ex(&clients,&lid,logic_id.clone()).await;
-                    del_linker(&linker_map,link_id).await;
+                    clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
                     return;
                 }
                 _ => {}
@@ -285,8 +302,15 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 {
                     set_client_st_ex(&clients,logic_id.clone(), State::Busy).await;
                     let b = SystemTime::now();
-                    if let Some(v) = sender.check_recv(&buf[..]).await {
-                        package = subpackager.subpackage(&v[..], v.len());
+                    match sender.check_recv(&buf[..]).await{
+                        Ok(v) => {
+                            package = subpackager.subpackage(&v[..], v.len());
+                        }
+                        Err(USErr::EmptyMsg) => {}
+                        Err(e) => {
+                            clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                            return;
+                        }
                     }
                     let e = SystemTime::now();
                     //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
@@ -297,16 +321,21 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
             }
             Err(e) => {
                 eprintln!("recv error = {}", e);
-                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                del_client_ex(&clients,&lid,logic_id.clone()).await;
-                del_linker(&linker_map,link_id).await;
+                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
                 return;
             }
         };
 
         if package.is_none() && sender.need_check(){
-            if let Some(v) = sender.check_recv(&[]).await{
-                package = subpackager.subpackage(&v[..],v.len());
+            match sender.check_recv(&[]).await{
+                Ok(v) => {
+                    package = subpackager.subpackage(&v[..], v.len());
+                }
+                Err(USErr::EmptyMsg) => {}
+                Err(e) => {
+                    clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                    return;
+                }
             }
         }
 
@@ -346,9 +375,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 if let Some(v) = immediate_send
                 {
                     if let Err(_) = sender.send_msg(parser_cp.package_nor(v, m.ext)).await{
-                        dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                        del_client_ex(&clients,&lid,logic_id.clone()).await;
-                        del_linker(&linker_map,link_id).await;
+                        clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
                         return;
                     }
                     continue;
@@ -385,9 +412,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                                 _ => { data.to_vec()}
                             };
                             if let Err(_) = sender.send_msg(parser_cp.package_tf(send_data, ext,tag)).await{
-                                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                                del_client_ex(&clients,&lid,logic_id.clone()).await;
-                                del_linker(&linker_map,link_id).await;
+                                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
                                 return;
                             }
                         }
@@ -400,9 +425,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                             _ => {}
                         };
                         if let Err(_) = sender.send_msg(parser_cp.package_nor(respose, ext)).await{
-                            dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                            del_client_ex(&clients,&lid,logic_id.clone()).await;
-                            del_linker(&linker_map,link_id).await;
+                            clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
                             return;
                         }
                     }
@@ -410,9 +433,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
             }
         }else{
             if let Err(_) = sender.check_send().await{
-                dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                del_client_ex(&clients,&lid,logic_id.clone()).await;
-                del_linker(&linker_map,link_id).await;
+                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
                 return;
             }
         }
@@ -440,9 +461,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                         _ => { data.to_vec()}
                     };
                     if let Err(_) = sender.send_msg(parser_cp.package_tf(send_data, ext, tag)).await{
-                        dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                        del_client_ex(&clients,&lid,logic_id.clone()).await;
-                        del_linker(&linker_map,link_id).await;
+                        clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
                         return;
                     };
                 }
@@ -454,9 +473,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                     _ => {}
                 };
                 if let Err(_) = sender.send_msg(parser_cp.package_nor(data, e)).await{
-                    dead_plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
-                    del_client_ex(&clients,&lid,logic_id.clone()).await;
-                    del_linker(&linker_map,link_id).await;
+                    clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
                     return;
                 };
             }

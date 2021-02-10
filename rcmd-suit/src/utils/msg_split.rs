@@ -14,6 +14,7 @@ pub trait MsgSplit{
     fn split<'a>(&mut self,data:&'a mut Vec<u8>,ext:u32) -> Vec<(&'a [u8],u32,u8)>;
     fn need_merge<'a>(&self,msg:&'a Message<'a>)->bool;
     fn merge<'a>(&mut self,msg:&'a Message<'a>)->Option<(Vec<u8>, u32)>;
+    fn extend_ignore(&mut self,v:&[u32]);
 }
 
 pub struct DefMsgSplit{
@@ -52,10 +53,6 @@ impl DefMsgSplit{
         (u16::from_be_bytes(f),u16::from_be_bytes(s))
     }
 
-    pub fn extend_ignore(&mut self,v:&Vec<u32>)
-    {
-        self.ignore_map.extend(v.iter());
-    }
 }
 
 impl MsgSplit for DefMsgSplit
@@ -155,6 +152,10 @@ impl MsgSplit for DefMsgSplit
             _ => {None}
         }
     }
+
+    fn extend_ignore(&mut self, v: &[u32]) {
+        self.ignore_map.extend(v.iter());
+    }
 }
 
 pub struct UdpMsgSplit
@@ -209,14 +210,14 @@ impl UdpMsgSplit{
 
     pub fn up_unit_size(&mut self)
     {
-        let mut n = self.unit_size * 2;
+        let mut n = self.unit_size + (self.unit_size / 10);
         if n > self.max_unit_size { n = self.max_unit_size; }
         self.unit_size = n;
     }
 
     pub fn down_unit_size(&mut self)
     {
-        let mut n = self.unit_size - (self.unit_size / 10);
+        let mut n = self.unit_size - (self.unit_size / 30);
         if n < self.min_unit_size { n = self.min_unit_size; }
         self.unit_size = n;
     }

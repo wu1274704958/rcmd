@@ -15,7 +15,7 @@ use crate::utils::msg_split::UdpMsgSplit;
 #[async_trait]
 pub trait UdpSender{
     async fn send_msg(&mut self,v:Vec<u8>)->Result<(),USErr>;
-    async fn check_recv(&mut self,data:&[u8])-> Option<Vec<u8>>;
+    async fn check_recv(&mut self, data: &[u8]) -> Result<Vec<u8>,USErr>;
     fn need_check(&self)->bool;
     fn create(sock:Arc<UdpSocket>,addr:SocketAddr) ->Self;
     fn set_max_msg_len(&mut self,len:u16);
@@ -52,7 +52,9 @@ pub enum USErr{
     EmptyMsg,
     MsgCacheOverflow,
     RetryTimesLimit,
-    Warp(std::io::Error)
+    Warp(std::io::Error),
+    ResponseSendSuccMiss,
+    SendSuccMissCache
 }
 
 impl USErr {
@@ -66,6 +68,8 @@ impl USErr {
                 None => {-3}
                 Some(v) => {v}
             }}
+            USErr::ResponseSendSuccMiss => {-4},
+            USErr::SendSuccMissCache=>{-5}
         }
     }
 
@@ -76,6 +80,8 @@ impl USErr {
             USErr::MsgCacheOverflow => {"Message cache overflow".to_string()}
             USErr::RetryTimesLimit => {"Retry times reach the maximum".to_string()}
             USErr::Warp(e) => {  format!("{}",e) }
+            USErr::ResponseSendSuccMiss => { "Response send success miss message id".to_string() },
+            USErr::SendSuccMissCache=>{"Send success miss the cache".to_string()}
         }
     }
 }
@@ -189,7 +195,7 @@ impl DefUdpSender
         }
     }
 
-    async fn unwarp(&mut self,data:&[u8])-> Option<Vec<u8>>
+    async fn unwarp(&mut self,data:&[u8])-> Result<Vec<u8>,USErr>
     {
         let mut d = None;
         if data.is_empty() && self.need_check_in()
@@ -208,17 +214,18 @@ impl DefUdpSender
                 None => { None }
                 Some(v) => {
                     let (msg, id, ext,tag) = self.unwarp_ex(v.as_slice());
-                    if self.check_send_recv(msg,ext,tag,id)
+                    if self.check_send_recv(msg,ext,tag,id).await?
                     {
-                        return None;
+                        return Err(USErr::EmptyMsg);
                     }
                     //println!("recv msg {} {:?}",id,msg);
-                    self.send_recv(id).await;
                     if id > self.expect_id
                     {
+                        self.send_recv(id).await;
                         self.recv_cache.insert(id, (msg.to_vec(), ext,tag));
                         None
                     } else if id == self.expect_id {
+                        self.send_recv(id).await;
                         self.next_expect();
                         Some((msg.to_vec(),ext,tag))
                     }else { None }
@@ -229,23 +236,37 @@ impl DefUdpSender
             if self.msg_split.need_merge(tag){
                 if let Some(v) = self.msg_split.merge(msg.as_slice(),ext,tag)
                 {
-                    return Some(v);
+                    return Ok(v);
                 }
             }else{
-                return Some(msg);
+                return Ok(msg);
             }
         }
-        None
+        Err(USErr::EmptyMsg)
     }
 
-    fn check_send_recv(&mut self,msg:&[u8],ext:u32,tag:u8,id:usize) -> bool
+    async fn check_send_recv(&mut self,msg:&[u8],ext:u32,tag:u8,id:usize) -> Result<bool,USErr>
     {
-        if msg.len() == 1 && msg[0] == 199 && ext == Self::mn_send_recv() && tag == TOKEN_NORMAL {
-            //println!("op recv msg {}",id);
-            self.remove_cache(id);
-            true
+        if msg.len() == 1 && msg[0] == 199 && tag == TOKEN_NORMAL {
+            if ext == Self::mn_send_recv(){
+                //println!("op recv msg {}",id);
+                //self.remove_cache(id);
+                if let Some((_,t,times)) = self.remove_cache(id)
+                {
+                    println!("op recv msg id = {} times = {}",id,times);
+                    self.check_msg_cache_queue().await;
+                }
+                // else{
+                //     let v = Self::warp_ex(&[199],Self::mn_miss_cache(),TOKEN_NORMAL,id);
+                //     Self::send_ex(self.sock.clone(),self.addr,v.as_slice()).await;
+                //     return Err(USErr::ResponseSendSuccMiss);
+                // }
+                Ok(true)
+            }else if ext == Self::mn_miss_cache(){
+                Err(USErr::SendSuccMissCache)
+            }else { Ok(false) }
         }else{
-            false
+            Ok(false)
         }
     }
 
@@ -268,7 +289,14 @@ impl DefUdpSender
 
     async fn send(&self,d:&[u8]) -> Result<usize,USErr>
     {
-        match self.sock.send_to(d,self.addr).await{
+        let sock = self.sock.clone();
+        let addr = self.addr;
+        Self::send_ex(sock,addr,d).await
+    }
+
+    async fn send_ex(sock:Arc<UdpSocket>,addr:SocketAddr,d:&[u8]) -> Result<usize,USErr>
+    {
+        match sock.send_to(d,addr).await{
             Ok(l) => {
                 Ok(l)
             }
@@ -278,20 +306,6 @@ impl DefUdpSender
             }
         }
         //if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
-    }
-
-    async fn send_ex(sock:Arc<UdpSocket>,addr:SocketAddr,d:&[u8])
-    {
-        let len = match sock.send_to(d,addr).await{
-            Ok(l) => {
-                l
-            }
-            Err(e) => {
-                eprintln!("udp send msg failed {:?}",e);
-                0
-            }
-        };
-        if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
     }
 
     fn unwarp_ex<'a>(&self,data: &'a [u8])->(&'a[u8],usize,u32,u8)
@@ -320,13 +334,14 @@ impl DefUdpSender
         self.subpacker.need_check() || self.need_check_in()
     }
 
-    fn magic_num_0()->u8 {3}
-    fn magic_num_1()->u8 {1}
-    fn magic_num_2()->u8 {7}
-    fn magic_num_3()->u8 {2}
-    fn magic_num_4()->u8 {6}
+    const fn magic_num_0()->u8 {3}
+    const fn magic_num_1()->u8 {1}
+    const fn magic_num_2()->u8 {7}
+    const fn magic_num_3()->u8 {2}
+    const fn magic_num_4()->u8 {6}
 
-    fn mn_send_recv()->u32 {u32::max_value()}
+    const fn mn_send_recv()->u32 {u32::max_value()}
+    const fn mn_miss_cache()->u32 {u32::max_value()-1}
 
     fn package_len()->usize
     {
@@ -335,20 +350,30 @@ impl DefUdpSender
 
     fn adjust_unit_size(&mut self,times_frequency:HashMap<u16,u32>)
     {
-
+        // times_frequency.into_iter().for_each(|(times,f)|{
+        //     if times > self.max_retry_times / 10 {
+        //         self.msg_split.down_unit_size();
+        //         println!("down unit size curr = {} ",self.msg_split.unit_size());
+        //     }else if times < 3 && f == self.cache_size as u32{
+        //         self.msg_split.up_unit_size();
+        //         println!("up unit size curr = {} ",self.msg_split.unit_size());
+        //     }
+        // });
     }
 
     async fn check_msg_cache_queue(&mut self)
     {
-        if self.queue.len() < self.cache_size as usize
-        {
-            if let Some((id, v)) = self.msg_cache_queue.pop_front()
+        loop {
+            if self.queue.len() < self.cache_size as usize
             {
-                let sock = self.sock.clone();
-                let addr = self.addr;
-                let a = { self.push_cache(id,v).ok().unwrap() };
-                Self::send_ex(sock,addr,a).await;
-            }
+                if let Some((id, v)) = self.msg_cache_queue.pop_front()
+                {
+                    let sock = self.sock.clone();
+                    let addr = self.addr;
+                    let a = { self.push_cache(id, v).ok().unwrap() };
+                    Self::send_ex(sock, addr, a).await;
+                }else { break; }
+            }else{break;}
         }
     }
 }
@@ -380,7 +405,7 @@ impl UdpSender for DefUdpSender
         }
     }
 
-    async fn check_recv(&mut self, data: &[u8]) -> Option<Vec<u8>> {
+    async fn check_recv(&mut self, data: &[u8]) -> Result<Vec<u8>,USErr> {
         self.unwarp(data).await
     }
 
@@ -390,7 +415,7 @@ impl UdpSender for DefUdpSender
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        let cache_size = 10;
+        let cache_size = 50;
         let max_len = 65500 - Self::package_len();
         let min_len = 1500 - Self::package_len();
         DefUdpSender{
@@ -405,9 +430,9 @@ impl UdpSender for DefUdpSender
             expect_id: 1,
             recv_cache: HashMap::new(),
             subpacker: UdpSubpackage::new(),
-            timeout: Duration::from_millis(200),
+            timeout: Duration::from_millis(40),
             msg_split: UdpMsgSplit::with_max_unit_size(max_len,min_len),
-            max_retry_times: 30,
+            max_retry_times: 100,
             msg_cache_queue: VecDeque::new()
         }
     }
@@ -465,7 +490,7 @@ impl UdpSender for DefUdpSender
         }
 
         self.adjust_unit_size(times_frequency);
-        self.check_msg_cache_queue().await;
+        //self.check_msg_cache_queue().await;
         Ok(())
     }
 
