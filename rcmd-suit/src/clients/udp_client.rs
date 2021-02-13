@@ -156,7 +156,7 @@ impl <'a,T,A> UdpClient<T,A>
                     if addr_ == addr{
                         match sender.check_recv(&buf[0..len]).await{
                             Ok(v) => {
-                                package = subpackager.subpackage(&v[..], v.len());
+                                //package = subpackager.subpackage(&v[..], v.len());
                             }
                             Err(USErr::EmptyMsg) => {}
                             Err(e) => {return Err(e);}
@@ -174,10 +174,10 @@ impl <'a,T,A> UdpClient<T,A>
 
             // handle request
             //dbg!(&buf_rest);
-            if package.is_none() && sender.need_check(){
+            if package.is_none() && sender.need_check().await{
                 match sender.check_recv(&[]).await{
                     Ok(v) => {
-                        package = subpackager.subpackage(&v[..], v.len());
+                        //package = subpackager.subpackage(&v[..], v.len());
                     }
                     Err(USErr::EmptyMsg) => {}
                     Err(e) => {return Err(e);}

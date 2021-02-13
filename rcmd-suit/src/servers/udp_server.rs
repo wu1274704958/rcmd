@@ -210,34 +210,29 @@ async fn del_client_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>>,logic
     res
 }
 
-async fn del_linker(linker_map:&Arc<Mutex<HashMap<u64,mpsc::Sender<Vec<u8>>>>>,id:u64)
-{
-    let mut abs = linker_map.lock().await;
-    abs.remove(&id);
-}
 
-async fn clean<LID,ABC,PL,PLM>(
+async fn clean<LID,ABC,PL,PLM,F>(
     dead_plugs_cp:Arc<PLM>,
     logic_id:LID,
     clients:Arc<Mutex<HashMap<LID, Box<ABC>>>>,
     conf:Arc<Config>,
     lid:Arc<Mutex<LID>>,
-    link_id:u64,
-    linker_map:Arc<Mutex<HashMap<u64,mpsc::Sender<Vec<u8>>>>>
+    on_ret:F,
 )
     where PL : Plug<ABClient=ABC,Id=LID,Config=Config>,
           PLM: PlugMgr<PL> + Send + std::marker::Sync,
           LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
-          ABC: ABClient<LID = LID> + Send
+          ABC: ABClient<LID = LID> + Send,
+            F:FnOnce()
 {
     dead_plugs_cp.run(logic_id.clone(),&clients,conf).await;
     del_client_ex(&clients,&lid,logic_id).await;
-    del_linker(&linker_map,link_id).await;
+    on_ret();
 }
 
 #[allow(unused_must_use)]
 #[allow(unused_variables)]
-pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
+pub async fn run_in<LID,ABC,P,SH,H,PL,PLM,F,SE>
 (
     clients:Arc<Mutex<HashMap<LID,Box<ABC>>>>,
     lid:Arc<Mutex<LID>>,
@@ -247,10 +242,9 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
     plugs_cp:Arc<PLM>,
     dead_plugs_cp:Arc<PLM>,
     socket:Arc<UdpSocket>,
-    mut rx:mpsc::Receiver<Vec<u8>>,
+    sender:Arc<SE>,
     addr:SocketAddr,
-    link_id:u64,
-    linker_map:Arc<Mutex<HashMap<u64,mpsc::Sender<Vec<u8>>>>>,
+    on_ret:F,
     asy_cry_ignore:Option<&Vec<u32>>,
     msg_split_ignore:Option<&Vec<u32>>
 )
@@ -260,7 +254,9 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
           PLM: PlugMgr<PL> + Send + std::marker::Sync,
           P : Agreement + Send + std::marker::Sync,
           LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
-          ABC: ABClient<LID = LID> + Send
+          ABC: ABClient<LID = LID> + Send,
+          F : FnOnce(),
+          SE : UdpSender + Send + std::marker::Sync
 {
     let local_addr = socket.local_addr().unwrap();
 
@@ -278,7 +274,6 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         spliter.extend_ignore(v);
     }
     let mut package = None;
-    let mut sender = DefUdpSender::create(socket.clone(),addr);
     // In a loop, read data from the socket and write the data back.
     loop {
 
@@ -287,7 +282,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
             if st.is_none() { println!(" begin ee1");return; }
             match st{
                 Some(State::WaitKill) => {
-                    clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                    clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                     return;
                 }
                 _ => {}
@@ -295,47 +290,16 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         }
         // read request
         // println!(" read the request....");
-        match rx.try_recv() {
-            Ok(buf) => {
-                //println!("n = {}",n);
-                if !buf.is_empty()
-                {
-                    set_client_st_ex(&clients,logic_id.clone(), State::Busy).await;
-                    let b = SystemTime::now();
-                    match sender.check_recv(&buf[..]).await{
-                        Ok(v) => {
-                            package = subpackager.subpackage(&v[..], v.len());
-                        }
-                        Err(USErr::EmptyMsg) => {}
-                        Err(e) => {
-                            clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
-                            return;
-                        }
-                    }
-                    let e = SystemTime::now();
-                    //println!("subpackage use {} ms",e.duration_since(b).unwrap().as_millis());
-                }
+        match sender.pop_recv_msg().await{
+            Ok(v) => {
+                set_client_st_ex(&clients,logic_id.clone(), State::Busy).await;
+                package = subpackager.subpackage(&v[..],v.len());
             }
-            Err(mpsc::error::TryRecvError::Empty) =>{
-
-            }
+            Err(USErr::EmptyMsg) => {}
             Err(e) => {
-                eprintln!("recv error = {}", e);
-                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                eprintln!("recv error = {:?}",e);
+                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                 return;
-            }
-        };
-
-        if package.is_none() && sender.need_check(){
-            match sender.check_recv(&[]).await{
-                Ok(v) => {
-                    package = subpackager.subpackage(&v[..], v.len());
-                }
-                Err(USErr::EmptyMsg) => {}
-                Err(e) => {
-                    clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
-                    return;
-                }
             }
         }
 
@@ -375,7 +339,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                 if let Some(v) = immediate_send
                 {
                     if let Err(_) = sender.send_msg(parser_cp.package_nor(v, m.ext)).await{
-                        clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                        clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                         return;
                     }
                     continue;
@@ -411,8 +375,9 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                                 }
                                 _ => { data.to_vec()}
                             };
-                            if let Err(_) = sender.send_msg(parser_cp.package_tf(send_data, ext,tag)).await{
-                                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                            if let Err(e) = sender.send_msg(parser_cp.package_tf(send_data, ext,tag)).await{
+                                eprintln!("recv error = {:?}",e);
+                                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                                 return;
                             }
                         }
@@ -424,16 +389,18 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                             }
                             _ => {}
                         };
-                        if let Err(_) = sender.send_msg(parser_cp.package_nor(respose, ext)).await{
-                            clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                        if let Err(e) = sender.send_msg(parser_cp.package_nor(respose, ext)).await{
+                            eprintln!("recv error = {:?}",e);
+                            clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                             return;
                         }
                     }
                 }
             }
         }else{
-            if let Err(_) = sender.check_send().await{
-                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+            if let Err(e) = sender.check_send().await{
+                eprintln!("recv error = {:?}",e);
+                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                 return;
             }
         }
@@ -461,7 +428,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                         _ => { data.to_vec()}
                     };
                     if let Err(_) = sender.send_msg(parser_cp.package_tf(send_data, ext, tag)).await{
-                        clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                        clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                         return;
                     };
                 }
@@ -473,7 +440,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
                     _ => {}
                 };
                 if let Err(_) = sender.send_msg(parser_cp.package_nor(data, e)).await{
-                    clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),link_id,linker_map.clone()).await;
+                    clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                     return;
                 };
             }

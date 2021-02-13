@@ -12,12 +12,16 @@ use async_std::io::Error;
 use crate::tools::{TOKEN_NORMAL};
 use crate::utils::msg_split::UdpMsgSplit;
 use tokio::sync::Mutex;
+use crate::utils::udp_sender::USErr::Warp;
+use std::fmt::Debug;
+use winapi::_core::fmt::Formatter;
 
 #[async_trait]
 pub trait UdpSender{
     async fn send_msg(&self,v:Vec<u8>)->Result<(),USErr>;
-    async fn check_recv(&mut self, data: &[u8]) -> Result<Vec<u8>,USErr>;
-    fn need_check(&self)->bool;
+    async fn check_recv(&self, data: &[u8]) -> Result<(),USErr>;
+    async fn pop_recv_msg(&self) -> Result<Vec<u8>,USErr>;
+    async fn need_check(&self)->bool;
     fn create(sock:Arc<UdpSocket>,addr:SocketAddr) ->Self;
     async fn set_max_msg_len(&mut self,len:u16);
     fn max_msg_len(&self)->u16;
@@ -26,7 +30,7 @@ pub trait UdpSender{
     fn cache_size(&self)->u16;
     fn set_cache_size(&mut self,s:u16);
     fn set_time_out(&mut self,dur:Duration);
-    async fn check_send(&mut self)->Result<(),USErr>;
+    async fn check_send(&self)->Result<(),USErr>;
     fn set_retry_times(&mut self,v:u16);
     fn retry_times(&self)->u16;
 }
@@ -39,21 +43,24 @@ pub struct DefUdpSender{
     mid: Arc<Mutex<usize>>,
     queue: Arc<Mutex<VecDeque<usize>>>,
     msg_map: Arc<Mutex<HashMap<usize,(Vec<u8>,SystemTime,u16)>>>,
-    recv_cache: HashMap<usize,(Vec<u8>,u32,u8)>,
-    expect_id: usize,
+    recv_cache: Arc<Mutex<HashMap<usize,(Vec<u8>,u32,u8)>>>,
+    expect_id: Arc<Mutex<usize>>,
     addr:SocketAddr,
-    subpacker: UdpSubpackage,
+    subpacker: Arc<Mutex<UdpSubpackage>>,
     timeout: Duration,
     msg_split: Arc<Mutex<UdpMsgSplit>>,
     max_retry_times: u16,
-    msg_cache_queue: Arc<Mutex<VecDeque<(usize,Vec<u8>)>>>
+    msg_cache_queue: Arc<Mutex<VecDeque<(usize,Vec<u8>)>>>,
+    recv_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    error: Arc<Mutex<Option<USErr>>>
 }
 
+#[derive(Clone)]
 pub enum USErr{
     EmptyMsg,
     MsgCacheOverflow,
     RetryTimesLimit,
-    Warp(std::io::Error),
+    Warp((i32,String)),
     ResponseSendSuccMiss,
     SendSuccMissCache
 }
@@ -65,10 +72,7 @@ impl USErr {
             USErr::EmptyMsg => { 0 }
             USErr::MsgCacheOverflow => {-1}
             USErr::RetryTimesLimit => {-2}
-            USErr::Warp(e) => { match e.raw_os_error() {
-                None => {-3}
-                Some(v) => {v}
-            }}
+            USErr::Warp(e) => { (*e).0 }
             USErr::ResponseSendSuccMiss => {-4},
             USErr::SendSuccMissCache=>{-5}
         }
@@ -80,7 +84,7 @@ impl USErr {
             USErr::EmptyMsg => {"Empty Message".to_string()}
             USErr::MsgCacheOverflow => {"Message cache overflow".to_string()}
             USErr::RetryTimesLimit => {"Retry times reach the maximum".to_string()}
-            USErr::Warp(e) => {  format!("{}",e) }
+            USErr::Warp(e) => {  (*e).1.clone() }
             USErr::ResponseSendSuccMiss => { "Response send success miss message id".to_string() },
             USErr::SendSuccMissCache=>{"Send success miss the cache".to_string()}
         }
@@ -90,7 +94,22 @@ impl USErr {
 impl From<std::io::Error> for USErr
 {
     fn from(e: Error) -> Self {
-        USErr::Warp(e)
+        let code = match e.raw_os_error() {
+            None => {-3}
+            Some(v) => {v}
+        };
+        let str = format!("{}",e);
+        Warp((code,str))
+    }
+}
+
+impl Debug for USErr
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("USErr")
+            .field(&self.code())
+            .field(&self.err_str())
+            .finish()
     }
 }
 
@@ -176,21 +195,26 @@ impl DefUdpSender
         msg_map.remove(&mid)
     }
 
-    async fn unwarp(&mut self,data:&[u8])-> Result<Vec<u8>,USErr>
+    async fn unwarp(&self,data:&[u8])-> Result<Vec<u8>,USErr>
     {
         let mut d = None;
-        if data.is_empty() && self.need_check_in()
+        if data.is_empty() && self.need_check_in().await
         {
-            match self.recv_cache.remove(&self.expect_id){
+            let mut recv_cache = self.recv_cache.lock().await;
+            match recv_cache.remove(&self.get_expect().await){
                 None => {}
                 Some(v) => {
-                    self.next_expect();
+                    self.next_expect().await;
                     d = Some(v);
                 }
             }
         }
         if d.is_none() {
-            d = match self.subpacker.subpackage(data, data.len())
+            let package_v = {
+                let mut subpacker = self.subpacker.lock().await;
+                subpacker.subpackage(data, data.len())
+            };
+            d = match package_v
             {
                 None => { None }
                 Some(v) => {
@@ -200,14 +224,15 @@ impl DefUdpSender
                         return Err(USErr::EmptyMsg);
                     }
                     //println!("recv msg {} {:?}",id,msg);
-                    if id > self.expect_id
+                    if id > self.get_expect().await
                     {
                         self.send_recv(id).await;
-                        self.recv_cache.insert(id, (msg.to_vec(), ext,tag));
+                        let mut recv_cache = self.recv_cache.lock().await;
+                        recv_cache.insert(id, (msg.to_vec(), ext,tag));
                         None
-                    } else if id == self.expect_id {
+                    } else if id == self.get_expect().await {
                         self.send_recv(id).await;
-                        self.next_expect();
+                        self.next_expect().await;
                         Some((msg.to_vec(),ext,tag))
                     }else { None }
                 }
@@ -227,7 +252,7 @@ impl DefUdpSender
         Err(USErr::EmptyMsg)
     }
 
-    async fn check_send_recv(&mut self,msg:&[u8],ext:u32,tag:u8,id:usize) -> Result<bool,USErr>
+    async fn check_send_recv(&self,msg:&[u8],ext:u32,tag:u8,id:usize) -> Result<bool,USErr>
     {
         if msg.len() == 1 && msg[0] == 199 && tag == TOKEN_NORMAL {
             if ext == Self::mn_send_recv(){
@@ -252,20 +277,28 @@ impl DefUdpSender
         }
     }
 
-    fn next_expect(&mut self)->usize
+    async fn next_expect(&self)->usize
     {
-        if self.expect_id == usize::max_value()
+        let mut expect_id = self.expect_id.lock().await;
+        if *expect_id == usize::max_value()
         {
-            self.expect_id = usize::one();
+            *expect_id = usize::one();
         }else{
-            self.expect_id += usize::one();
+            *expect_id += usize::one();
         }
-        self.expect_id
+        *expect_id
+    }
+
+    async fn get_expect(&self)->usize
+    {
+        let mut expect_id = self.expect_id.lock().await;
+        *expect_id
     }
 
     async fn send_recv(&self,id:usize) -> Result<usize,USErr>
     {
         let v = Self::warp_ex(&[199],Self::mn_send_recv(),TOKEN_NORMAL,id);
+        self.send(v.as_slice()).await?;
         self.send(v.as_slice()).await
     }
 
@@ -284,7 +317,7 @@ impl DefUdpSender
             }
             Err(e) => {
                 eprintln!("udp send msg failed {:?}",e);
-                Err(USErr::Warp(e))
+                Err(e.into())
             }
         }
         //if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
@@ -307,13 +340,15 @@ impl DefUdpSender
         (&data[msg_p..data.len()],usize::from_be_bytes(id_buf),u32::from_be_bytes(ext_buf),tag)
     }
 
-    fn need_check_in(&self)-> bool
+    async fn need_check_in(&self)-> bool
     {
-        !self.recv_cache.is_empty() && self.recv_cache.contains_key(&self.expect_id)
+        let recv_cache = self.recv_cache.lock().await;
+        !recv_cache.is_empty() && recv_cache.contains_key(&self.get_expect().await)
     }
 
-    fn need_check(&self) -> bool {
-        self.subpacker.need_check() || self.need_check_in()
+    async fn need_check(&self) -> bool {
+        let subpacker = self.subpacker.lock().await;
+        subpacker.need_check() || self.need_check_in().await
     }
 
     const fn magic_num_0()->u8 {3}
@@ -368,6 +403,12 @@ impl DefUdpSender
         let mut msg_split = self.msg_split.lock().await;
         msg_split.need_split(len)
     }
+
+    async fn set_error(&self,e:USErr)
+    {
+        let mut err = self.error.lock().await;
+        *err = Some(e);
+    }
 }
 
 #[async_trait]
@@ -400,13 +441,42 @@ impl UdpSender for DefUdpSender
         }
     }
 
-    async fn check_recv(&mut self, data: &[u8]) -> Result<Vec<u8>,USErr> {
-        self.unwarp(data).await
+    async fn check_recv(&self, data: &[u8]) -> Result<(),USErr> {
+        match self.unwarp(data).await
+        {
+            Ok(v) => {
+                let mut recv_queue = self.recv_queue.lock().await;
+                recv_queue.push_back(v);
+                Ok(())
+            }
+            Err(USErr::EmptyMsg) => {Ok(())}
+            Err(e) => {
+                self.set_error(e.clone());
+                Err(e)
+            }
+        }
+    }
+
+    async fn pop_recv_msg(&self) -> Result<Vec<u8>,USErr>
+    {
+        {
+            let err = self.error.lock().await;
+            if let Some(e) = err.clone(){
+                return Err(e);
+            }
+        }
+        let mut recv_queue = self.recv_queue.lock().await;
+        if let Some(v) = recv_queue.pop_front()
+        {
+            Ok(v)
+        }else {
+            Err(USErr::EmptyMsg)
+        }
     }
 
 
-    fn need_check(&self) -> bool {
-        self.need_check()
+    async fn need_check(&self) -> bool {
+        self.need_check().await
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
@@ -422,13 +492,15 @@ impl UdpSender for DefUdpSender
             mid: Arc::new(Mutex::new(usize::zero())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             msg_map: Arc::new(Mutex::new(HashMap::new())),
-            expect_id: 1,
-            recv_cache: HashMap::new(),
-            subpacker: UdpSubpackage::new(),
-            timeout: Duration::from_millis(40),
+            expect_id: Arc::new(Mutex::new(1)),
+            recv_cache: Arc::new(Mutex::new(HashMap::new())),
+            subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
+            timeout: Duration::from_millis(400),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
             max_retry_times: 100,
-            msg_cache_queue: Arc::new(Mutex::new(VecDeque::new()))
+            msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
+            recv_queue: Arc::new(Mutex::new(VecDeque::new())),
+            error :Arc::new(Mutex::new(None))
         }
     }
 
@@ -464,7 +536,7 @@ impl UdpSender for DefUdpSender
         self.timeout = dur;
     }
 
-    async fn check_send(&mut self) -> Result<(),USErr> {
+    async fn check_send(&self) -> Result<(),USErr> {
         let now = SystemTime::now();
         let mut times_frequency = HashMap::<u16,u32>::new();
         {
@@ -489,7 +561,7 @@ impl UdpSender for DefUdpSender
             }
         }
 
-        self.adjust_unit_size(times_frequency);
+        //self.adjust_unit_size(times_frequency);
         //self.check_msg_cache_queue().await;
         Ok(())
     }
