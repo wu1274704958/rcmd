@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use tokio::net::UdpSocket;
-use std::sync::Arc;
+use std::sync::{Arc};
 use num_traits::{One, Zero};
 use std::collections::{VecDeque, HashMap};
 use std::mem::size_of;
@@ -11,7 +11,7 @@ use std::time::SystemTime;
 use async_std::io::Error;
 use crate::tools::{TOKEN_NORMAL};
 use crate::utils::msg_split::UdpMsgSplit;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex,MutexGuard};
 use crate::utils::udp_sender::USErr::Warp;
 use std::fmt::Debug;
 use winapi::_core::fmt::Formatter;
@@ -130,7 +130,7 @@ impl DefUdpSender
     async fn warp(&self,v:&[u8],ext:u32,tag:u8)->Result<Vec<u8>,USErr>
     {
         let mid = self.get_mid().await;
-        //println!("send id {} {:?}",mid,v);
+        //println!("send id {}",mid);
         let res = Self::warp_ex(v,ext,tag,mid);
         self.push_cache(mid,res.clone()).await?;
         Ok(res)
@@ -224,17 +224,19 @@ impl DefUdpSender
                         return Err(USErr::EmptyMsg);
                     }
                     //println!("recv msg {} {:?}",id,msg);
-                    if id > self.get_expect().await
+                    let mut except = self.expect_id.lock().await;
+                    if id == *except {
+                        self.send_recv(id).await;
+                        drop(except);
+                        self.next_expect().await;
+                        Some((msg.to_vec(),ext,tag))
+                    }else if id > *except && id < *except + 10
                     {
                         self.send_recv(id).await;
                         let mut recv_cache = self.recv_cache.lock().await;
                         recv_cache.insert(id, (msg.to_vec(), ext,tag));
                         None
-                    } else if id == self.get_expect().await {
-                        self.send_recv(id).await;
-                        self.next_expect().await;
-                        Some((msg.to_vec(),ext,tag))
-                    }else { None }
+                    } else { None }
                 }
             };
         }
@@ -260,7 +262,7 @@ impl DefUdpSender
                 //self.remove_cache(id).await;
                 if let Some((_,t,times)) = self.remove_cache(id).await
                 {
-                    println!("op recv msg id = {} times = {}",id,times);
+                    //println!("op recv msg id = {} times = {}",id,times);
                     self.check_msg_cache_queue().await;
                 }
                 // else{
@@ -381,18 +383,21 @@ impl DefUdpSender
     async fn check_msg_cache_queue(&self)
     {
         let mut queue = self.queue.lock().await;
-        let mut msg_cache_queue = self.msg_cache_queue.lock().await;
         loop {
             if queue.len() < self.cache_size as usize
             {
-                if let Some((id, v)) = msg_cache_queue.pop_front()
-                {
+                if let Some((id, v)) = {
+                    let mut msg_cache_queue = self.msg_cache_queue.lock().await;
+                    msg_cache_queue.pop_front()
+                }{
                     let sock = self.sock.clone();
                     let addr = self.addr;
-                    self.push_cache(id, v).await.ok().unwrap();
+
+                    queue.push_back(id);
                     let mut msg_map = self.msg_map.lock().await;
-                    let (a,_,_) = msg_map.get(&id).unwrap();
-                    Self::send_ex(sock, addr, a.as_slice()).await;
+                    Self::send_ex(sock, addr, v.as_slice()).await;
+                    msg_map.insert(id,(v,SystemTime::now(),1));
+
                 }else { break; }
             }else{break;}
         }
@@ -495,7 +500,7 @@ impl UdpSender for DefUdpSender
             expect_id: Arc::new(Mutex::new(1)),
             recv_cache: Arc::new(Mutex::new(HashMap::new())),
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
-            timeout: Duration::from_millis(400),
+            timeout: Duration::from_millis(40),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
             max_retry_times: 100,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),

@@ -9,6 +9,7 @@ use crate::tools::platform_handle;
 use async_std::io::Error;
 use async_std::future::Future;
 use crate::client_handler::Handle;
+use std::thread::Thread;
 
 pub struct UdpClient<T,A>
     where T:Handle
@@ -114,13 +115,24 @@ impl <'a,T,A> UdpClient<T,A>
     }
 
 
-    async fn write_msg(&self, sender:&mut DefUdpSender, data: Vec<u8>, ext:u32)->Result<(),USErr>{
-        sender.send_msg(self.parser.package_nor(data,ext)).await
+    async fn write_msg<SE>(&self, sender:&Arc<SE>, data: Vec<u8>, ext:u32)->Result<(),USErr>
+    where SE : UdpSender + Send + std::marker::Sync
+    {
+        match sender.send_msg(self.parser.package_nor(data,ext)).await
+        {
+            Ok(_) => { Ok(()) }
+            Err(e) => {
+                self.stop();
+                Err(e)
+            }
+        }
     }
 
     #[allow(unused_must_use)]
-    pub async fn run(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
+    pub async fn run<SE>(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
                      msg_split_ignore:Option<&Vec<u32>>) -> Result<(),USErr>
+
+    where SE : UdpSender + Send + std::marker::Sync + 'static
     {
         let sock = Arc::new( UdpSocket::bind(self.bind_addr).await? );
         platform_handle(sock.as_ref());
@@ -141,9 +153,47 @@ impl <'a,T,A> UdpClient<T,A>
         }
         let mut package = None;
 
-        let mut sender = DefUdpSender::create(sock.clone(),addr);
+        let sender = Arc::new(SE::create(sock.clone(),addr));
+        let err:Arc<Mutex<Option<USErr>>> = Arc::new(Mutex::new(None));
+        let sender_cp = sender.clone();
+        let run_cp = self.runing.clone();
+        let sock_cp = sock.clone();
+        let err_cp = err.clone();
+        let addr_cp = addr;
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .unwrap();
+
+       let recv_worker = runtime.spawn(async move {
+            let r = {
+                let r = run_cp.lock().unwrap();
+                *r
+            };
+            while r {
+                match sock_cp.recv_from(&mut buf).await {
+                    Ok((len,addr)) => {
+                        if addr == addr_cp{
+                            sender_cp.check_recv(&buf[0..len]).await;
+                            while sender_cp.need_check().await { sender_cp.check_recv(&[]).await; }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("recv from {:?}",e);
+                        let mut err = err_cp.lock().unwrap();
+                        *err = Some(e.into());
+                        let mut run = run_cp.lock().unwrap();
+                        *run = false;
+                        break;
+                    }
+                }
+            }
+        });
+
+
         if let Ok(pub_key_data) = asy.build_pub_key().await{
-            self.write_msg(&mut sender, pub_key_data, 10).await?;
+            self.write_msg(&sender, pub_key_data, 10).await?;
         }
 
         let mut subpackager = DefSubpackage::new();
@@ -151,38 +201,26 @@ impl <'a,T,A> UdpClient<T,A>
         loop {
             // read request
             //println!("read the request....");
-            match sock.try_recv_from(&mut buf) {
-                Ok((len,addr_)) => {
-                    if addr_ == addr{
-                        match sender.check_recv(&buf[0..len]).await{
-                            Ok(v) => {
-                                //package = subpackager.subpackage(&v[..], v.len());
-                            }
-                            Err(USErr::EmptyMsg) => {}
-                            Err(e) => {return Err(e);}
-                        }
-                    }
+            {
+                let err = err.lock().unwrap();
+                if let Some(e) = (*err).clone(){
+                    self.stop();
+                    recv_worker.await;
+                    return Err(e);
                 }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-
+            };
+            match sender.pop_recv_msg().await{
+                Ok(v) => {
+                    package = subpackager.subpackage(&v[..],v.len());
                 }
+                Err(USErr::EmptyMsg) => {}
                 Err(e) => {
-                    eprintln!("error = {}", e);
-                    break;
+                    self.stop();
+                    recv_worker.await;
+                    return Err(e);
                 }
             }
 
-            // handle request
-            //dbg!(&buf_rest);
-            if package.is_none() && sender.need_check().await{
-                match sender.check_recv(&[]).await{
-                    Ok(v) => {
-                        //package = subpackager.subpackage(&v[..], v.len());
-                    }
-                    Err(USErr::EmptyMsg) => {}
-                    Err(e) => {return Err(e);}
-                }
-            }
             if package.is_none() && subpackager.need_check(){
                 package = subpackager.subpackage(&[],0);
             }
@@ -214,7 +252,7 @@ impl <'a,T,A> UdpClient<T,A>
                     };
                     if let Some(v) = immediate_send
                     {
-                        self.write_msg(&mut sender, v, m.ext).await?;
+                        self.write_msg(&sender, v, m.ext).await?;
                         continue;
                     }
                     if let Some(ref v) = override_msg
@@ -249,7 +287,7 @@ impl <'a,T,A> UdpClient<T,A>
                 if n > self.heartbeat_dur
                 {
                     heartbeat_t = SystemTime::now();
-                    self.write_msg(&mut sender, vec![9], 9).await?;
+                    self.write_msg(& sender, vec![9], 9).await?;
                 }
             }
 
@@ -268,7 +306,15 @@ impl <'a,T,A> UdpClient<T,A>
                                 _ => { data.to_vec()}
                             };
                             let real_pkg = self.parser.package_tf(send_data, ext,tag);
-                            sender.send_msg(real_pkg).await?;
+                            match sender.send_msg(real_pkg).await
+                            {
+                                Ok(_) => { }
+                                Err(e) => {
+                                    self.stop();
+                                    recv_worker.await;
+                                    return Err(e);
+                                }
+                            }
                         }
                     }else {
                         match asy.encrypt(&v.0, v.1) {
@@ -278,7 +324,7 @@ impl <'a,T,A> UdpClient<T,A>
                             EncryptRes::NotChange => {}
                             _ => {}
                         };
-                        self.write_msg(&mut sender, v.0, v.1).await?;
+                        self.write_msg(&sender, v.0, v.1).await?;
                     }
                 }else{
                     sleep(Duration::from_millis(1)).await;
@@ -291,6 +337,8 @@ impl <'a,T,A> UdpClient<T,A>
             }
 
         }
+        self.stop();
+        recv_worker.await;
         Ok(())
     }
 

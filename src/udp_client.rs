@@ -21,6 +21,7 @@ use std::net::{SocketAddr, Ipv4Addr, SocketAddrV4};
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::client_handler::{DefHandler, Handle};
 use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE};
+use rcmd_suit::utils::udp_sender::DefUdpSender;
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -70,7 +71,7 @@ async fn main() -> io::Result<()>
         );
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
-        let run = client.run(args.ip,args.port,msg_split_ignore,msg_split_ignore);
+        let run = client.run::<DefUdpSender>(args.ip,args.port,msg_split_ignore,msg_split_ignore);
         futures::join!(console,run);
     }
 
