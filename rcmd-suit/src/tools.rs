@@ -340,6 +340,8 @@ use winapi::ctypes::{c_void,c_ulong};
 use std::ptr::null;
 #[cfg(target_os = "windows")]
 use std::os::windows::prelude::*;
+use uuid::Uuid;
+
 #[cfg(target_os = "windows")]
 pub fn platform_handle(s:&UdpSocket)
 {
@@ -368,3 +370,16 @@ pub fn platform_handle(s:&UdpSocket)
 
 }
 
+
+pub fn uuid() -> u128
+{
+    Uuid::new_v4().as_u128()
+}
+
+pub fn to_uuid(v:&[u8])->u128
+{
+    assert!( v.len() >= size_of::<u128>() );
+    let mut a = [0u8;size_of::<u128>()];
+    a.copy_from_slice(&v[0..size_of::<u128>()]);
+    u128::from_be_bytes(a)
+}

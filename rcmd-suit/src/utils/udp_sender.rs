@@ -15,6 +15,9 @@ use tokio::sync::{Mutex,MutexGuard};
 use crate::utils::udp_sender::USErr::Warp;
 use std::fmt::Debug;
 use winapi::_core::fmt::Formatter;
+use crate::utils::udp_sender::SessionState::Has;
+use crate::tools;
+use futures::task::LocalSpawn;
 
 #[async_trait]
 pub trait UdpSender{
@@ -33,6 +36,25 @@ pub trait UdpSender{
     async fn check_send(&self)->Result<(),USErr>;
     fn set_retry_times(&mut self,v:u16);
     fn retry_times(&self)->u16;
+    async fn has_session(&self)->bool;
+    async fn build_session(&self)->Result<(),USErr>;
+}
+
+enum SessionState{
+    Null,
+    WaitResponse(u128,SystemTime,u16),
+    Has(u128)
+}
+
+impl SessionState{
+    pub fn is_has(&self) -> bool
+    {
+        match self {
+            SessionState::Null => {false}
+            SessionState::WaitResponse(_, _, _) => {false}
+            SessionState::Has(_) => {true}
+        }
+    }
 }
 
 pub struct DefUdpSender{
@@ -52,7 +74,8 @@ pub struct DefUdpSender{
     max_retry_times: u16,
     msg_cache_queue: Arc<Mutex<VecDeque<(usize,Vec<u8>)>>>,
     recv_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    error: Arc<Mutex<Option<USErr>>>
+    error: Arc<Mutex<Option<USErr>>>,
+    sid: Arc<Mutex<SessionState>>
 }
 
 #[derive(Clone)]
@@ -62,7 +85,12 @@ pub enum USErr{
     RetryTimesLimit,
     Warp((i32,String)),
     ResponseSendSuccMiss,
-    SendSuccMissCache
+    SendSuccMissCache,
+    BadSessionID,
+    NoSession,
+    AlreadyHasSession,
+    WaitSessionResponse,
+    SendSessionFailed
 }
 
 impl USErr {
@@ -75,6 +103,11 @@ impl USErr {
             USErr::Warp(e) => { (*e).0 }
             USErr::ResponseSendSuccMiss => {-4},
             USErr::SendSuccMissCache=>{-5}
+            USErr::BadSessionID=>{-6}
+            USErr::NoSession=>{-7}
+            USErr::AlreadyHasSession=>{-8}
+            USErr::WaitSessionResponse=>{-9}
+            USErr::SendSessionFailed=>{-10}
         }
     }
 
@@ -87,6 +120,11 @@ impl USErr {
             USErr::Warp(e) => {  (*e).1.clone() }
             USErr::ResponseSendSuccMiss => { "Response send success miss message id".to_string() },
             USErr::SendSuccMissCache=>{"Send success miss the cache".to_string()}
+            USErr::BadSessionID=>{"Bad session ID".to_string()}
+            USErr::NoSession=>{"No Session".to_string()}
+            USErr::AlreadyHasSession=>{"Already has session".to_string()}
+            USErr::WaitSessionResponse=>{"Waiting session response".to_string()}
+            USErr::SendSessionFailed=>{"Send session failed".to_string()}
         }
     }
 }
@@ -129,14 +167,21 @@ impl DefUdpSender
 
     async fn warp(&self,v:&[u8],ext:u32,tag:u8)->Result<Vec<u8>,USErr>
     {
+        let sid = {
+            if let Some(v) = self.get_sid().await{
+                v
+            }else{
+                return Err(USErr::NoSession);
+            }
+        };
         let mid = self.get_mid().await;
         //println!("send id {}",mid);
-        let res = Self::warp_ex(v,ext,tag,mid);
+        let res = Self::warp_ex(v,ext,tag,mid,sid);
         self.push_cache(mid,res.clone()).await?;
         Ok(res)
     }
 
-    fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize)->Vec<u8>
+    fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize,sid:u128)->Vec<u8>
     {
         assert!(!v.is_empty());
         let len = v.len() + Self::package_len();
@@ -151,6 +196,8 @@ impl DefUdpSender
         let ext_buf = ext.to_be_bytes();
         res.extend_from_slice(&ext_buf[..]);
         res.push(tag);
+        let sid_buf = sid.to_be_bytes();
+        res.extend_from_slice(&sid_buf[..]);
         res.push(Self::magic_num_3());
         res.extend_from_slice(&v[..]);
         res.push(Self::magic_num_4());
@@ -218,21 +265,20 @@ impl DefUdpSender
             {
                 None => { None }
                 Some(v) => {
-                    let (msg, id, ext,tag) = self.unwarp_ex(v.as_slice());
-                    if self.check_send_recv(msg,ext,tag,id).await?
+                    let (msg, id, ext,tag,sid) = self.unwarp_ex(v.as_slice());
+                    if self.check_send_recv(msg,ext,tag,id,sid).await?
                     {
                         return Err(USErr::EmptyMsg);
                     }
-                    //println!("recv msg {} {:?}",id,msg);
+                    self.send_recv(id).await?;
+                    println!("recv msg {}",id);
                     let mut except = self.expect_id.lock().await;
                     if id == *except {
-                        self.send_recv(id).await;
                         drop(except);
                         self.next_expect().await;
                         Some((msg.to_vec(),ext,tag))
-                    }else if id > *except && id < *except + 10
+                    }else if id > *except && id < *except + self.cache_size as usize
                     {
-                        self.send_recv(id).await;
                         let mut recv_cache = self.recv_cache.lock().await;
                         recv_cache.insert(id, (msg.to_vec(), ext,tag));
                         None
@@ -254,7 +300,7 @@ impl DefUdpSender
         Err(USErr::EmptyMsg)
     }
 
-    async fn check_send_recv(&self,msg:&[u8],ext:u32,tag:u8,id:usize) -> Result<bool,USErr>
+    async fn check_send_recv(&self,msg:&[u8],ext:u32,tag:u8,id:usize,sid:u128) -> Result<bool,USErr>
     {
         if msg.len() == 1 && msg[0] == 199 && tag == TOKEN_NORMAL {
             if ext == Self::mn_send_recv(){
@@ -262,21 +308,39 @@ impl DefUdpSender
                 //self.remove_cache(id).await;
                 if let Some((_,t,times)) = self.remove_cache(id).await
                 {
-                    //println!("op recv msg id = {} times = {}",id,times);
+                    println!("op recv msg id = {} times = {}",id,times);
                     self.check_msg_cache_queue().await;
                 }
-                // else{
-                //     let v = Self::warp_ex(&[199],Self::mn_miss_cache(),TOKEN_NORMAL,id);
-                //     Self::send_ex(self.sock.clone(),self.addr,v.as_slice()).await;
-                //     return Err(USErr::ResponseSendSuccMiss);
-                // }
                 Ok(true)
-            }else if ext == Self::mn_miss_cache(){
-                Err(USErr::SendSuccMissCache)
-            }else { Ok(false) }
+            }else if ext == Self::mn_send_sid()
+            {
+                if self.has_sid().await
+                {
+                    self.send_ext(Self::mn_err_already_has_sid()).await?;
+                    return Err(USErr::AlreadyHasSession);
+                }
+                if self.is_waiting_session().await{
+                    self.send_ext(Self::mn_err_waiting_response()).await?;
+                    return Err(USErr::WaitSessionResponse);
+                }
+                let mut sid_ = self.sid.lock().await;
+                *sid_ = SessionState::Has(sid);
+                Ok(true)
+            }else if ext == Self::mn_err_already_has_sid(){
+                Err(USErr::AlreadyHasSession)
+            }else if ext == Self::mn_err_waiting_response(){
+                Err(USErr::WaitSessionResponse)
+            }
+            else { Ok(false) }
         }else{
             Ok(false)
         }
+    }
+
+    async fn send_ext(&self,ext:u32) -> Result<usize,USErr>
+    {
+        let v = Self::warp_ex(&[199],ext,TOKEN_NORMAL,0,0);
+        self.send(v.as_slice()).await
     }
 
     async fn next_expect(&self)->usize
@@ -299,7 +363,14 @@ impl DefUdpSender
 
     async fn send_recv(&self,id:usize) -> Result<usize,USErr>
     {
-        let v = Self::warp_ex(&[199],Self::mn_send_recv(),TOKEN_NORMAL,id);
+        let sid = {
+            if let Some(v) = self.get_sid().await{
+                v
+            }else{
+                return Err(USErr::NoSession);
+            }
+        };
+        let v = Self::warp_ex(&[199],Self::mn_send_recv(),TOKEN_NORMAL,id,sid);
         self.send(v.as_slice()).await?;
         self.send(v.as_slice()).await
     }
@@ -325,21 +396,22 @@ impl DefUdpSender
         //if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
     }
 
-    fn unwarp_ex<'a>(&self,data: &'a [u8])->(&'a[u8],usize,u32,u8)
+    fn unwarp_ex<'a>(&self,data: &'a [u8])->(&'a[u8],usize,u32,u8,u128)
     {
         let id_p = size_of::<u8>() + size_of::<u32>();
         let ext_p = id_p + size_of::<usize>() + size_of::<u8>();
         let tag = data[ext_p + size_of::<u32>()];
-        let msg_p = ext_p + size_of::<u32>() + size_of::<u8>() * 2;
-
+        let sid_p = ext_p + size_of::<u32>() + size_of::<u8>();
+        let msg_p = ext_p + size_of::<u32>() + size_of::<u128>() + size_of::<u8>() * 2;
 
         let mut id_buf = [0u8;size_of::<usize>()];
         id_buf.copy_from_slice(&data[id_p..(id_p + size_of::<usize>())]);
         let mut ext_buf = [0u8;size_of::<u32>()];
         ext_buf.copy_from_slice(&data[ext_p..(ext_p + size_of::<u32>())]);
+        let mut sid_buf = [0u8;size_of::<u128>()];
+        sid_buf.copy_from_slice(&data[sid_p..(sid_p + size_of::<u128>())]);
 
-
-        (&data[msg_p..data.len()],usize::from_be_bytes(id_buf),u32::from_be_bytes(ext_buf),tag)
+        (&data[msg_p..data.len()],usize::from_be_bytes(id_buf),u32::from_be_bytes(ext_buf),tag,u128::from_be_bytes(sid_buf))
     }
 
     async fn need_check_in(&self)-> bool
@@ -361,10 +433,15 @@ impl DefUdpSender
 
     const fn mn_send_recv()->u32 {u32::max_value()}
     const fn mn_miss_cache()->u32 {u32::max_value()-1}
+    const fn mn_send_sid()->u32 {100}
+    const fn mn_response_send_sid()->u32 {101}
+
+    const fn mn_err_already_has_sid()->u32 {5000}
+    const fn mn_err_waiting_response()->u32 {5001}
 
     fn package_len()->usize
     {
-        size_of::<u8>() * 4 + size_of::<usize>() + size_of::<u32>() * 2
+        size_of::<u8>() * 4 + size_of::<usize>() + size_of::<u32>() * 2 + size_of::<u128>()
     }
 
     fn adjust_unit_size(&mut self,times_frequency:HashMap<u16,u32>)
@@ -390,6 +467,7 @@ impl DefUdpSender
                     let mut msg_cache_queue = self.msg_cache_queue.lock().await;
                     msg_cache_queue.pop_front()
                 }{
+                    println!("pop cache {}",id);
                     let sock = self.sock.clone();
                     let addr = self.addr;
 
@@ -413,6 +491,60 @@ impl DefUdpSender
     {
         let mut err = self.error.lock().await;
         *err = Some(e);
+    }
+
+    async fn set_sid(&self,v:u128)
+    {
+        let mut sid = self.sid.lock().await;
+        *sid = SessionState::Has(v)
+    }
+
+    async fn get_sid(&self) -> Option<u128>
+    {
+        let sid = self.sid.lock().await;
+        match *sid {
+            SessionState::Null => {None}
+            SessionState::WaitResponse(_, _, _) => {None}
+            SessionState::Has(v) => {Some(v)}
+        }
+    }
+
+    async fn has_sid(&self) -> bool
+    {
+        let sid = self.sid.lock().await;
+        sid.is_has()
+    }
+
+    async fn eq_sid(&self,v:u128) -> bool
+    {
+        let sid = self.sid.lock().await;
+        if let SessionState::Has(res) = *sid{
+            res == v
+        }else{
+            false
+        }
+    }
+
+    async fn is_waiting_session(&self) -> bool
+    {
+        let sid = self.sid.lock().await;
+        if let SessionState::WaitResponse(_,_,_) = *sid{
+            true
+        }else{
+            false
+        }
+    }
+
+    async fn send_session(&self) -> Result<(),USErr>
+    {
+        let sid_ = tools::uuid();
+        let v = Self::warp_ex(&[199],Self::mn_send_sid(),TOKEN_NORMAL,0,sid_);
+        {
+            let mut sid = self.sid.lock().await;
+            *sid = SessionState::WaitResponse(sid_, SystemTime::now(), 1);
+        }
+        self.send(v.as_slice()).await?;
+        Ok(())
     }
 }
 
@@ -485,7 +617,7 @@ impl UdpSender for DefUdpSender
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        let cache_size = 50;
+        let cache_size = 3;
         let max_len = 65500 - Self::package_len();
         let min_len = 1500 - Self::package_len();
         DefUdpSender{
@@ -505,7 +637,8 @@ impl UdpSender for DefUdpSender
             max_retry_times: 100,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
-            error :Arc::new(Mutex::new(None))
+            error :Arc::new(Mutex::new(None)),
+            sid: Arc::new(Mutex::new(SessionState::Null))
         }
     }
 
@@ -545,6 +678,24 @@ impl UdpSender for DefUdpSender
         let now = SystemTime::now();
         let mut times_frequency = HashMap::<u16,u32>::new();
         {
+            let mut sid = self.sid.lock().await;
+
+            if let SessionState::WaitResponse(v,t,times) = *sid {
+                if times > self.max_retry_times {
+                    return Err(USErr::SendSessionFailed);
+                }
+                if let Ok(dur) = SystemTime::now().duration_since(t)
+                {
+                    if dur > self.timeout
+                    {
+                        let d = Self::warp_ex(&[199],Self::mn_send_sid(),TOKEN_NORMAL,0,v);
+                        self.send(d.as_slice()).await?;
+                        *sid = SessionState::WaitResponse(v,SystemTime::now(),times + 1);
+                    }
+                }
+            }
+        }
+        {
             let mut msg_map = self.msg_map.lock().await;
             for (id, (v, t, times)) in msg_map.iter_mut() {
                 if *times > self.max_retry_times {
@@ -577,6 +728,21 @@ impl UdpSender for DefUdpSender
 
     fn retry_times(&self) -> u16 {
         self.max_retry_times
+    }
+
+    async fn has_session(&self) -> bool {
+        self.has_sid().await
+    }
+
+    async fn build_session(&self) -> Result<(), USErr> {
+        if self.has_sid().await {
+            return Err(USErr::AlreadyHasSession);
+        }
+        if self.is_waiting_session().await {
+            return Err(USErr::WaitSessionResponse);
+        }
+        self.send_session().await?;
+        Ok(())
     }
 }
 

@@ -152,8 +152,9 @@ impl UdpSubpackage{
     pub fn check(data:&[u8])->bool
     {
         let o2 = size_of::<u8>() * 2 + size_of::<u32>() + size_of::<usize>();
-        let o3 = o2 + size_of::<u8>() + size_of::<u32>() + size_of::<u8>();
-        data[o2] == Self::mn_2() && data[o3] == Self::mn_3()
+        let tag_p = o2 + size_of::<u32>() + size_of::<u8>();
+        let o3 = tag_p + size_of::<u128>() + size_of::<u8>();
+        data[o2] == Self::mn_2() &&  Self::good_tag(data[tag_p]) && data[o3] == Self::mn_3()
     }
 
     fn mn_0()->u8 {3}
@@ -169,6 +170,16 @@ impl UdpSubpackage{
             7|
             2|
             6 => { true }
+            _ => {false}
+        }
+    }
+    pub fn good_tag(b:u8) -> bool
+    {
+        match b {
+            1|
+            2|
+            3|
+            4=> { true }
             _ => {false}
         }
     }

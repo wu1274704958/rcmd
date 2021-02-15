@@ -27,6 +27,7 @@ futures = "*"
 num-traits = "0.2.14"
 async-trait = "0.1.42"
 ahash = "0.6.3"
+uuid = { version = "0.8", features = [ "v4"] }
 
 
 [target.'cfg(target_os = "windows")'.dependencies]
