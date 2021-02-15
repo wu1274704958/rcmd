@@ -364,6 +364,7 @@ impl DefUdpSender
                             *sid_ = SessionState::Has(sid);
                             drop(sid_);
                             self.send_sid_response(sid,Self::mn_response_cp_send_sid()).await?;
+                            self.send_cache_no_sid().await?;
                         }
                     }
                     SessionState::WaitResponseCp(v, _, _) => {
@@ -392,6 +393,7 @@ impl DefUdpSender
                         }else{
                             *sid_ = SessionState::Has(sid);
                             drop(sid_);
+                            self.send_cache_no_sid().await?;
                         }
                     }
                     SessionState::Has(v) => {
@@ -623,7 +625,7 @@ impl DefUdpSender
             SessionState::Null => {false}
             SessionState::WaitResponse(_, _, _) => {false}
             SessionState::WaitResponseCp(v_,_,_) => {v == v_}
-            SessionState::Has(v) => {v == v_}
+            SessionState::Has(v_) => {v == v_}
         }
     }
 
@@ -837,7 +839,7 @@ impl UdpSender for DefUdpSender
                     }
                 }
             }
-            if let SessionState::WaitResponse2(v,t,times) = *sid {
+            if let SessionState::WaitResponseCp(v,t,times) = *sid {
                 if times > self.max_retry_times {
                     return Err(USErr::SendSessionFailed);
                 }
