@@ -125,7 +125,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                     let mut sender = Arc::new(DefUdpSender::create(sock.clone(),addr));
                     {
                         sender.check_recv(&buf[0..len]).await;
+                        println!("check_recv end -------------------------");
                         while sender.need_check().await { sender.check_recv(&[]).await; }
+                        println!("-------------------------");
                         let mut map = linker_map.lock().unwrap();
                         map.insert(id, sender.clone());
                     }

@@ -43,6 +43,7 @@ pub trait UdpSender{
 enum SessionState{
     Null,
     WaitResponse(u128,SystemTime,u16),
+    WaitResponseCp(u128,SystemTime,u16),
     Has(u128)
 }
 
@@ -52,6 +53,7 @@ impl SessionState{
         match self {
             SessionState::Null => {false}
             SessionState::WaitResponse(_, _, _) => {false}
+            SessionState::WaitResponseCp(_, _, _) => {true}
             SessionState::Has(_) => {true}
         }
     }
@@ -75,7 +77,8 @@ pub struct DefUdpSender{
     msg_cache_queue: Arc<Mutex<VecDeque<(usize,Vec<u8>)>>>,
     recv_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
     error: Arc<Mutex<Option<USErr>>>,
-    sid: Arc<Mutex<SessionState>>
+    sid: Arc<Mutex<SessionState>>,
+    msg_cache_on_no_sid: Arc<Mutex<VecDeque<Vec<u8>>>>
 }
 
 #[derive(Clone)]
@@ -90,6 +93,9 @@ pub enum USErr{
     NoSession,
     AlreadyHasSession,
     WaitSessionResponse,
+    WaitSessionResponseCp,
+    NotWaitingSessionResponse,
+    NotWaitingSessionResponseCp,
     SendSessionFailed
 }
 
@@ -108,6 +114,9 @@ impl USErr {
             USErr::AlreadyHasSession=>{-8}
             USErr::WaitSessionResponse=>{-9}
             USErr::SendSessionFailed=>{-10}
+            USErr::NotWaitingSessionResponse=>{-11}
+            USErr::NotWaitingSessionResponseCp=>{-12}
+            USErr::WaitSessionResponseCp=>{-13}
         }
     }
 
@@ -125,6 +134,9 @@ impl USErr {
             USErr::AlreadyHasSession=>{"Already has session".to_string()}
             USErr::WaitSessionResponse=>{"Waiting session response".to_string()}
             USErr::SendSessionFailed=>{"Send session failed".to_string()}
+            USErr::NotWaitingSessionResponse=>{"Not waiting session response".to_string()}
+            USErr::NotWaitingSessionResponseCp=>{"Not waiting session response cp".to_string()}
+            USErr::WaitSessionResponseCp=>{"Waiting session response cp".to_string()}
         }
     }
 }
@@ -270,6 +282,16 @@ impl DefUdpSender
                     {
                         return Err(USErr::EmptyMsg);
                     }
+                    if let Some(sid_) = self.get_sid().await{
+                        if sid_ != sid
+                        {
+                            self.send_ext(Self::mn_err_bad_session()).await?;
+                            return Err(USErr::EmptyMsg);
+                        }
+                    }else{
+                        self.send_ext(Self::mn_err_no_session()).await?;
+                        return Err(USErr::EmptyMsg);
+                    }
                     self.send_recv(id).await?;
                     println!("recv msg {}",id);
                     let mut except = self.expect_id.lock().await;
@@ -314,22 +336,86 @@ impl DefUdpSender
                 Ok(true)
             }else if ext == Self::mn_send_sid()
             {
-                if self.has_sid().await
-                {
-                    self.send_ext(Self::mn_err_already_has_sid()).await?;
-                    return Err(USErr::AlreadyHasSession);
-                }
-                if self.is_waiting_session().await{
-                    self.send_ext(Self::mn_err_waiting_response()).await?;
-                    return Err(USErr::WaitSessionResponse);
-                }
                 let mut sid_ = self.sid.lock().await;
-                *sid_ = SessionState::Has(sid);
+                match *sid_ {
+                    SessionState::Null => {
+                        *sid_ = SessionState::WaitResponseCp(sid,SystemTime::now(),1);
+                        drop(sid);
+                        self.send_sid_response(sid,Self::mn_response_send_sid()).await?;
+                    }
+                    SessionState::WaitResponse(_, _, _) => {
+                        self.send_ext(Self::mn_err_waiting_response()).await?;
+                    }
+                    SessionState::WaitResponseCp(_, _, _) => {}
+                    SessionState::Has(v) => {}
+                }
                 Ok(true)
-            }else if ext == Self::mn_err_already_has_sid(){
+            }else if ext == Self::mn_response_send_sid()
+            {
+                let mut sid_ = self.sid.lock().await;
+                match *sid_ {
+                    SessionState::Null => {
+                        self.send_ext(Self::mn_err_not_wait_sid_resp()).await?;
+                    }
+                    SessionState::WaitResponse(v, _, _) => {
+                        if v != sid{
+                            self.send_ext(Self::mn_err_bad_session()).await?;
+                        }else{
+                            *sid_ = SessionState::Has(sid);
+                            drop(sid_);
+                            self.send_sid_response(sid,Self::mn_response_cp_send_sid()).await?;
+                        }
+                    }
+                    SessionState::WaitResponseCp(v, _, _) => {
+                        self.send_ext(Self::mn_err_waiting_response_cp()).await?;
+                    }
+                    SessionState::Has(v) => {
+                        if v != sid{
+                            self.send_ext(Self::mn_err_already_has_sid()).await?;
+                        }
+                    }
+                }
+                Ok(true)
+            }else if ext == Self::mn_response_cp_send_sid()
+            {
+                let mut sid_ = self.sid.lock().await;
+                match *sid_ {
+                    SessionState::Null => {
+                        self.send_ext(Self::mn_err_not_wait_sid_resp_cp()).await?;
+                    }
+                    SessionState::WaitResponse(v, _, _) => {
+                        self.send_ext(Self::mn_err_waiting_response()).await?;
+                    }
+                    SessionState::WaitResponseCp(v, _, _) => {
+                        if v != sid{
+                            self.send_ext(Self::mn_err_bad_session()).await?;
+                        }else{
+                            *sid_ = SessionState::Has(sid);
+                            drop(sid_);
+                        }
+                    }
+                    SessionState::Has(v) => {
+                        if v != sid{
+                            self.send_ext(Self::mn_err_already_has_sid()).await?;
+                        }
+                    }
+                }
+                Ok(true)
+            }
+            else if ext == Self::mn_err_already_has_sid(){
                 Err(USErr::AlreadyHasSession)
             }else if ext == Self::mn_err_waiting_response(){
                 Err(USErr::WaitSessionResponse)
+            }else if ext == Self::mn_err_waiting_response_cp(){
+                Err(USErr::WaitSessionResponseCp)
+            }else if ext == Self::mn_err_bad_session(){
+                Err(USErr::BadSessionID)
+            }else if ext == Self::mn_err_not_wait_sid_resp(){
+                Err(USErr::NotWaitingSessionResponse)
+            }else if ext == Self::mn_err_no_session(){
+                Err(USErr::NoSession)
+            }else if ext == Self::mn_err_not_wait_sid_resp_cp(){
+                Err(USErr::NotWaitingSessionResponseCp)
             }
             else { Ok(false) }
         }else{
@@ -340,6 +426,12 @@ impl DefUdpSender
     async fn send_ext(&self,ext:u32) -> Result<usize,USErr>
     {
         let v = Self::warp_ex(&[199],ext,TOKEN_NORMAL,0,0);
+        self.send(v.as_slice()).await
+    }
+
+    async fn send_sid_response(&self,sid:u128,ext:u32) -> Result<usize,USErr>
+    {
+        let v = Self::warp_ex(&[199],ext,TOKEN_NORMAL,0,sid);
         self.send(v.as_slice()).await
     }
 
@@ -384,6 +476,7 @@ impl DefUdpSender
 
     async fn send_ex(sock:Arc<UdpSocket>,addr:SocketAddr,d:&[u8]) -> Result<usize,USErr>
     {
+        println!("send_ex ..........................");
         match sock.send_to(d,addr).await{
             Ok(l) => {
                 Ok(l)
@@ -435,9 +528,16 @@ impl DefUdpSender
     const fn mn_miss_cache()->u32 {u32::max_value()-1}
     const fn mn_send_sid()->u32 {100}
     const fn mn_response_send_sid()->u32 {101}
+    const fn mn_response_cp_send_sid()->u32 {102}
 
     const fn mn_err_already_has_sid()->u32 {5000}
     const fn mn_err_waiting_response()->u32 {5001}
+    const fn mn_err_bad_session()->u32 {5002}
+    const fn mn_err_no_session()->u32 {5003}
+    const fn mn_err_not_wait_sid_resp()->u32 {5004}
+    const fn mn_err_waiting_response_cp()->u32 {5005}
+    const fn mn_err_not_wait_sid_resp_cp()->u32 {5006}
+
 
     fn package_len()->usize
     {
@@ -505,6 +605,7 @@ impl DefUdpSender
         match *sid {
             SessionState::Null => {None}
             SessionState::WaitResponse(_, _, _) => {None}
+            SessionState::WaitResponseCp(v,_,_) => {Some(v)}
             SessionState::Has(v) => {Some(v)}
         }
     }
@@ -518,10 +619,11 @@ impl DefUdpSender
     async fn eq_sid(&self,v:u128) -> bool
     {
         let sid = self.sid.lock().await;
-        if let SessionState::Has(res) = *sid{
-            res == v
-        }else{
-            false
+        match *sid {
+            SessionState::Null => {false}
+            SessionState::WaitResponse(_, _, _) => {false}
+            SessionState::WaitResponseCp(v_,_,_) => {v == v_}
+            SessionState::Has(v) => {v == v_}
         }
     }
 
@@ -546,12 +648,52 @@ impl DefUdpSender
         self.send(v.as_slice()).await?;
         Ok(())
     }
+
+    async fn push_cache_no_sid(&self,v:Vec<u8>)
+    {
+        assert!(!self.has_sid().await);
+        let mut queue = self.msg_cache_on_no_sid.lock().await;
+        queue.push_back(v);
+    }
+
+    async fn send_cache_no_sid(&self) -> Result<(),USErr>
+    {
+        assert!(self.has_sid().await);
+        let mut queue = self.msg_cache_on_no_sid.lock().await;
+        while !queue.is_empty() {
+            let v = queue.pop_front().unwrap();
+            self.send_msg(v).await?;
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl UdpSender for DefUdpSender
 {
     async fn send_msg(&self, v: Vec<u8>) -> Result<(),USErr> {
+        {
+            let sid = self.sid.lock().await;
+            match *sid {
+                SessionState::Null => {
+                    drop(sid);
+                    self.push_cache_no_sid(v).await;
+                    self.send_session().await?;
+                    return Ok(());
+                }
+                SessionState::WaitResponse(_, _, _) => {
+                    drop(sid);
+                    self.push_cache_no_sid(v).await;
+                    return Ok(());
+                }
+                SessionState::WaitResponseCp(_, _, _) => {}
+                Has(_) => {}
+            }
+        }
+        if !self.has_sid().await{
+
+            return Ok(());
+        }
         if self.need_split(v.len()).await
         {
             let vs = {
@@ -638,7 +780,8 @@ impl UdpSender for DefUdpSender
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
-            sid: Arc::new(Mutex::new(SessionState::Null))
+            sid: Arc::new(Mutex::new(SessionState::Null)),
+            msg_cache_on_no_sid: Arc::new(Mutex::new(VecDeque::new()))
         }
     }
 
@@ -691,6 +834,20 @@ impl UdpSender for DefUdpSender
                         let d = Self::warp_ex(&[199],Self::mn_send_sid(),TOKEN_NORMAL,0,v);
                         self.send(d.as_slice()).await?;
                         *sid = SessionState::WaitResponse(v,SystemTime::now(),times + 1);
+                    }
+                }
+            }
+            if let SessionState::WaitResponse2(v,t,times) = *sid {
+                if times > self.max_retry_times {
+                    return Err(USErr::SendSessionFailed);
+                }
+                if let Ok(dur) = SystemTime::now().duration_since(t)
+                {
+                    if dur > self.timeout
+                    {
+                        let d = Self::warp_ex(&[199],Self::mn_response_send_sid(),TOKEN_NORMAL,0,v);
+                        self.send(d.as_slice()).await?;
+                        *sid = SessionState::WaitResponseCp(v,SystemTime::now(),times + 1);
                     }
                 }
             }
