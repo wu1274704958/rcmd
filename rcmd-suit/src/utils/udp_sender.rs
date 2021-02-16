@@ -30,8 +30,10 @@ pub trait UdpSender{
     fn max_msg_len(&self)->u16;
     async fn set_min_msg_len(&mut self,len:u16);
     fn min_msg_len(&self)->u16;
-    fn cache_size(&self)->u16;
-    fn set_cache_size(&mut self,s:u16);
+    fn max_cache_size(&self)->u16;
+    fn set_max_cache_size(&mut self,s:u16);
+    fn min_cache_size(&self)->u16;
+    fn set_min_cache_size(&mut self,s:u16);
     fn set_time_out(&mut self,dur:Duration);
     async fn check_send(&self)->Result<(),USErr>;
     fn set_retry_times(&mut self,v:u16);
@@ -63,7 +65,9 @@ pub struct DefUdpSender{
     sock: Arc<UdpSocket>,
     max_len: u16,
     min_len: u16,
-    cache_size:u16,
+    cache_size:Arc<Mutex<u16>>,
+    min_cache_size:u16,
+    max_cache_size:u16,
     mid: Arc<Mutex<usize>>,
     queue: Arc<Mutex<VecDeque<usize>>>,
     msg_map: Arc<Mutex<HashMap<usize,(Vec<u8>,SystemTime,u16)>>>,
@@ -219,7 +223,7 @@ impl DefUdpSender
     async fn push_cache(&self, id:usize, v:Vec<u8>) -> Result<(), USErr>
     {
         let mut queue = self.queue.lock().await;
-        if queue.len() == self.cache_size as usize  {
+        if queue.len() == self.get_cache_size().await as usize  {
             let mut msg_cache_queue = self.msg_cache_queue.lock().await;
             msg_cache_queue.push_back((id,v));
             return Err(USErr::MsgCacheOverflow);
@@ -299,7 +303,7 @@ impl DefUdpSender
                         drop(except);
                         self.next_expect().await;
                         Some((msg.to_vec(),ext,tag))
-                    }else if id > *except && id < *except + self.cache_size as usize
+                    }else if id > *except
                     {
                         let mut recv_cache = self.recv_cache.lock().await;
                         recv_cache.insert(id, (msg.to_vec(), ext,tag));
@@ -546,24 +550,24 @@ impl DefUdpSender
         size_of::<u8>() * 4 + size_of::<usize>() + size_of::<u32>() * 2 + size_of::<u128>()
     }
 
-    fn adjust_unit_size(&mut self,times_frequency:HashMap<u16,u32>)
+    async fn adjust_unit_size(&self,times_frequency:HashMap<u16,u32>)
     {
-        // times_frequency.into_iter().for_each(|(times,f)|{
-        //     if times > self.max_retry_times / 10 {
-        //         self.msg_split.down_unit_size();
-        //         println!("down unit size curr = {} ",self.msg_split.unit_size());
-        //     }else if times < 3 && f == self.cache_size as u32{
-        //         self.msg_split.up_unit_size();
-        //         println!("up unit size curr = {} ",self.msg_split.unit_size());
-        //     }
-        // });
+        for (times,f) in times_frequency.into_iter(){
+            if times > self.max_retry_times / 3 {
+                let v = self.adjust_cache_size(-1,2).await;
+                println!("down cache size curr = {} ",v);
+            }else if times < 3 && f == self.get_cache_size().await as u32{
+                let v = self.adjust_cache_size(1,1).await;
+                println!("up cache size curr = {} ",v);
+            }
+        };
     }
 
     async fn check_msg_cache_queue(&self)
     {
         let mut queue = self.queue.lock().await;
         loop {
-            if queue.len() < self.cache_size as usize
+            if queue.len() < self.get_cache_size().await as usize
             {
                 if let Some((id, v)) = {
                     let mut msg_cache_queue = self.msg_cache_queue.lock().await;
@@ -668,6 +672,24 @@ impl DefUdpSender
         }
         Ok(())
     }
+
+    async fn get_cache_size(&self) -> u16
+    {
+        let v = self.cache_size.lock().await;
+        *v
+    }
+
+    async fn adjust_cache_size(&self,f:i16,r:i16) ->u16
+    {
+        let mut cs = self.cache_size.lock().await;
+        let mut v = *cs as i16 / 10;
+        if v <= 0 { v = 1; }
+        let mut new = *cs as i16 + v * r * f;
+        if new < self.min_cache_size as i16 { new = self.min_cache_size as i16; }
+        if new > self.max_cache_size as i16 { new = self.max_cache_size as i16; }
+        *cs = new as u16;
+        new as u16
+    }
 }
 
 #[async_trait]
@@ -761,7 +783,7 @@ impl UdpSender for DefUdpSender
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        let cache_size = 3;
+        let max_cache_size = 32;
         let max_len = 65500 - Self::package_len();
         let min_len = 1500 - Self::package_len();
         DefUdpSender{
@@ -769,16 +791,18 @@ impl UdpSender for DefUdpSender
             sock,
             max_len: max_len as _,
             min_len: min_len as _,
-            cache_size,
+            max_cache_size,
+            min_cache_size:8,
+            cache_size: Arc::new(Mutex::new(max_cache_size)),
             mid: Arc::new(Mutex::new(usize::zero())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             msg_map: Arc::new(Mutex::new(HashMap::new())),
             expect_id: Arc::new(Mutex::new(1)),
             recv_cache: Arc::new(Mutex::new(HashMap::new())),
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
-            timeout: Duration::from_millis(40),
+            timeout: Duration::from_millis(100),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 100,
+            max_retry_times: 50,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
@@ -807,12 +831,20 @@ impl UdpSender for DefUdpSender
         self.min_len
     }
 
-    fn cache_size(&self) -> u16 {
-        self.cache_size
+    fn min_cache_size(&self) -> u16 {
+        self.min_cache_size
     }
 
-    fn set_cache_size(&mut self, s: u16) {
-        self.cache_size = s;
+    fn set_min_cache_size(&mut self, s: u16) {
+        self.min_cache_size = s;
+    }
+
+    fn max_cache_size(&self) -> u16 {
+        self.max_cache_size
+    }
+
+    fn set_max_cache_size(&mut self, s: u16) {
+        self.max_cache_size = s;
     }
 
     fn set_time_out(&mut self, dur: Duration) {
@@ -876,7 +908,7 @@ impl UdpSender for DefUdpSender
             }
         }
 
-        //self.adjust_unit_size(times_frequency);
+        self.adjust_unit_size(times_frequency).await;
         //self.check_msg_cache_queue().await;
         Ok(())
     }
