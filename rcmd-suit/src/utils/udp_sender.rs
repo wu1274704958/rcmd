@@ -81,7 +81,9 @@ pub struct DefUdpSender{
     recv_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
     error: Arc<Mutex<Option<USErr>>>,
     sid: Arc<Mutex<SessionState>>,
-    msg_cache_on_no_sid: Arc<Mutex<VecDeque<Vec<u8>>>>
+    msg_cache_on_no_sid: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    adjust_cache_size_time:Arc<Mutex<SystemTime>>,
+    avg_retry_times: Arc<Mutex<(u32,f32)>>
 }
 
 #[derive(Clone)]
@@ -559,19 +561,21 @@ impl DefUdpSender
         size_of::<u8>() * 4 + size_of::<usize>() + size_of::<u32>() * 2 + size_of::<u128>()
     }
 
-    async fn adjust_unit_size(&self,times_frequency:HashMap<u16,u32>)
+    async fn adjust_unit_size(&self,times_frequency:f32)
     {
-        for (times,f) in times_frequency.into_iter(){
-            if times > self.max_retry_times / 10 {
-                let v = self.adjust_cache_size(-1,5).await;
-                println!("down cache size curr = {} ",v);
-                break;
-            }else if times == 1 && f == self.get_cache_size().await as u32{
-                let v = self.adjust_cache_size(1,1).await;
-                println!("up cache size curr = {} ",v);
-                break;
-            }
-        };
+        if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency >= 3f32 {
+            let v = self.adjust_cache_size(-1,5).await;
+            println!("down cache size curr = {} ",v);
+        }else if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency <= 1f32 {
+            let v = self.adjust_cache_size_ex(1).await;
+            println!("up cache size curr = {} ",v);
+        }
+    }
+
+    async fn get_cache_len(&self) ->usize
+    {
+        let msg_map = self.msg_map.lock().await;
+        msg_map.len()
     }
 
     async fn check_msg_cache_queue(&self)
@@ -701,6 +705,16 @@ impl DefUdpSender
         *cs = new as u16;
         new as u16
     }
+
+    async fn adjust_cache_size_ex(&self,r:u16) ->u16
+    {
+        let mut cs = self.cache_size.lock().await;
+        let mut new = *cs + r;
+        if new < self.min_cache_size  { new = self.min_cache_size; }
+        if new > self.max_cache_size  { new = self.max_cache_size; }
+        *cs = new;
+        new
+    }
 }
 
 #[async_trait]
@@ -791,7 +805,7 @@ impl UdpSender for DefUdpSender
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        let max_cache_size = 64;
+        let max_cache_size = 50;
         let max_len = 65500 - Self::package_len();
         let min_len = 1500 - Self::package_len();
         DefUdpSender{
@@ -801,21 +815,23 @@ impl UdpSender for DefUdpSender
             min_len: min_len as _,
             max_cache_size,
             min_cache_size:8,
-            cache_size: Arc::new(Mutex::new(max_cache_size)),
+            cache_size: Arc::new(Mutex::new(8)),
             mid: Arc::new(Mutex::new(usize::zero())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             msg_map: Arc::new(Mutex::new(HashMap::new())),
             expect_id: Arc::new(Mutex::new(1)),
             recv_cache: Arc::new(Mutex::new(HashMap::new())),
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
-            timeout: Duration::from_millis(100),
+            timeout: Duration::from_millis(400),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 100,
+            max_retry_times: 50,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
             sid: Arc::new(Mutex::new(SessionState::Null)),
-            msg_cache_on_no_sid: Arc::new(Mutex::new(VecDeque::new()))
+            msg_cache_on_no_sid: Arc::new(Mutex::new(VecDeque::new())),
+            adjust_cache_size_time: Arc::new(Mutex::new(SystemTime::now())),
+            avg_retry_times: Arc::new(Mutex::new((0,0f32))),
         }
     }
 
@@ -862,7 +878,6 @@ impl UdpSender for DefUdpSender
     async fn check_send(&self) -> Result<(),USErr> {
         self.check_err().await?;
         let now = SystemTime::now();
-        let mut times_frequency = HashMap::<u16,u32>::new();
         {
             let mut sid = self.sid.lock().await;
 
@@ -895,15 +910,18 @@ impl UdpSender for DefUdpSender
                 }
             }
         }
+        let mut avg_times = 0f32;
         {
             let queue = self.queue.lock().await;
             let mut msg_map = self.msg_map.lock().await;
             let mut l = 0;
+            let mut sum = 0;
             for id in queue.iter(){
-                if l >= self.get_cache_size().await {
-                    break;
-                }
                 if let Some((v,t,times)) = msg_map.get_mut(id){
+                    if l >= self.get_cache_size().await {
+                        break;
+                    }
+                    sum += *times;
                     if *times > self.max_retry_times {
                         eprintln!("msg {} retry times reach the maximum!", id);
                         return Err(USErr::RetryTimesLimit);
@@ -917,15 +935,23 @@ impl UdpSender for DefUdpSender
                             Self::send_ex(self.sock.clone(), self.addr, v.as_slice()).await;
                         }
                     }
-                    let mut freq = *(times_frequency.get(times).unwrap_or(&0));
-                    freq += 1;
-                    times_frequency.insert(*times, freq);
+                    l += 1;
                 }
-                l += 1;
             }
+            if l > 0 { avg_times = sum as f32 / l as f32; }
         }
 
-        self.adjust_unit_size(times_frequency).await;
+        let mut adjust_cache_size_time = self.adjust_cache_size_time.lock().await;
+        if let Ok(dur) = SystemTime::now().duration_since(*adjust_cache_size_time) {
+            let mut retry_times = self.avg_retry_times.lock().await;
+            (*retry_times).0 += 1;
+            (*retry_times).1 += avg_times;
+            if dur.as_secs() > 20 {
+                let avg =  (*retry_times).1 / (*retry_times).0 as f32;
+                self.adjust_unit_size(avg).await;
+                *retry_times = (0,0f32);
+            }
+        }
         //self.check_msg_cache_queue().await;
         Ok(())
     }
