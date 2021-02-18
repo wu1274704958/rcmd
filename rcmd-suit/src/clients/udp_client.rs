@@ -171,12 +171,35 @@ impl <'a,T,A> UdpClient<T,A>
                 let r = run_cp.lock().unwrap();
                 *r
             };
-            while r {
+            'Out: while r {
                 match sock_cp.recv_from(&mut buf).await {
                     Ok((len,addr)) => {
                         if addr == addr_cp{
-                            sender_cp.check_recv(&buf[0..len]).await;
-                            while sender_cp.need_check().await { sender_cp.check_recv(&[]).await; }
+                            match sender_cp.check_recv(&buf[0..len]).await
+                            {
+                                Err(USErr::EmptyMsg)=>{}
+                                Err(e)=>{
+                                    let mut err = err_cp.lock().unwrap();
+                                    *err = Some(e.into());
+                                    let mut run = run_cp.lock().unwrap();
+                                    *run = false;
+                                    break;
+                                }
+                                _=>{}
+                            };
+                            while sender_cp.need_check().await {
+                                match sender_cp.check_recv(&[]).await{
+                                    Err(USErr::EmptyMsg)=>{}
+                                    Err(e)=>{
+                                        let mut err = err_cp.lock().unwrap();
+                                        *err = Some(e.into());
+                                        let mut run = run_cp.lock().unwrap();
+                                        *run = false;
+                                        break 'Out;
+                                    }
+                                    _=>{}
+                                }
+                            }
                         }
                     }
                     Err(e) => {

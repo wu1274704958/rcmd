@@ -14,7 +14,6 @@ use crate::utils::msg_split::UdpMsgSplit;
 use tokio::sync::{Mutex,MutexGuard};
 use crate::utils::udp_sender::USErr::Warp;
 use std::fmt::Debug;
-use winapi::_core::fmt::Formatter;
 use crate::utils::udp_sender::SessionState::Has;
 use crate::tools;
 use futures::task::LocalSpawn;
@@ -180,7 +179,15 @@ impl DefUdpSender
         }
         *mid
     }
-
+    async fn check_err(&self)->Result<(),USErr>
+    {
+        let err = self.error.lock().await;
+        if let Some(e) = err.as_ref(){
+            Err(e.clone())
+        }else{
+            Ok(())
+        }
+    }
     async fn warp(&self,v:&[u8],ext:u32,tag:u8)->Result<Vec<u8>,USErr>
     {
         let sid = {
@@ -297,7 +304,7 @@ impl DefUdpSender
                         return Err(USErr::EmptyMsg);
                     }
                     self.send_recv(id).await?;
-                    println!("recv msg {}",id);
+                    //println!("recv msg {}",id);
                     let mut except = self.expect_id.lock().await;
                     if id == *except {
                         drop(except);
@@ -329,12 +336,13 @@ impl DefUdpSender
     async fn check_send_recv(&self,msg:&[u8],ext:u32,tag:u8,id:usize,sid:u128) -> Result<bool,USErr>
     {
         if msg.len() == 1 && msg[0] == 199 && tag == TOKEN_NORMAL {
+            //println!("get inside msg type ext = {}",ext);
             if ext == Self::mn_send_recv(){
                 //println!("op recv msg {}",id);
                 //self.remove_cache(id).await;
                 if let Some((_,t,times)) = self.remove_cache(id).await
                 {
-                    println!("op recv msg id = {} times = {}",id,times);
+                    //println!("op recv msg id = {} times = {}",id,times);
                     self.check_msg_cache_queue().await;
                 }
                 Ok(true)
@@ -431,6 +439,7 @@ impl DefUdpSender
 
     async fn send_ext(&self,ext:u32) -> Result<usize,USErr>
     {
+        eprintln!("send ext {}",ext);
         let v = Self::warp_ex(&[199],ext,TOKEN_NORMAL,0,0);
         self.send(v.as_slice()).await
     }
@@ -482,7 +491,7 @@ impl DefUdpSender
 
     async fn send_ex(sock:Arc<UdpSocket>,addr:SocketAddr,d:&[u8]) -> Result<usize,USErr>
     {
-        println!("send_ex ..........................");
+        //println!("send_ex ..........................");
         match sock.send_to(d,addr).await{
             Ok(l) => {
                 Ok(l)
@@ -553,12 +562,14 @@ impl DefUdpSender
     async fn adjust_unit_size(&self,times_frequency:HashMap<u16,u32>)
     {
         for (times,f) in times_frequency.into_iter(){
-            if times > self.max_retry_times / 3 {
-                let v = self.adjust_cache_size(-1,2).await;
+            if times > self.max_retry_times / 10 {
+                let v = self.adjust_cache_size(-1,5).await;
                 println!("down cache size curr = {} ",v);
-            }else if times < 3 && f == self.get_cache_size().await as u32{
+                break;
+            }else if times == 1 && f == self.get_cache_size().await as u32{
                 let v = self.adjust_cache_size(1,1).await;
                 println!("up cache size curr = {} ",v);
+                break;
             }
         };
     }
@@ -573,7 +584,7 @@ impl DefUdpSender
                     let mut msg_cache_queue = self.msg_cache_queue.lock().await;
                     msg_cache_queue.pop_front()
                 }{
-                    println!("pop cache {}",id);
+                    //println!("pop cache {}",id);
                     let sock = self.sock.clone();
                     let addr = self.addr;
 
@@ -745,6 +756,7 @@ impl UdpSender for DefUdpSender
     }
 
     async fn check_recv(&self, data: &[u8]) -> Result<(),USErr> {
+        self.check_err().await?;
         match self.unwarp(data).await
         {
             Ok(v) => {
@@ -754,6 +766,7 @@ impl UdpSender for DefUdpSender
             }
             Err(USErr::EmptyMsg) => {Ok(())}
             Err(e) => {
+                eprintln!("set error {:?} ",e);
                 self.set_error(e.clone());
                 Err(e)
             }
@@ -762,12 +775,7 @@ impl UdpSender for DefUdpSender
 
     async fn pop_recv_msg(&self) -> Result<Vec<u8>,USErr>
     {
-        {
-            let err = self.error.lock().await;
-            if let Some(e) = err.clone(){
-                return Err(e);
-            }
-        }
+        self.check_err().await?;
         let mut recv_queue = self.recv_queue.lock().await;
         if let Some(v) = recv_queue.pop_front()
         {
@@ -783,7 +791,7 @@ impl UdpSender for DefUdpSender
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        let max_cache_size = 32;
+        let max_cache_size = 64;
         let max_len = 65500 - Self::package_len();
         let min_len = 1500 - Self::package_len();
         DefUdpSender{
@@ -802,7 +810,7 @@ impl UdpSender for DefUdpSender
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
             timeout: Duration::from_millis(100),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 50,
+            max_retry_times: 20,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
@@ -852,6 +860,7 @@ impl UdpSender for DefUdpSender
     }
 
     async fn check_send(&self) -> Result<(),USErr> {
+        self.check_err().await?;
         let now = SystemTime::now();
         let mut times_frequency = HashMap::<u16,u32>::new();
         {
@@ -887,24 +896,32 @@ impl UdpSender for DefUdpSender
             }
         }
         {
+            let queue = self.queue.lock().await;
             let mut msg_map = self.msg_map.lock().await;
-            for (id, (v, t, times)) in msg_map.iter_mut() {
-                if *times > self.max_retry_times {
-                    eprintln!("msg {} retry times reach the maximum!", id);
-                    return Err(USErr::RetryTimesLimit);
+            let mut l = 0;
+            for id in queue.iter(){
+                if l >= self.get_cache_size().await {
+                    break;
                 }
-                if let Ok(dur) = now.duration_since(*t)
-                {
-                    if dur > self.timeout
-                    {
-                        *times += 1;
-                        *t = SystemTime::now();
-                        Self::send_ex(self.sock.clone(), self.addr, v.as_slice()).await;
+                if let Some((v,t,times)) = msg_map.get_mut(id){
+                    if *times > self.max_retry_times {
+                        eprintln!("msg {} retry times reach the maximum!", id);
+                        return Err(USErr::RetryTimesLimit);
                     }
+                    if let Ok(dur) = now.duration_since(*t)
+                    {
+                        if dur > self.timeout
+                        {
+                            *times += 1;
+                            *t = SystemTime::now();
+                            Self::send_ex(self.sock.clone(), self.addr, v.as_slice()).await;
+                        }
+                    }
+                    let mut freq = *(times_frequency.get(times).unwrap_or(&0));
+                    freq += 1;
+                    times_frequency.insert(*times, freq);
                 }
-                let mut freq = *(times_frequency.get(times).unwrap_or(&0));
-                freq += 1;
-                times_frequency.insert(*times, freq);
+                l += 1;
             }
         }
 
