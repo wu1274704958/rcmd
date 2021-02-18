@@ -810,7 +810,7 @@ impl UdpSender for DefUdpSender
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
             timeout: Duration::from_millis(100),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 20,
+            max_retry_times: 100,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),

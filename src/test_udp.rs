@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     {
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
-        //handler.add_handler(Arc::new(TestHandler{}));
+        handler.add_handler(Arc::new(TestHandler{}));
         handler.add_handler(Arc::new(handlers::upload_file::UploadHandler::new(user_map.clone())));
         handler.add_handler(Arc::new(handlers::login::Login::new(dbmgr.clone(),user_map.clone(),login_map.clone())));
         //parser.add_transform(Arc::new(DefCompress{}));
