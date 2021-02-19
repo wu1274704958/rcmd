@@ -946,10 +946,11 @@ impl UdpSender for DefUdpSender
             let mut retry_times = self.avg_retry_times.lock().await;
             (*retry_times).0 += 1;
             (*retry_times).1 += avg_times;
-            if dur.as_secs() > 20 {
+            if dur.as_secs_f32() > 3.6 {
                 let avg =  (*retry_times).1 / (*retry_times).0 as f32;
                 self.adjust_unit_size(avg).await;
                 *retry_times = (0,0f32);
+                *adjust_cache_size_time = SystemTime::now();
             }
         }
         //self.check_msg_cache_queue().await;
