@@ -149,7 +149,7 @@ impl <'a,T,A> UdpClient<T,A>
         }
         let mut spliter = DefMsgSplit::new();
         if let Some(v) = msg_split_ignore{
-            asy.extend_ignore(v.as_slice());
+            spliter.extend_ignore(v.as_slice());
         }
         let mut package = None;
 
