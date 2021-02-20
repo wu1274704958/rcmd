@@ -563,7 +563,7 @@ impl DefUdpSender
 
     async fn adjust_unit_size(&self,times_frequency:f32)
     {
-        if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency >= 3f32 {
+        if self.get_cache_len().await >= self.get_cache_size().await as usize/ 2  && times_frequency >= 3f32 {
             let v = self.adjust_cache_size(-1,5).await;
             println!("down cache size curr = {} ",v);
         }else if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency <= 1f32 {
@@ -814,8 +814,8 @@ impl UdpSender for DefUdpSender
             max_len: max_len as _,
             min_len: min_len as _,
             max_cache_size,
-            min_cache_size:8,
-            cache_size: Arc::new(Mutex::new(8)),
+            min_cache_size:3,
+            cache_size: Arc::new(Mutex::new(3)),
             mid: Arc::new(Mutex::new(usize::zero())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             msg_map: Arc::new(Mutex::new(HashMap::new())),
