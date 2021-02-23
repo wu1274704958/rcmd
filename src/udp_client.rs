@@ -63,7 +63,7 @@ async fn main() -> io::Result<()>
     {
         let msg_queue = msg_queue.clone();
         let client = UdpClient::with_msg_queue_runing(
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0,0,0,0),args.bind_port)),
+            ("0.0.0.0", args.bind_port),
             Arc::new(handler),
             DefParser::new(),
             msg_queue.clone(),

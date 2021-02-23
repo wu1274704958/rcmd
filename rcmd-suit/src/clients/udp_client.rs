@@ -1,5 +1,5 @@
 
-use std::{collections::VecDeque, io, net::{IpAddr, Ipv4Addr, SocketAddr}, sync::{Arc,Mutex}, time::{Duration, SystemTime}};
+use std::{collections::VecDeque, io, net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs}, sync::{Arc,Mutex}, time::{Duration, SystemTime}};
 use std::vec::Vec;
 use tokio::{io::AsyncWriteExt, net::{UdpSocket}, time::sleep};
 
@@ -24,11 +24,15 @@ pub struct UdpClient<T,A>
     parser:A
 }
 
+fn socket_addr_conv<T:ToSocketAddrs>(t:T) -> io::Result<SocketAddr>{
+    t.to_socket_addrs()?.next().ok_or(io::Error::from(io::ErrorKind::InvalidInput))
+}
+
 impl <'a,T,A> UdpClient<T,A>
     where T:Handle,
           A : Agreement
 {
-    pub fn new(bind_addr:SocketAddr,handler:Arc<T>,parser:A)-> Self
+    pub fn new(bind_addr:impl ToSocketAddrs,handler:Arc<T>,parser:A)-> Self
     {
         UdpClient::<T,A>{
             msg_queue : Arc::new(Mutex::new(VecDeque::new())),
@@ -37,12 +41,12 @@ impl <'a,T,A> UdpClient<T,A>
             heartbeat_dur:Duration::from_secs(10),
             nomsg_rest_dur:Duration::from_millis(1),
             parser,
-            bind_addr,
+            bind_addr : socket_addr_conv(bind_addr).unwrap(),
             buf_size:1024 * 1024 * 10
         }
     }
 
-    pub fn with_dur(bind_addr:SocketAddr,handler:Arc<T>,parser:A,
+    pub fn with_dur(bind_addr:impl ToSocketAddrs,handler:Arc<T>,parser:A,
                     heartbeat_dur:Duration,
                     nomsg_rest_dur:Duration)-> Self
     {
@@ -53,12 +57,12 @@ impl <'a,T,A> UdpClient<T,A>
             heartbeat_dur,
             nomsg_rest_dur,
             parser,
-            bind_addr,
+            bind_addr:socket_addr_conv(bind_addr).unwrap(),
             buf_size:1024 * 1024 * 10
         }
     }
 
-    pub fn with_msg_queue(bind_addr:SocketAddr,handler:Arc<T>,parser:A,
+    pub fn with_msg_queue(bind_addr:impl ToSocketAddrs,handler:Arc<T>,parser:A,
                           msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>)-> Self
     {
         UdpClient::<T,A>{
@@ -68,12 +72,12 @@ impl <'a,T,A> UdpClient<T,A>
             heartbeat_dur:Duration::from_secs(10),
             nomsg_rest_dur:Duration::from_millis(1),
             parser,
-            bind_addr,
+            bind_addr: socket_addr_conv(bind_addr).unwrap(),
             buf_size:1024 * 1024 * 10
         }
     }
 
-    pub fn with_msg_queue_runing(bind_addr:SocketAddr,handler:Arc<T>,parser:A,
+    pub fn with_msg_queue_runing(bind_addr:impl ToSocketAddrs,handler:Arc<T>,parser:A,
                                  msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
                                  runing:Arc<Mutex<bool>>)-> Self
     {
@@ -84,7 +88,7 @@ impl <'a,T,A> UdpClient<T,A>
             heartbeat_dur:Duration::from_secs(10),
             nomsg_rest_dur:Duration::from_millis(1),
             parser,
-            bind_addr,
+            bind_addr: socket_addr_conv(bind_addr).unwrap(),
             buf_size:1024 * 1024 * 10
         }
     }
