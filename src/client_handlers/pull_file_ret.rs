@@ -45,4 +45,8 @@ impl SubHandle for PullFileRet
         }
         None
     }
+
+    fn interested(&self, ext:u32) ->bool {
+        EXT_PULL_FILE_S == ext || ext == EXT_PULL_FILE_C || ext == EXT_ERR_PULL_FILE_RET_EXT
+    }
 }

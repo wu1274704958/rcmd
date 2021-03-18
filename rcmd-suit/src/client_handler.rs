@@ -14,6 +14,7 @@ use std::time::SystemTime;
 
 pub trait SubHandle:Send + Sync {
     fn handle(&self,data:&[u8],len:u32,ext:u32)-> Option<(Vec<u8>,u32)>;
+    fn interested(&self,ext:u32)->bool{true} 
 }
 
 pub trait Handle
@@ -24,9 +25,11 @@ pub trait Handle
         for i in 0..self.handler_count()
         {
             let handler = self.get_handler(i);
-            if let Some((v,ext)) = handler.handle(data.msg,data.len,data.ext)
-            {
-                return Some((v,ext));
+            if handler.interested(data.ext) {
+                if let Some((v,ext)) = handler.handle(data.msg,data.len,data.ext)
+                {
+                    return Some((v,ext));
+                }
             }
         }
         None

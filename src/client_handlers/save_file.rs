@@ -61,11 +61,7 @@ fn ret(id_buf:&[u8],mut v2:Vec<u8>)->Vec<u8>
 impl SubHandle for SaveFile
 {
     fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
-        if ext != EXT_SAVE_FILE_CREATE &&
-            ext != EXT_SAVE_FILE &&
-            ext != EXT_SAVE_FILE_ELF{
-            return None;
-        }
+      
         let mut id_buf = [0u8;size_of::<usize>()];
         id_buf.copy_from_slice(&data[0..size_of::<usize>()]);
 
@@ -174,5 +170,11 @@ impl SubHandle for SaveFile
             }
         }
         None
+    }
+
+    fn interested(&self, ext:u32) ->bool {
+        ext == EXT_SAVE_FILE_CREATE ||
+        ext == EXT_SAVE_FILE ||
+        ext == EXT_SAVE_FILE_ELF
     }
 }

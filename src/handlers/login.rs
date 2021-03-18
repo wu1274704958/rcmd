@@ -121,6 +121,9 @@ impl SubHandle for Login
         }
         None
     }
+    fn interested(&self, ext:u32) ->bool {
+        ext == EXT_LOGIN || ext == EXT_LOGOUT
+    }
 }
 
 

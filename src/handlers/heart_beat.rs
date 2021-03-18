@@ -17,7 +17,7 @@ impl SubHandle for HeartbeatHandler
     type ABClient = AbClient;
     type Id = usize;
 
-    async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>,u32)> where Self::Id: Copy {
+    async fn handle(&self, data: &[u8], _len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>,u32)> where Self::Id: Copy {
 
         let mut a = clients.lock().await;
         if let Some(c) = a.get_mut(&id)
@@ -29,5 +29,9 @@ impl SubHandle for HeartbeatHandler
             }
         }
         None
+    }
+
+    fn interested(&self, ext:u32) ->bool {
+        ext == 9
     }
 }

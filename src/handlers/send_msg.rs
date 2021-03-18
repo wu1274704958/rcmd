@@ -35,7 +35,7 @@ impl SubHandle for SendMsg
     type Id = usize;
 
     async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
-        if ext != EXT_SEND_BROADCAST && ext != EXT_SEND_MSG { return None;}
+        
 
         let mut self_name = None;
         {
@@ -83,5 +83,8 @@ impl SubHandle for SendMsg
 
         }
         None
+    }
+    fn interested(&self, ext:u32) ->bool {
+        ext == EXT_SEND_BROADCAST || ext == EXT_SEND_MSG
     }
 }

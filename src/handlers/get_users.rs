@@ -31,8 +31,8 @@ impl SubHandle for GetUser
     type ABClient = AbClient;
     type Id = usize;
 
-    async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
-        if ext != EXT_GET_USERS {return  None;}
+    async fn handle(&self, _data: &[u8], _len: u32, ext: u32, _clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+        
         let login = {
             let u = self.user_map.lock().await;
             u.get(&id).is_some()
@@ -43,7 +43,7 @@ impl SubHandle for GetUser
         let mut res = vec![];
         let um = self.user_map.lock().await;
         {
-            let ns:Vec<_> = um.iter().map(|(i,it)|{
+            let ns:Vec<_> = um.iter().map(|(_i,it)|{
                 it.acc.clone()
             }).collect();
 
@@ -57,5 +57,9 @@ impl SubHandle for GetUser
             }
         }
         Some((serde_json::Value::Array(res).to_string().into_bytes(),EXT_GET_USERS))
+    }
+
+    fn interested(&self, ext:u32) ->bool {
+        ext == EXT_GET_USERS
     }
 }

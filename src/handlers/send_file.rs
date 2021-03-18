@@ -99,6 +99,16 @@ impl SubHandle for SendFile
         }
         None
     }
+
+    fn interested(&self, ext:u32) ->bool {
+        ext == EXT_SEND_FILE_CREATE ||
+        ext == EXT_SEND_FILE ||
+        ext == EXT_SEND_FILE_ELF ||
+        ext == EXT_SAVE_FILE ||
+        ext == EXT_SAVE_FILE_ELF ||
+        ext == EXT_SAVE_FILE_CREATE ||
+        ext == EXT_ERR_SAVE_FILE_RET_EXT
+    }
 }
 
 fn map_ext(e:u32) -> u32

@@ -25,7 +25,6 @@ impl GetUser {
 impl SubHandle for GetUser
 {
     fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
-        if ext != EXT_GET_USERS {return  None;}
 
         let s = String::from_utf8_lossy(data).to_string();
         let u = serde_json::from_str::<serde_json::Value>(s.as_str()).unwrap();
@@ -43,6 +42,10 @@ impl SubHandle for GetUser
         }
 
         None
+    }
+
+    fn interested(&self, ext:u32) ->bool {
+        ext == EXT_GET_USERS
     }
 }
 

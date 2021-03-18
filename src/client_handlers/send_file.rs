@@ -49,4 +49,11 @@ impl SubHandle for SendFile
         }
         None
     }
+
+    fn interested(&self, ext:u32) ->bool {
+        ext == EXT_SAVE_FILE_RET ||
+        ext == EXT_SAVE_FILE_CREATE_RET ||
+        ext == EXT_SAVE_FILE_ELF_RET ||
+        ext == EXT_ERR_SAVE_FILE_RET_EXT 
+    }
 }

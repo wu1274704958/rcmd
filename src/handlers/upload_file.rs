@@ -35,7 +35,7 @@ impl SubHandle for UploadHandler
     type Id = usize;
 
     async fn handle(&self, data: &[u8], len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, id: Self::Id) -> Option<(Vec<u8>,u32)> where Self::Id: Copy {
-        if ext != EXT_UPLOAD_FILE_CREATE && ext != EXT_UPLOAD_FILE && ext != EXT_UPLOAD_FILE_ELF {return  None;}
+        
         let has_permission = {
             let u = self.user_map.lock().await;
             {
@@ -154,5 +154,9 @@ impl SubHandle for UploadHandler
             }
         }
         Some((rd,EXT_DEFAULT_ERR_CODE))
+    }
+
+    fn interested(&self, ext:u32) ->bool {
+        ext == EXT_UPLOAD_FILE_CREATE || ext == EXT_UPLOAD_FILE || ext == EXT_UPLOAD_FILE_ELF
     }
 }
