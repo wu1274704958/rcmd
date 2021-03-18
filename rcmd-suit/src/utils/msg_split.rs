@@ -1,7 +1,7 @@
 use crate::agreement::Message;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem::size_of;
-use crate::tools::{TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END, TOKEN_SUBPACKAGE_BEGIN};
+use crate::tools::{TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END, TOKEN_SUBPACKAGE_BEGIN, TOKEN_NORMAL};
 use crate::ext_code::*;
 
 pub trait MsgSplit{
@@ -165,6 +165,7 @@ pub struct UdpMsgSplit
     max_unit_size:usize,
     min_unit_size:usize,
     unit_size:usize,
+    wait_split_queue:VecDeque<(Vec<u8>,usize,u16,u16)>
 }
 
 impl UdpMsgSplit{
@@ -175,7 +176,8 @@ impl UdpMsgSplit{
             logic_id:0,
             max_unit_size,
             min_unit_size,
-            unit_size:max_unit_size
+            unit_size:min_unit_size,
+            wait_split_queue:VecDeque::new()
         }
     }
 
@@ -223,7 +225,7 @@ impl UdpMsgSplit{
     }
 
     pub fn need_split(&self,len:usize) ->bool {
-        self.open() && len > self.max_unit_size()
+        (self.open() && len > self.max_unit_size()) || !self.wait_split_queue.is_empty()
     }
 
     pub fn open(&self) -> bool {
@@ -327,5 +329,48 @@ impl UdpMsgSplit{
     }
     pub fn unit_size(&self) -> usize {
         self.unit_size
+    }
+
+    pub fn need_send(&self) ->bool
+    {
+        !self.wait_split_queue.is_empty()
+    }
+
+    pub fn push_msg(&mut self,v:Vec<u8>)
+    {
+        let id = self.get_id();
+        self.wait_split_queue.push_back((v,0,id,0));
+    }
+
+    pub fn pop_msg(&mut self) -> Option<(&[u8], u32, u8, bool)>
+    {
+        //(data begin_pos id idx )
+        if let Some(v) = self.wait_split_queue.front_mut()
+        {
+            let end = (*v).0.len() - (*v).1 <= self.unit_size;
+            let e = (*v).1 + self.unit_size;
+            let sli = if end { &(*v).0[(*v).1..] }else { &(*v).0[(*v).1..e] };
+            let begin = (*v).1 == 0;
+            if begin && end { return Some((sli,0,TOKEN_NORMAL,true))}
+            let id_ = (*v).2.to_be_bytes();
+            let i_ = (*v).3.to_be_bytes();
+
+            let mut ext_buf = [0u8;size_of::<u32>()];
+            (&mut ext_buf[0..size_of::<u16>()]).copy_from_slice(&id_);
+            (&mut ext_buf[size_of::<u16>()..]).copy_from_slice(&i_);
+            (*v).1 = e;
+            (*v).3 = (*v).3 + 1;
+            let tag = if begin{
+                TOKEN_SUBPACKAGE_BEGIN
+            }else if end {
+                TOKEN_SUBPACKAGE_END
+            }else { TOKEN_SUBPACKAGE };
+            Some((sli,u32::from_be_bytes(ext_buf),tag,end))
+        }else { None }
+    }
+
+    pub fn pop_front_wait_split(&mut self)
+    {
+        self.wait_split_queue.pop_front();
     }
 }

@@ -499,7 +499,7 @@ impl DefUdpSender
                 Ok(l)
             }
             Err(e) => {
-                eprintln!("udp send msg failed {:?}",e);
+                eprintln!("udp send msg failed len = {} {:?}",d.len(),e);
                 Err(e.into())
             }
         }
@@ -563,13 +563,27 @@ impl DefUdpSender
 
     async fn adjust_unit_size(&self,times_frequency:f32)
     {
-        if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency >= 3f32 {
-            let v = self.adjust_cache_size(-1,5).await;
-            println!("down cache size curr = {} ",v);
-        }else if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency <= 1f32 {
-            let v = self.adjust_cache_size_ex(1).await;
-            println!("up cache size curr = {} ",v);
+        let mut msg_split = self.msg_split.lock().await;
+        if msg_split.is_max_unit_size(){
+            if self.get_cache_len().await >= self.get_cache_size().await as usize/ 2  && times_frequency >= 3f32 {
+                let v = self.adjust_cache_size(-1,5).await;
+                msg_split.down_unit_size();
+                println!("down cache size curr = {} ",v);
+            }else if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency <= 1f32 {
+                let v = self.adjust_cache_size_ex(1).await;
+                println!("up cache size curr = {} ",v);
+            }
+        }else{
+            if self.get_cache_len().await >= self.get_cache_size().await as usize/ 2  && times_frequency >= 3f32 {
+                let v = self.adjust_cache_size(-1,5).await;
+                msg_split.down_unit_size();
+                println!("down cache size curr = {} ",v);
+            }else if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency <= 1f32 {
+                msg_split.up_unit_size();
+                println!("up unit size curr = {} ",msg_split.unit_size());
+            }
         }
+
     }
 
     async fn get_cache_len(&self) ->usize
@@ -715,6 +729,13 @@ impl DefUdpSender
         *cs = new;
         new
     }
+
+    async fn send_cache_empty(&self) ->bool
+    {
+        let queue = self.queue.lock().await;
+        let msg_cache_queue = self.msg_cache_queue.lock().await;
+        queue.len() < self.get_cache_size().await as usize && msg_cache_queue.is_empty()
+    }
 }
 
 #[async_trait]
@@ -745,19 +766,8 @@ impl UdpSender for DefUdpSender
         }
         if self.need_split(v.len()).await
         {
-            let vs = {
-                let mut msg_split = self.msg_split.lock().await;
-                msg_split.split(&v)
-            };
-            for (d,ext,tag) in vs
-            {
-                let v = match self.warp(d,ext,tag).await{
-                    Ok(v) => {v}
-                    Err(USErr::MsgCacheOverflow) => { continue; }
-                    Err(e) => {return Err(e);}
-                };
-                self.send(v.as_slice()).await?;
-            }
+            let mut msg_split = self.msg_split.lock().await;
+            msg_split.push_msg(v);
             Ok(())
         }else{
             match self.warp(v.as_slice(),0,TOKEN_NORMAL).await{
@@ -814,8 +824,8 @@ impl UdpSender for DefUdpSender
             max_len: max_len as _,
             min_len: min_len as _,
             max_cache_size,
-            min_cache_size:8,
-            cache_size: Arc::new(Mutex::new(8)),
+            min_cache_size:3,
+            cache_size: Arc::new(Mutex::new(3)),
             mid: Arc::new(Mutex::new(usize::zero())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             msg_map: Arc::new(Mutex::new(HashMap::new())),
@@ -940,16 +950,32 @@ impl UdpSender for DefUdpSender
             }
             if l > 0 { avg_times = sum as f32 / l as f32; }
         }
+        {
+            let mut msg_split = self.msg_split.lock().await;
+            while self.send_cache_empty().await && msg_split.need_send() {
+                if let Some((v,ext,tag,is_end)) = msg_split.pop_msg(){
+                    match self.warp(v,ext,tag).await{
+                        Ok(v) => {self.send(v.as_slice()).await?;}
+                        Err(USErr::MsgCacheOverflow) => {}
+                        Err(e) => { return Err(e);}
+                    }
+                    if is_end {
+                        msg_split.pop_front_wait_split();
+                    }
+                }
+            }
+        }
 
         let mut adjust_cache_size_time = self.adjust_cache_size_time.lock().await;
         if let Ok(dur) = SystemTime::now().duration_since(*adjust_cache_size_time) {
             let mut retry_times = self.avg_retry_times.lock().await;
             (*retry_times).0 += 1;
             (*retry_times).1 += avg_times;
-            if dur.as_secs() > 20 {
+            if dur.as_secs_f32() > 3.6 {
                 let avg =  (*retry_times).1 / (*retry_times).0 as f32;
                 self.adjust_unit_size(avg).await;
                 *retry_times = (0,0f32);
+                *adjust_cache_size_time = SystemTime::now();
             }
         }
         //self.check_msg_cache_queue().await;
