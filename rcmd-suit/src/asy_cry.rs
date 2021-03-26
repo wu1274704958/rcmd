@@ -71,7 +71,7 @@ impl DefAsyCry
     {
         let mut ignore_map = HashSet::new();
         let runtime = runtime::Builder::new_multi_thread()
-            .worker_threads(6)
+            .worker_threads(1)
             .build()
             .unwrap();
         ignore_map.extend([9].iter());

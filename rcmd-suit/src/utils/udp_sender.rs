@@ -825,7 +825,7 @@ impl UdpSender for DefUdpSender
             min_len: min_len as _,
             max_cache_size,
             min_cache_size:3,
-            cache_size: Arc::new(Mutex::new(3)),
+            cache_size: Arc::new(Mutex::new(1)),
             mid: Arc::new(Mutex::new(usize::zero())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             msg_map: Arc::new(Mutex::new(HashMap::new())),
