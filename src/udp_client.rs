@@ -107,6 +107,8 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
 
         match cmds[0] {
             "-" => {
+                let mut v = is_runing.lock().unwrap();
+                *v = false;
                 return Ok(());
             }
             "0" => {

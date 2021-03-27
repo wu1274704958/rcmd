@@ -17,6 +17,10 @@ use std::fmt::Debug;
 use crate::utils::udp_sender::SessionState::Has;
 use crate::tools;
 use futures::task::LocalSpawn;
+use crate::utils::udp_sender::SpecialExt::send_recv;
+use num_enum::TryFromPrimitive;
+use std::convert::TryFrom;
+use std::thread::sleep;
 
 #[async_trait]
 pub trait UdpSender{
@@ -39,9 +43,11 @@ pub trait UdpSender{
     fn retry_times(&self)->u16;
     async fn has_session(&self)->bool;
     async fn build_session(&self)->Result<(),USErr>;
+    async fn close_session(&self)->Result<(),USErr>;
 }
 
 enum SessionState{
+    Closed,
     Null,
     WaitResponse(u128,SystemTime,u16),
     WaitResponseCp(u128,SystemTime,u16),
@@ -56,6 +62,15 @@ impl SessionState{
             SessionState::WaitResponse(_, _, _) => {false}
             SessionState::WaitResponseCp(_, _, _) => {true}
             SessionState::Has(_) => {true}
+            SessionState::Closed => {false}
+        }
+    }
+
+    pub fn is_close(&self) -> bool
+    {
+        match self {
+            SessionState::Closed => {true},
+            _ => {false}
         }
     }
 }
@@ -101,7 +116,9 @@ pub enum USErr{
     WaitSessionResponseCp,
     NotWaitingSessionResponse,
     NotWaitingSessionResponseCp,
-    SendSessionFailed
+    SendSessionFailed,
+    AlreadyClosed,
+    CpAlreadyClosed,
 }
 
 impl USErr {
@@ -121,7 +138,9 @@ impl USErr {
             USErr::SendSessionFailed=>{-10}
             USErr::NotWaitingSessionResponse=>{-11}
             USErr::NotWaitingSessionResponseCp=>{-12}
-            USErr::WaitSessionResponseCp=>{-13}
+            USErr::WaitSessionResponseCp=>{-13},
+            USErr::AlreadyClosed => {-14}
+            USErr::CpAlreadyClosed => {-15}
         }
     }
 
@@ -142,6 +161,8 @@ impl USErr {
             USErr::NotWaitingSessionResponse=>{"Not waiting session response".to_string()}
             USErr::NotWaitingSessionResponseCp=>{"Not waiting session response cp".to_string()}
             USErr::WaitSessionResponseCp=>{"Waiting session response cp".to_string()}
+            USErr::AlreadyClosed=>{"Session already closed!".to_string()}
+            USErr::CpAlreadyClosed => {"Cp Session already closed!".to_string()}
         }
     }
 }
@@ -165,6 +186,33 @@ impl Debug for USErr
             .field(&self.code())
             .field(&self.err_str())
             .finish()
+    }
+}
+
+#[repr(u32)]
+#[derive(TryFromPrimitive)]
+#[derive(Copy, Clone)]
+enum SpecialExt {
+    send_recv = u32::max_value(),
+    miss_cache = u32::max_value() - 1,
+    send_sid = 100,
+    response_send_sid = 101,
+    response_cp_send_sid = 102,
+    send_close = 103,
+    err_already_has_sid = 5000,
+    err_waiting_response = 5001,
+    err_bad_session = 5002,
+    err_no_session = 5003,
+    err_not_wait_sid_resp = 5004,
+    err_waiting_response_cp = 5005,
+    err_not_wait_sid_resp_cp = 5006,
+    err_already_closed = 5007,
+}
+
+impl Into<u32> for SpecialExt{
+    fn into(self) -> u32
+    {
+        self as u32
     }
 }
 
@@ -295,14 +343,18 @@ impl DefUdpSender
                     {
                         return Err(USErr::EmptyMsg);
                     }
+                    if self.is_close().await{
+                        self.send_ext(SpecialExt::err_already_closed.into()).await?;
+                        return Err(USErr::EmptyMsg);
+                    }
                     if let Some(sid_) = self.get_sid().await{
                         if sid_ != sid
                         {
-                            self.send_ext(Self::mn_err_bad_session()).await?;
+                            self.send_ext(SpecialExt::err_bad_session.into()).await?;
                             return Err(USErr::EmptyMsg);
                         }
                     }else{
-                        self.send_ext(Self::mn_err_no_session()).await?;
+                        self.send_ext(SpecialExt::err_no_session.into()).await?;
                         return Err(USErr::EmptyMsg);
                     }
                     self.send_recv(id).await?;
@@ -339,116 +391,153 @@ impl DefUdpSender
     {
         if msg.len() == 1 && msg[0] == 199 && tag == TOKEN_NORMAL {
             //println!("get inside msg type ext = {}",ext);
-            if ext == Self::mn_send_recv(){
-                //println!("op recv msg {}",id);
-                //self.remove_cache(id).await;
-                if let Some((_,t,times)) = self.remove_cache(id).await
-                {
-                    //println!("op recv msg id = {} times = {}",id,times);
-                    self.check_msg_cache_queue().await;
+            let sp_ext = SpecialExt::try_from(ext).unwrap();
+            match sp_ext {
+                SpecialExt::send_recv => {
+                    //println!("op recv msg {}",id);
+                    //self.remove_cache(id).await;
+                    if let Some((_,t,times)) = self.remove_cache(id).await
+                    {
+                        //println!("op recv msg id = {} times = {}",id,times);
+                        self.check_msg_cache_queue().await;
+                    }
+                    Ok(true)
                 }
-                Ok(true)
-            }else if ext == Self::mn_send_sid()
-            {
-                let mut sid_ = self.sid.lock().await;
-                match *sid_ {
-                    SessionState::Null => {
-                        *sid_ = SessionState::WaitResponseCp(sid,SystemTime::now(),1);
-                        drop(sid);
-                        self.send_sid_response(sid,Self::mn_response_send_sid()).await?;
-                    }
-                    SessionState::WaitResponse(_, _, _) => {
-                        self.send_ext(Self::mn_err_waiting_response()).await?;
-                    }
-                    SessionState::WaitResponseCp(_, _, _) => {}
-                    SessionState::Has(v) => {}
-                }
-                Ok(true)
-            }else if ext == Self::mn_response_send_sid()
-            {
-                let mut sid_ = self.sid.lock().await;
-                match *sid_ {
-                    SessionState::Null => {
-                        self.send_ext(Self::mn_err_not_wait_sid_resp()).await?;
-                    }
-                    SessionState::WaitResponse(v, _, _) => {
-                        if v != sid{
-                            self.send_ext(Self::mn_err_bad_session()).await?;
-                        }else{
-                            *sid_ = SessionState::Has(sid);
-                            drop(sid_);
-                            self.send_sid_response(sid,Self::mn_response_cp_send_sid()).await?;
-                            self.send_cache_no_sid().await?;
+                SpecialExt::send_sid => {
+                    let mut sid_ = self.sid.lock().await;
+                    match *sid_ {
+                        SessionState::Null => {
+                            *sid_ = SessionState::WaitResponseCp(sid, SystemTime::now(), 1);
+                            drop(sid);
+                            self.send_sid_response(sid, SpecialExt::response_send_sid).await?;
+                        }
+                        SessionState::WaitResponse(_, _, _) => {
+                            self.send_ext(SpecialExt::err_waiting_response).await?;
+                        }
+                        SessionState::WaitResponseCp(_, _, _) => {}
+                        SessionState::Has(v) => {}
+                        SessionState::Closed => {
+                            self.send_ext(SpecialExt::err_already_closed).await?;
                         }
                     }
-                    SessionState::WaitResponseCp(v, _, _) => {
-                        self.send_ext(Self::mn_err_waiting_response_cp()).await?;
-                    }
-                    SessionState::Has(v) => {
-                        if v != sid{
-                            self.send_ext(Self::mn_err_already_has_sid()).await?;
-                        }
-                    }
+                    Ok(true)
                 }
-                Ok(true)
-            }else if ext == Self::mn_response_cp_send_sid()
-            {
-                let mut sid_ = self.sid.lock().await;
-                match *sid_ {
-                    SessionState::Null => {
-                        self.send_ext(Self::mn_err_not_wait_sid_resp_cp()).await?;
-                    }
-                    SessionState::WaitResponse(v, _, _) => {
-                        self.send_ext(Self::mn_err_waiting_response()).await?;
-                    }
-                    SessionState::WaitResponseCp(v, _, _) => {
-                        if v != sid{
-                            self.send_ext(Self::mn_err_bad_session()).await?;
-                        }else{
-                            *sid_ = SessionState::Has(sid);
-                            drop(sid_);
-                            self.send_cache_no_sid().await?;
+                SpecialExt::response_send_sid => {
+                    let mut sid_ = self.sid.lock().await;
+                    match *sid_ {
+                        SessionState::Null => {
+                            self.send_ext(SpecialExt::err_not_wait_sid_resp).await?;
+                        }
+                        SessionState::WaitResponse(v, _, _) => {
+                            if v != sid {
+                                self.send_ext(SpecialExt::err_bad_session).await?;
+                            } else {
+                                *sid_ = SessionState::Has(sid);
+                                drop(sid_);
+                                self.send_sid_response(sid, SpecialExt::response_cp_send_sid).await?;
+                                self.send_cache_no_sid().await?;
+                            }
+                        }
+                        SessionState::WaitResponseCp(v, _, _) => {
+                            self.send_ext(SpecialExt::err_waiting_response_cp).await?;
+                        }
+                        SessionState::Has(v) => {
+                            if v != sid {
+                                self.send_ext(SpecialExt::err_already_has_sid).await?;
+                            }
+                        }
+                        SessionState::Closed => {
+                            self.send_ext(SpecialExt::err_already_closed).await?;
                         }
                     }
-                    SessionState::Has(v) => {
-                        if v != sid{
-                            self.send_ext(Self::mn_err_already_has_sid()).await?;
-                        }
-                    }
+                    Ok(true)
                 }
-                Ok(true)
+                SpecialExt::response_cp_send_sid => {
+                    let mut sid_ = self.sid.lock().await;
+                    match *sid_ {
+                        SessionState::Null => {
+                            self.send_ext(SpecialExt::err_not_wait_sid_resp_cp).await?;
+                        }
+                        SessionState::WaitResponse(v, _, _) => {
+                            self.send_ext(SpecialExt::err_waiting_response).await?;
+                        }
+                        SessionState::WaitResponseCp(v, _, _) => {
+                            if v != sid {
+                                self.send_ext(SpecialExt::err_bad_session).await?;
+                            } else {
+                                *sid_ = SessionState::Has(sid);
+                                drop(sid_);
+                                self.send_cache_no_sid().await?;
+                            }
+                        }
+                        SessionState::Has(v) => {
+                            if v != sid {
+                                self.send_ext(SpecialExt::err_already_has_sid).await?;
+                            }
+                        }
+                        SessionState::Closed => {
+                            self.send_ext(SpecialExt::err_already_closed).await?;
+                        }
+                    }
+                    Ok(true)
+                }
+                SpecialExt::err_already_has_sid => {
+                    Err(USErr::AlreadyHasSession)
+                }
+                SpecialExt::err_waiting_response => {
+                    Err(USErr::WaitSessionResponse)
+                }
+                SpecialExt::err_waiting_response_cp => {
+                    Err(USErr::WaitSessionResponseCp)
+                }
+                SpecialExt::err_bad_session => {
+                    Err(USErr::BadSessionID)
+                }
+                SpecialExt::err_not_wait_sid_resp => {
+                    Err(USErr::NotWaitingSessionResponse)
+                }
+                SpecialExt::err_no_session => {
+                    Err(USErr::NoSession)
+                }
+                SpecialExt::err_not_wait_sid_resp_cp => {
+                    Err(USErr::NotWaitingSessionResponseCp)
+                }
+                SpecialExt::err_already_closed => {
+                    Err(USErr::CpAlreadyClosed)
+                }
+                SpecialExt::send_close => {
+                    let mut sid_ = self.sid.lock().await;
+                    match *sid_ {
+                        SessionState::Has(v) => {
+                            if sid != v {
+                                self.send_ext(SpecialExt::err_bad_session).await?;
+                            }else {
+                                println!("cp request close!");
+                                *sid_ = SessionState::Closed;
+                            }
+                        }
+                        _ => {}
+                    }
+                    Ok(true)
+                }
+                _ => { Ok(false) }
+
             }
-            else if ext == Self::mn_err_already_has_sid(){
-                Err(USErr::AlreadyHasSession)
-            }else if ext == Self::mn_err_waiting_response(){
-                Err(USErr::WaitSessionResponse)
-            }else if ext == Self::mn_err_waiting_response_cp(){
-                Err(USErr::WaitSessionResponseCp)
-            }else if ext == Self::mn_err_bad_session(){
-                Err(USErr::BadSessionID)
-            }else if ext == Self::mn_err_not_wait_sid_resp(){
-                Err(USErr::NotWaitingSessionResponse)
-            }else if ext == Self::mn_err_no_session(){
-                Err(USErr::NoSession)
-            }else if ext == Self::mn_err_not_wait_sid_resp_cp(){
-                Err(USErr::NotWaitingSessionResponseCp)
-            }
-            else { Ok(false) }
         }else{
             Ok(false)
         }
     }
 
-    async fn send_ext(&self,ext:u32) -> Result<usize,USErr>
+    async fn send_ext(&self,ext:SpecialExt) -> Result<usize,USErr>
     {
-        eprintln!("send ext {}",ext);
-        let v = Self::warp_ex(&[199],ext,TOKEN_NORMAL,0,0);
+        eprintln!("send ext {}",ext as u32);
+        let v = Self::warp_ex(&[199],ext.into(),TOKEN_NORMAL,0,0);
         self.send(v.as_slice()).await
     }
 
-    async fn send_sid_response(&self,sid:u128,ext:u32) -> Result<usize,USErr>
+    async fn send_sid_response(&self,sid:u128,ext:SpecialExt) -> Result<usize,USErr>
     {
-        let v = Self::warp_ex(&[199],ext,TOKEN_NORMAL,0,sid);
+        let v = Self::warp_ex(&[199],ext.into(),TOKEN_NORMAL,0,sid);
         self.send(v.as_slice()).await
     }
 
@@ -479,7 +568,7 @@ impl DefUdpSender
                 return Err(USErr::NoSession);
             }
         };
-        let v = Self::warp_ex(&[199],Self::mn_send_recv(),TOKEN_NORMAL,id,sid);
+        let v = Self::warp_ex(&[199],SpecialExt::send_recv.into(),TOKEN_NORMAL,id,sid);
         self.send(v.as_slice()).await?;
         self.send(v.as_slice()).await
     }
@@ -540,20 +629,6 @@ impl DefUdpSender
     const fn magic_num_2()->u8 {7}
     const fn magic_num_3()->u8 {2}
     const fn magic_num_4()->u8 {6}
-
-    const fn mn_send_recv()->u32 {u32::max_value()}
-    const fn mn_miss_cache()->u32 {u32::max_value()-1}
-    const fn mn_send_sid()->u32 {100}
-    const fn mn_response_send_sid()->u32 {101}
-    const fn mn_response_cp_send_sid()->u32 {102}
-
-    const fn mn_err_already_has_sid()->u32 {5000}
-    const fn mn_err_waiting_response()->u32 {5001}
-    const fn mn_err_bad_session()->u32 {5002}
-    const fn mn_err_no_session()->u32 {5003}
-    const fn mn_err_not_wait_sid_resp()->u32 {5004}
-    const fn mn_err_waiting_response_cp()->u32 {5005}
-    const fn mn_err_not_wait_sid_resp_cp()->u32 {5006}
 
 
     fn package_len()->usize
@@ -642,6 +717,7 @@ impl DefUdpSender
             SessionState::WaitResponse(_, _, _) => {None}
             SessionState::WaitResponseCp(v,_,_) => {Some(v)}
             SessionState::Has(v) => {Some(v)}
+            SessionState::Closed => {None}
         }
     }
 
@@ -649,6 +725,12 @@ impl DefUdpSender
     {
         let sid = self.sid.lock().await;
         sid.is_has()
+    }
+
+    async fn is_close(&self) -> bool
+    {
+        let sid = self.sid.lock().await;
+        sid.is_close()
     }
 
     async fn eq_sid(&self,v:u128) -> bool
@@ -659,6 +741,7 @@ impl DefUdpSender
             SessionState::WaitResponse(_, _, _) => {false}
             SessionState::WaitResponseCp(v_,_,_) => {v == v_}
             SessionState::Has(v_) => {v == v_}
+            SessionState::Closed => {false}
         }
     }
 
@@ -675,7 +758,7 @@ impl DefUdpSender
     async fn send_session(&self) -> Result<(),USErr>
     {
         let sid_ = tools::uuid();
-        let v = Self::warp_ex(&[199],Self::mn_send_sid(),TOKEN_NORMAL,0,sid_);
+        let v = Self::warp_ex(&[199],SpecialExt::send_sid.into(),TOKEN_NORMAL,0,sid_);
         {
             let mut sid = self.sid.lock().await;
             *sid = SessionState::WaitResponse(sid_, SystemTime::now(), 1);
@@ -736,6 +819,20 @@ impl DefUdpSender
         let msg_cache_queue = self.msg_cache_queue.lock().await;
         queue.len() < self.get_cache_size().await as usize && msg_cache_queue.is_empty()
     }
+
+    async fn send_close_session(&self) ->Result<(),USErr>
+    {
+        let sid_ = self.get_sid().await.unwrap();
+        let v = Self::warp_ex(&[199],SpecialExt::send_close.into(),TOKEN_NORMAL,0,sid_);
+        {
+            let mut sid = self.sid.lock().await;
+            *sid = SessionState::Closed;
+        }
+        self.send(v.as_slice()).await?;
+        self.send(v.as_slice()).await?;
+        self.send(v.as_slice()).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -757,6 +854,9 @@ impl UdpSender for DefUdpSender
                     return Ok(());
                 }
                 SessionState::WaitResponseCp(_, _, _) => {}
+                SessionState::Closed => {
+                    return Err(USErr::AlreadyClosed);
+                }
                 Has(_) => {}
             }
         }
@@ -899,7 +999,7 @@ impl UdpSender for DefUdpSender
                 {
                     if dur > self.timeout
                     {
-                        let d = Self::warp_ex(&[199],Self::mn_send_sid(),TOKEN_NORMAL,0,v);
+                        let d = Self::warp_ex(&[199],SpecialExt::send_sid.into(),TOKEN_NORMAL,0,v);
                         self.send(d.as_slice()).await?;
                         *sid = SessionState::WaitResponse(v,SystemTime::now(),times + 1);
                     }
@@ -913,7 +1013,7 @@ impl UdpSender for DefUdpSender
                 {
                     if dur > self.timeout
                     {
-                        let d = Self::warp_ex(&[199],Self::mn_response_send_sid(),TOKEN_NORMAL,0,v);
+                        let d = Self::warp_ex(&[199],SpecialExt::response_send_sid.into(),TOKEN_NORMAL,0,v);
                         self.send(d.as_slice()).await?;
                         *sid = SessionState::WaitResponseCp(v,SystemTime::now(),times + 1);
                     }
@@ -1003,6 +1103,14 @@ impl UdpSender for DefUdpSender
         }
         self.send_session().await?;
         Ok(())
+    }
+
+    async fn close_session(&self) -> Result<(), USErr> {
+        if !self.has_session().await
+        {
+            return Err(USErr::NoSession);
+        }
+        self.send_close_session().await
     }
 }
 

@@ -364,6 +364,7 @@ impl <'a,T,A> UdpClient<T,A>
             }
 
         }
+        sender_cp.close_session().await;
         self.stop();
         recv_worker.await;
         Ok(())
