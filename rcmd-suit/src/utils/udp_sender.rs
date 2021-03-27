@@ -119,6 +119,7 @@ pub enum USErr{
     SendSessionFailed,
     AlreadyClosed,
     CpAlreadyClosed,
+    CpRequestClosed
 }
 
 impl USErr {
@@ -141,6 +142,7 @@ impl USErr {
             USErr::WaitSessionResponseCp=>{-13},
             USErr::AlreadyClosed => {-14}
             USErr::CpAlreadyClosed => {-15}
+            USErr::CpRequestClosed => {-16}
         }
     }
 
@@ -163,6 +165,7 @@ impl USErr {
             USErr::WaitSessionResponseCp=>{"Waiting session response cp".to_string()}
             USErr::AlreadyClosed=>{"Session already closed!".to_string()}
             USErr::CpAlreadyClosed => {"Cp Session already closed!".to_string()}
+            USErr::CpRequestClosed => {"Cp Session request closed!".to_string()}
         }
     }
 }
@@ -514,6 +517,7 @@ impl DefUdpSender
                             }else {
                                 println!("cp request close!");
                                 *sid_ = SessionState::Closed;
+                                return Err(USErr::CpRequestClosed);
                             }
                         }
                         _ => {}

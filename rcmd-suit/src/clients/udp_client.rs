@@ -364,9 +364,11 @@ impl <'a,T,A> UdpClient<T,A>
             }
 
         }
-        sender_cp.close_session().await;
+        sender.close_session().await;
         self.stop();
-        recv_worker.await;
+        println!("waiting for recv worker!");
+        recv_worker.abort();
+        println!("recv worker end!");
         Ok(())
     }
 
