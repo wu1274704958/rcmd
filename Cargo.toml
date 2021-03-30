@@ -21,6 +21,7 @@ serde_json = "1.0.61"
 lazy_static = "1.4.0"
 ahash = "0.6.3"
 futures = "*"
+flate2 = "*"
 
 [dependencies.rcmd-suit]
 path = "rcmd-suit"
