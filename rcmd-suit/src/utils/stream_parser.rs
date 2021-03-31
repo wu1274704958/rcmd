@@ -44,6 +44,53 @@ impl<'a> Stream<'a>{
 
 pub trait StreamParse : Sized {
     fn stream_parse(stream:&mut Stream)->Option<Self>;
+    fn stream_parse_ex(&mut self,stream:&mut Stream)->bool
+    {
+        if let Some(v) = Self::stream_parse(stream){
+            *self = v;
+            true
+        }else {
+            false
+        }
+    }
+}
+
+pub struct Skip<const N:usize>{
+
+}
+
+impl<const N:usize> StreamParse for Skip<N> {
+    fn stream_parse(stream: &mut Stream) -> Option<Self>
+    {
+        if stream.skip(N) { Some(Skip::<N>{}) }else { None }
+    }
+}
+
+pub struct SkipRt{
+    n:usize
+}
+
+impl From<usize> for SkipRt{
+    fn from(v: usize) -> Self
+    {
+        SkipRt{n:v}
+    }
+}
+
+impl Into<usize> for SkipRt{
+    fn into(self) -> usize {
+        self.n
+    }
+}
+
+impl StreamParse for SkipRt {
+    fn stream_parse(stream: &mut Stream) -> Option<Self> {
+        None
+    }
+
+    fn stream_parse_ex(&mut self, stream: &mut Stream) -> bool {
+        stream.skip(self.n)
+    }
 }
 
 gen_stream_parse!{u64}
@@ -77,7 +124,7 @@ fn test_gen_stream_parse2() {
     let mut stream = Stream::new(buf);
     let b1 = u32::stream_parse(&mut stream).unwrap();
     let b2 = i32::stream_parse(&mut stream).unwrap();
-    stream.skip(3);
+    SkipRt{n:3}.stream_parse_ex(&mut stream);
     let b3 = usize::stream_parse(&mut stream).unwrap();
     let b4 = isize::stream_parse(&mut stream).unwrap();
 
