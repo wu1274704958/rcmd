@@ -1,5 +1,6 @@
 use std::mem::size_of;
 use pm_gen::gen_stream_parse;
+use pm_gen::StreamParse;
 
 pub struct Stream<'a>{
     data:&'a [u8],
@@ -93,6 +94,8 @@ impl StreamParse for SkipRt {
     }
 }
 
+gen_stream_parse!{f32}
+gen_stream_parse!{f64}
 gen_stream_parse!{u64}
 gen_stream_parse!{i64}
 gen_stream_parse!{u16}
@@ -137,8 +140,48 @@ fn test_gen_stream_parse2() {
 #[test]
 fn test_gen_stream_parse() {
     let a = 10052398u32;
-    let buf = a.to_be_bytes();
-    let mut stream = Stream::new(&buf);
+    let x = 9090909i32;
+    let y = 871923i32;
+    let z = 2787183789127usize;
+    let mut v = Vec::new();
+    v.extend_from_slice(&a.to_be_bytes());
+    v.extend_from_slice(&x.to_be_bytes());
+    v.extend_from_slice(&y.to_be_bytes());
+    v.extend_from_slice(&z.to_be_bytes());
+    let mut stream = Stream::new(&v);
     let b = u32::stream_parse(&mut stream).unwrap();
     assert_eq!(a,b);
+
+    let mut data = Data{ x:0,y:0,z:0};
+    data.stream_parse_ex(&mut stream);
+
+    assert_eq!(x,data.x);
+    assert_eq!(y,data.y);
+    assert_eq!(z,data.z);
+
+    let mut v2 = Vec::new();
+    v2.extend_from_slice(&x.to_be_bytes());
+    v2.extend_from_slice(&y.to_be_bytes());
+    v2.push(2);
+    v2.push(3);
+    v2.extend_from_slice(&z.to_be_bytes());
+    let mut stream = Stream::new(&v2);
+
+    let mut data2 = MyData(1,2,Skip::<2>{},3);
+    data2.stream_parse_ex(&mut stream);
+
+    assert_eq!(x,data2.0);
+    assert_eq!(y,data2.1);
+    assert_eq!(z,data2.3);
+
 }
+
+#[derive(StreamParse)]
+struct Data{
+    pub x: i32,
+    pub y: i32,
+    pub z: usize
+}
+
+#[derive(StreamParse)]
+struct MyData(i32,i32,Skip<2>,usize);
