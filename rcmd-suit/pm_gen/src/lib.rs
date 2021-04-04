@@ -35,7 +35,7 @@ pub fn derive_stream_parse(input: proc_macro::TokenStream) -> proc_macro::TokenS
         },
         _ => panic!("doesn't work with unions yet"),
     };
-    println!(" derive_stream_parse ---> \n{}",result.to_string());
+    //println!(" derive_stream_parse ---> \n{}",result.to_string());
     result.into()
 }
 
