@@ -920,7 +920,7 @@ impl UdpSender for DefUdpSender
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
         let max_cache_size = 50;
-        let max_len = 64000 - Self::package_len();
+        let max_len = 65500 - Self::package_len();
         let min_len = 1500 - Self::package_len();
         DefUdpSender{
             addr,

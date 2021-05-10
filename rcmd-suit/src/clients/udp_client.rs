@@ -220,7 +220,10 @@ impl <'a,T,A> UdpClient<T,A>
 
 
         if let Ok(pub_key_data) = asy.build_pub_key().await{
-            self.write_msg(&sender, pub_key_data, 10).await?;
+            if let Err(e) =  self.write_msg(&sender, pub_key_data, 10).await{
+                recv_worker.await;
+                return Err(e);
+            }
         }
 
         let mut subpackager = DefSubpackage::new();
@@ -279,7 +282,10 @@ impl <'a,T,A> UdpClient<T,A>
                     };
                     if let Some(v) = immediate_send
                     {
-                        self.write_msg(&sender, v, m.ext).await?;
+                        if let Err(e) = self.write_msg(&sender, v, m.ext).await{
+                        recv_worker.await;
+                        return Err(e);
+                    }
                         continue;
                     }
                     if let Some(ref v) = override_msg
@@ -306,7 +312,12 @@ impl <'a,T,A> UdpClient<T,A>
                 }
                 package = None;
             }else{
-                sender.check_send().await?;
+                if let Err(e) = sender.check_send().await{
+                    eprintln!("send msg error: {:?}",e);
+                    self.stop();
+                    recv_worker.await;
+                    return Err(e);
+                }
             }
 
             if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
@@ -314,7 +325,11 @@ impl <'a,T,A> UdpClient<T,A>
                 if n > self.heartbeat_dur
                 {
                     heartbeat_t = SystemTime::now();
-                    self.write_msg(& sender, vec![9], 9).await?;
+                    if let Err(e) = self.write_msg(& sender, vec![9], 9).await{
+                        eprintln!("send msg error: {:?}",e);
+                        recv_worker.await;
+                        return Err(e);
+                    }
                 }
             }
 
@@ -351,7 +366,11 @@ impl <'a,T,A> UdpClient<T,A>
                             EncryptRes::NotChange => {}
                             _ => {}
                         };
-                        self.write_msg(&sender, v.0, v.1).await?;
+                        if let Err(e) = self.write_msg(&sender, v.0, v.1).await{
+                            eprintln!("send msg error: {:?}",e);
+                            recv_worker.await;
+                            return Err(e);
+                        }
                     }
                 }else{
                     sleep(Duration::from_millis(1)).await;
