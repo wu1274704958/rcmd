@@ -311,13 +311,12 @@ impl <'a,T,A> UdpClient<T,A>
                     }
                 }
                 package = None;
-            }else{
-                if let Err(e) = sender.check_send().await{
-                    eprintln!("send msg error: {:?}",e);
-                    self.stop();
-                    recv_worker.await;
-                    return Err(e);
-                }
+            }
+            if let Err(e) = sender.check_send().await{
+                eprintln!("send msg error: {:?}",e);
+                self.stop();
+                recv_worker.await;
+                return Err(e);
             }
 
             if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)

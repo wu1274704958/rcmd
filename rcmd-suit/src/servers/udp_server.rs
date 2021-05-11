@@ -397,12 +397,12 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM,F,SE>
                     }
                 }
             }
-        }else{
-            if let Err(e) = sender.check_send().await{
-                eprintln!("recv error = {:?}",e);
-                clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
-                return;
-            }
+        }
+
+        if let Err(e) = sender.check_send().await{
+            eprintln!("recv error = {:?}",e);
+            clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
+            return;
         }
 
         //println!("{} handle the request....", logic_id);
