@@ -16,6 +16,10 @@ use tokio::io;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex,mpsc};
 use crate::utils::msg_split::{DefMsgSplit, MsgSplit};
+use crate::tools::platform_handle;
+use ahash::RandomState;
+use ahash::CallHasher;
+use std::hash::BuildHasher;
 
 pub struct UdpServer<LID,ABC,P,SH,H,PL,PLM>
     where SH : SubHandle<ABClient=ABC,Id=LID>,
@@ -451,65 +455,86 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM,F,SE>
         plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
     }
 }
-#[macro_export]
-macro_rules! udp_server_run {
-    ($server:ident,$asy_cry_ignore:ident,$msg_split_ignore:ident) => {
-        let channel_buf = $server.channel_buf;
-        let sock = Arc::new(UdpSocket::bind($server.config.addr).await?);
-        platform_handle(sock.as_ref());
 
-        let linker_map = Arc::new(Mutex::new(HashMap::<u64,mpsc::Sender<Vec<u8>>>::new()));
-        let mut hash_builder = RandomState::new();
+pub async fn run_udp_server<LID,ABC,P,SH,H,PL,PLM>(
+    server:UdpServer<LID,ABC,P,SH,H,PL,PLM>,
+    msg_split_ignore:Option<&'static Vec<u32>>,
+    asy_cry_ignore:Option<&'static Vec<u32>>
+) -> Result<(), Box<dyn std::error::Error>>
+    where SH : SubHandle<ABClient=ABC,Id=LID> + 'static,
+          H : Handle<SH> + Send + std::marker::Sync + 'static,
+          PL : Plug<ABClient=ABC,Id=LID,Config=Config> + 'static,
+          PLM: PlugMgr<PL> + Send + std::marker::Sync + 'static,
+          P : Agreement + Send + std::marker::Sync + 'static,
+          LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send + std::marker::Sync + 'static,
+          ABC: ABClient<LID = LID> + Send + 'static
 
-        loop {
-            let mut buf = Vec::with_capacity($server.buf_len);
-            buf.resize($server.buf_len,0);
-            match sock.recv_from(&mut buf[..]).await
-            {
-                Ok((len,addr)) => {
+{
+    let channel_buf = server.channel_buf;
+    let sock = Arc::new(UdpSocket::bind(server.config.addr).await?);
+    platform_handle(sock.as_ref());
 
-                    let id = CallHasher::get_hash(&addr, hash_builder.build_hasher());
-                    let has = {
-                        let map = linker_map.lock().await;
-                        if let Some(link) = map.get(&id){
-                            link.send(buf[0..len].to_vec()).await;
-                            true
-                        }else { false }
-                    };
-                    if !has
+    let linker_map = Arc::new(std::sync::Mutex::new(HashMap::<u64,Arc<DefUdpSender>>::new()));
+    let mut hash_builder = RandomState::new();
+
+    loop {
+        let mut buf = Vec::with_capacity(server.buf_len);
+        buf.resize(server.buf_len,0);
+        match sock.recv_from(&mut buf[..]).await
+        {
+            Ok((len,addr)) => {
+
+                let id = CallHasher::get_hash(&addr, hash_builder.build_hasher());
+                let has = {
+                    let mut map = linker_map.lock().unwrap();
+                    if let Some(link) = map.get(&id){
+                        link.check_recv(&buf[0..len]).await;
+                        while link.need_check().await { link.check_recv(&[]).await; }
+                        true
+                    }else { false }
+                };
+                if !has
+                {
+                    let mut sender = Arc::new(DefUdpSender::create(sock.clone(),addr));
                     {
-                        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(channel_buf);
-                        {
-                            let mut map = linker_map.lock().await;
-                            map.insert(id, tx);
-                        }
-                        {
-                            let linker_map_cp = linker_map.clone();
-                            let clients = $server.clients.clone();
-                            let lid = $server.logic_id.clone();
-                            let conf = $server.config.clone();
-                            let handler_cp = $server.handler.clone();
-                            let parser_cp = $server.parser.clone();
-                            let plugs_cp = $server.plug_mgr.clone();
-                            let dead_plugs_cp:Arc<_> = $server.dead_plug_mgr.clone();
-                            let sock_cp = sock.clone();
-                            dbg!(&addr);
-                            $server.runtime.spawn(run_in(
-                            clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,rx,
-                            addr,id,linker_map_cp,$asy_cry_ignore,$msg_split_ignore
+                        sender.check_recv(&buf[0..len]).await;
+                        println!("check_recv end -------------------------");
+                        while sender.need_check().await { sender.check_recv(&[]).await; }
+                        println!("-------------------------");
+                        let mut map = linker_map.lock().unwrap();
+                        map.insert(id, sender.clone());
+                    }
+                    {
+                        let linker_map_cp = linker_map.clone();
+                        let clients = server.clients.clone();
+                        let lid = server.logic_id.clone();
+                        let conf = server.config.clone();
+                        let handler_cp = server.handler.clone();
+                        let parser_cp = server.parser.clone();
+                        let plugs_cp = server.plug_mgr.clone();
+                        let dead_plugs_cp:Arc<_> = server.dead_plug_mgr.clone();
+                        let sock_cp = sock.clone();
+                        dbg!(&addr);
+
+                        server.runtime.spawn(run_in(
+                            clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,sender,
+                            addr,move ||{
+                                let id_ = id;
+                                let mut map = linker_map_cp.lock().unwrap();
+                                map.remove(&id_);
+                                println!("disconnect id = {}",id_);
+                            },asy_cry_ignore.clone(),msg_split_ignore.clone()
                         ));
-                        }
-                        {
-                            let mut map = linker_map.lock().await;
-                            let tx = map.get(&id).unwrap();
-                            tx.send(buf[0..len].to_vec()).await;
-                        }
+
+                        println!("Spawn a client handler!!!");
                     }
                 }
-                Err(e) => {
-                    eprintln!("err = {:?}",e);
-                }
+            }
+            Err(e) => {
+                eprintln!("err = {:?}",e);
             }
         }
     }
+
+    Ok(())
 }

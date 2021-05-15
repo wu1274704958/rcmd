@@ -41,7 +41,7 @@ use rcmd_suit::db::db_mgr::DBMgr;
 use rcmd_suit::utils::temp_permission::TempPermission;
 use rcmd_suit::servers::udp_server::UdpServer;
 use rcmd_suit::tools::platform_handle;
-use rcmd_suit::servers::udp_server::run_in;
+use rcmd_suit::servers::udp_server::run_udp_server;
 use rcmd_suit::utils::udp_sender::{DefUdpSender, UdpSender};
 
 #[tokio::main]
@@ -93,73 +93,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         config
     );
     lazy_static::initialize(&comm::IGNORE_EXT);
-    let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
-    let asy_cry_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
+    let msg_split_ignore:Option<&'static Vec<u32>> = Some(&comm::IGNORE_EXT);
+    let asy_cry_ignore:Option<&'static Vec<u32>> = Some(&comm::IGNORE_EXT);
     //udp_server_run!(server,msg_split_ignore,msg_split_ignore);
 
-    let channel_buf = server.channel_buf;
-    let sock = Arc::new(UdpSocket::bind(server.config.addr).await?);
-    platform_handle(sock.as_ref());
-
-    let linker_map = Arc::new(std::sync::Mutex::new(HashMap::<u64,Arc<DefUdpSender>>::new()));
-    let mut hash_builder = RandomState::new();
-
-    loop {
-        let mut buf = Vec::with_capacity(server.buf_len);
-        buf.resize(server.buf_len,0);
-        match sock.recv_from(&mut buf[..]).await
-        {
-            Ok((len,addr)) => {
-
-                let id = CallHasher::get_hash(&addr, hash_builder.build_hasher());
-                let has = {
-                    let mut map = linker_map.lock().unwrap();
-                    if let Some(link) = map.get(&id){
-                        link.check_recv(&buf[0..len]).await;
-                        while link.need_check().await { link.check_recv(&[]).await; }
-                        true
-                    }else { false }
-                };
-                if !has
-                {
-                    let mut sender = Arc::new(DefUdpSender::create(sock.clone(),addr));
-                    {
-                        sender.check_recv(&buf[0..len]).await;
-                        println!("check_recv end -------------------------");
-                        while sender.need_check().await { sender.check_recv(&[]).await; }
-                        println!("-------------------------");
-                        let mut map = linker_map.lock().unwrap();
-                        map.insert(id, sender.clone());
-                    }
-                    {
-                        let linker_map_cp = linker_map.clone();
-                        let clients = server.clients.clone();
-                        let lid = server.logic_id.clone();
-                        let conf = server.config.clone();
-                        let handler_cp = server.handler.clone();
-                        let parser_cp = server.parser.clone();
-                        let plugs_cp = server.plug_mgr.clone();
-                        let dead_plugs_cp:Arc<_> = server.dead_plug_mgr.clone();
-                        let sock_cp = sock.clone();
-                        dbg!(&addr);
-
-                        server.runtime.spawn(run_in(
-                        clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,sender,
-                        addr,move ||{
-                                let id_ = id;
-                                let mut map = linker_map_cp.lock().unwrap();
-                                map.remove(&id_);
-                                println!("disconnect id = {}",id_);
-                            },asy_cry_ignore,msg_split_ignore
-                        ));
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("err = {:?}",e);
-            }
-        }
-    }
+    run_udp_server(server,msg_split_ignore,asy_cry_ignore).await;
 
     Ok(())
 }
+

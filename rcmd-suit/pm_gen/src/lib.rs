@@ -1,6 +1,5 @@
 use quote::quote;
 use syn::DeriveInput;
-use syn::LitInt;
 
 #[proc_macro]
 pub fn gen_stream_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
