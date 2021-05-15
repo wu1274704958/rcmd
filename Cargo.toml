@@ -25,6 +25,7 @@ flate2 = "*"
 
 [dependencies.rcmd-suit]
 path = "rcmd-suit"
+default-features = false
 
 [dependencies.mysql]
 version = "=20.1.0"
