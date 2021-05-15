@@ -895,7 +895,7 @@ impl UdpSender for DefUdpSender
             Err(USErr::EmptyMsg) => {Ok(())}
             Err(e) => {
                 eprintln!("set error {:?} ",e);
-                self.set_error(e.clone());
+                self.set_error(e.clone()).await;
                 Err(e)
             }
         }
