@@ -643,21 +643,27 @@ impl DefUdpSender
     async fn adjust_unit_size(&self,times_frequency:f32)
     {
         let mut msg_split = self.msg_split.lock().await;
+        let mut cache_size = self.cache_size.lock().await;
+        let curr_cache_size = *cache_size as usize;
+        let cache_len = self.get_cache_len().await;
         if msg_split.is_max_unit_size(){
-            if self.get_cache_len().await >= self.get_cache_size().await as usize/ 2  && times_frequency >= 3f32 {
-                let v = self.adjust_cache_size(-1,5).await;
-                msg_split.down_unit_size();
-                println!("down cache size curr = {} ",v);
-            }else if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency <= 1f32 {
-                let v = self.adjust_cache_size_ex(1).await;
+            if cache_len >= curr_cache_size / 2  && times_frequency >= 3f32 {
+                if curr_cache_size as u16 <= self.min_cache_size
+                {
+                    msg_split.down_unit_size();
+                }else{
+                    let v = self.adjust_cache_size_no_await(&mut cache_size,-1,5);
+                    println!("down cache size curr = {} ",v);
+                }
+            }else if cache_len == curr_cache_size && times_frequency <= 1f32 {
+                let v = self.adjust_cache_size_ex(&mut cache_size,1);
                 println!("up cache size curr = {} ",v);
             }
         }else{
-            if self.get_cache_len().await >= self.get_cache_size().await as usize/ 2  && times_frequency >= 3f32 {
-                let v = self.adjust_cache_size(-1,5).await;
+            if cache_len >= curr_cache_size / 2  && times_frequency >= 3f32 {
                 msg_split.down_unit_size();
-                println!("down cache size curr = {} ",v);
-            }else if self.get_cache_len().await == self.get_cache_size().await as usize && times_frequency <= 1f32 {
+                println!("down unit size curr = {} ",msg_split.unit_size());
+            }else if cache_len == curr_cache_size && times_frequency <= 1f32 {
                 msg_split.up_unit_size();
                 println!("up unit size curr = {} ",msg_split.unit_size());
             }
@@ -807,13 +813,23 @@ impl DefUdpSender
         new as u16
     }
 
-    async fn adjust_cache_size_ex(&self,r:u16) ->u16
+    fn adjust_cache_size_no_await(&self,cs:&mut MutexGuard<u16>,f:i16,r:i16) ->u16
     {
-        let mut cs = self.cache_size.lock().await;
-        let mut new = *cs + r;
+        let mut v = **cs as i16 / 10;
+        if v <= 0 { v = 1; }
+        let mut new = **cs as i16 + v * r * f;
+        if new < self.min_cache_size as i16 { new = self.min_cache_size as i16; }
+        if new > self.max_cache_size as i16 { new = self.max_cache_size as i16; }
+        **cs = new as u16;
+        new as u16
+    }
+
+    fn adjust_cache_size_ex(&self,cs:&mut MutexGuard<u16>,r:u16) ->u16
+    {
+        let mut new = **cs + r;
         if new < self.min_cache_size  { new = self.min_cache_size; }
         if new > self.max_cache_size  { new = self.max_cache_size; }
-        *cs = new;
+        **cs = new;
         new
     }
 
