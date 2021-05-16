@@ -221,8 +221,7 @@ impl <'a,T,A> UdpClient<T,A>
 
         if let Ok(pub_key_data) = asy.build_pub_key().await{
             if let Err(e) =  self.write_msg(&sender, pub_key_data, 10).await{
-                self.stop();
-                recv_worker.await;
+                runtime.shutdown_background();
                 return Err(e);
             }
         }
@@ -284,8 +283,7 @@ impl <'a,T,A> UdpClient<T,A>
                     if let Some(v) = immediate_send
                     {
                         if let Err(e) = self.write_msg(&sender, v, m.ext).await{
-                            self.stop();
-                            recv_worker.await;
+                            runtime.shutdown_background();
                             return Err(e);
                         }
                         continue;
@@ -317,7 +315,7 @@ impl <'a,T,A> UdpClient<T,A>
             if let Err(e) = sender.check_send().await{
                 eprintln!("send msg error: {:?}",e);
                 self.stop();
-                recv_worker.await;
+                runtime.shutdown_background();
                 return Err(e);
             }
 
@@ -328,8 +326,7 @@ impl <'a,T,A> UdpClient<T,A>
                     heartbeat_t = SystemTime::now();
                     if let Err(e) = self.write_msg(& sender, vec![9], 9).await{
                         eprintln!("send msg error: {:?}",e);
-                        self.stop();
-                        recv_worker.await;
+                        runtime.shutdown_background();
                         return Err(e);
                     }
                 }
@@ -355,7 +352,7 @@ impl <'a,T,A> UdpClient<T,A>
                                 Ok(_) => { }
                                 Err(e) => {
                                     self.stop();
-                                    recv_worker.await;
+                                    runtime.shutdown_background();
                                     return Err(e);
                                 }
                             }
@@ -370,8 +367,7 @@ impl <'a,T,A> UdpClient<T,A>
                         };
                         if let Err(e) = self.write_msg(&sender, v.0, v.1).await{
                             eprintln!("send msg error: {:?}",e);
-                            self.stop();
-                            recv_worker.await;
+                            runtime.shutdown_background();
                             return Err(e);
                         }
                     }
