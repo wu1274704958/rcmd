@@ -10,7 +10,7 @@ use tokio::time::Duration;
 use std::time::SystemTime;
 use async_std::io::Error;
 use crate::tools::{TOKEN_NORMAL};
-use crate::utils::msg_split::UdpMsgSplit;
+use crate::utils::msg_split::{UdpMsgSplit,DefUdpMsgSplit};
 use tokio::sync::{Mutex,MutexGuard};
 use crate::utils::udp_sender::USErr::Warp;
 use std::fmt::Debug;
@@ -90,7 +90,7 @@ pub struct DefUdpSender{
     addr:SocketAddr,
     subpacker: Arc<Mutex<UdpSubpackage>>,
     timeout: Duration,
-    msg_split: Arc<Mutex<UdpMsgSplit>>,
+    msg_split: Arc<Mutex<DefUdpMsgSplit>>,
     max_retry_times: u16,
     msg_cache_queue: Arc<Mutex<VecDeque<(usize,Vec<u8>)>>>,
     recv_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
@@ -241,7 +241,7 @@ impl DefUdpSender
             Ok(())
         }
     }
-    async fn warp(&self,v:&[u8],ext:u32,tag:u8)->Result<Vec<u8>,USErr>
+    async fn warp(&self,v:&[u8],ext:u32,tag:u8,sub_head:Option<&[u8]>)->Result<Vec<u8>,USErr>
     {
         let sid = {
             if let Some(v) = self.get_sid().await{
@@ -252,12 +252,12 @@ impl DefUdpSender
         };
         let mid = self.get_mid().await;
         //println!("send id {}",mid);
-        let res = Self::warp_ex(v,ext,tag,mid,sid);
+        let res = Self::warp_ex(v,ext,tag,mid,sid,sub_head);
         self.push_cache(mid,res.clone()).await?;
         Ok(res)
     }
 
-    fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize,sid:u128)->Vec<u8>
+    fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize,sid:u128,sub_head:Option<&[u8]>)->Vec<u8>
     {
         assert!(!v.is_empty());
         let len = v.len() + Self::package_len();
@@ -275,7 +275,16 @@ impl DefUdpSender
         let sid_buf = sid.to_be_bytes();
         res.extend_from_slice(&sid_buf[..]);
         res.push(Self::magic_num_3());
-        res.extend_from_slice(&v[..]);
+        // push sub head
+        if let Some(sub_head_buf) = sub_head{
+            res.push(sub_head_buf.len());
+            res.extend_from_slice(sub_head_buf[..]);
+            res.push(Self::magic_num_5());
+        }else{
+            res.push(0);
+            res.push(Self::magic_num_5())
+        }
+        res.extend_from_slice(v[..]);
         res.push(Self::magic_num_4());
         res
     }
@@ -337,7 +346,7 @@ impl DefUdpSender
                 let mut subpacker = self.subpacker.lock().await;
                 subpacker.subpackage(data, data.len())
             };
-            d = match package_v
+            match package_v
             {
                 None => { None }
                 Some(v) => {
@@ -366,25 +375,34 @@ impl DefUdpSender
                     if id == *except {
                         drop(except);
                         self.next_expect().await;
-                        Some((msg.to_vec(),ext,tag))
+                        let mut msg_split = self.msg_split.lock().await;
+                        if msg_split.need_merge(tag){
+                            if let Some(v) = msg_split.merge(msg.as_slice(),ext,tag,&[])
+                            {
+                                return Ok(v);
+                            }
+                        }else{
+                            return Ok(msg);
+                        }
                     }else if id > *except
                     {
                         let mut recv_cache = self.recv_cache.lock().await;
                         recv_cache.insert(id, (msg.to_vec(), ext,tag));
-                        None
-                    } else { None }
+                        Err(USErr::EmptyMsg)
+                    } else { Err(USErr::EmptyMsg) }
                 }
             };
-        }
-        if let Some((msg,ext,tag)) = d{
-            let mut msg_split = self.msg_split.lock().await;
-            if msg_split.need_merge(tag){
-                if let Some(v) = msg_split.merge(msg.as_slice(),ext,tag)
-                {
-                    return Ok(v);
+        }else {
+            if let Some((msg, ext, tag)) = d {
+                let mut msg_split = self.msg_split.lock().await;
+                if msg_split.need_merge(tag) {
+                    if let Some(v) = msg_split.merge(msg.as_slice(), ext, tag,&[])
+                    {
+                        return Ok(v);
+                    }
+                } else {
+                    return Ok(msg);
                 }
-            }else{
-                return Ok(msg);
             }
         }
         Err(USErr::EmptyMsg)
@@ -535,13 +553,13 @@ impl DefUdpSender
     async fn send_ext(&self,ext:SpecialExt) -> Result<usize,USErr>
     {
         eprintln!("send ext {}",ext as u32);
-        let v = Self::warp_ex(&[199],ext.into(),TOKEN_NORMAL,0,0);
+        let v = Self::warp_ex(&[199],ext.into(),TOKEN_NORMAL,0,0,None);
         self.send(v.as_slice()).await
     }
 
     async fn send_sid_response(&self,sid:u128,ext:SpecialExt) -> Result<usize,USErr>
     {
-        let v = Self::warp_ex(&[199],ext.into(),TOKEN_NORMAL,0,sid);
+        let v = Self::warp_ex(&[199],ext.into(),TOKEN_NORMAL,0,sid,None);
         self.send(v.as_slice()).await
     }
 
@@ -572,7 +590,7 @@ impl DefUdpSender
                 return Err(USErr::NoSession);
             }
         };
-        let v = Self::warp_ex(&[199],SpecialExt::send_recv.into(),TOKEN_NORMAL,id,sid);
+        let v = Self::warp_ex(&[199],SpecialExt::send_recv.into(),TOKEN_NORMAL,id,sid,None);
         self.send(v.as_slice()).await?;
         self.send(v.as_slice()).await
     }
@@ -633,6 +651,7 @@ impl DefUdpSender
     const fn magic_num_2()->u8 {7}
     const fn magic_num_3()->u8 {2}
     const fn magic_num_4()->u8 {6}
+    const fn magic_num_5()->u8 {4}
 
 
     fn package_len()->usize
@@ -768,7 +787,7 @@ impl DefUdpSender
     async fn send_session(&self) -> Result<(),USErr>
     {
         let sid_ = tools::uuid();
-        let v = Self::warp_ex(&[199],SpecialExt::send_sid.into(),TOKEN_NORMAL,0,sid_);
+        let v = Self::warp_ex(&[199],SpecialExt::send_sid.into(),TOKEN_NORMAL,0,sid_,None);
         {
             let mut sid = self.sid.lock().await;
             *sid = SessionState::WaitResponse(sid_, SystemTime::now(), 1);
@@ -843,7 +862,7 @@ impl DefUdpSender
     async fn send_close_session(&self) ->Result<(),USErr>
     {
         let sid_ = self.get_sid().await.unwrap();
-        let v = Self::warp_ex(&[199],SpecialExt::send_close.into(),TOKEN_NORMAL,0,sid_);
+        let v = Self::warp_ex(&[199],SpecialExt::send_close.into(),TOKEN_NORMAL,0,sid_,None);
         {
             let mut sid = self.sid.lock().await;
             *sid = SessionState::Closed;
@@ -890,7 +909,7 @@ impl UdpSender for DefUdpSender
             msg_split.push_msg(v);
             Ok(())
         }else{
-            match self.warp(v.as_slice(),0,TOKEN_NORMAL).await{
+            match self.warp(v.as_slice(),0,TOKEN_NORMAL,None).await{
                 Ok(v) => {self.send(v.as_slice()).await?;}
                 Err(USErr::MsgCacheOverflow) => {}
                 Err(e) => { return Err(e);}
@@ -1019,7 +1038,7 @@ impl UdpSender for DefUdpSender
                 {
                     if dur > self.timeout
                     {
-                        let d = Self::warp_ex(&[199],SpecialExt::send_sid.into(),TOKEN_NORMAL,0,v);
+                        let d = Self::warp_ex(&[199],SpecialExt::send_sid.into(),TOKEN_NORMAL,0,v,None);
                         self.send(d.as_slice()).await?;
                         *sid = SessionState::WaitResponse(v,SystemTime::now(),times + 1);
                     }
@@ -1033,7 +1052,7 @@ impl UdpSender for DefUdpSender
                 {
                     if dur > self.timeout
                     {
-                        let d = Self::warp_ex(&[199],SpecialExt::response_send_sid.into(),TOKEN_NORMAL,0,v);
+                        let d = Self::warp_ex(&[199],SpecialExt::response_send_sid.into(),TOKEN_NORMAL,0,v,None);
                         self.send(d.as_slice()).await?;
                         *sid = SessionState::WaitResponseCp(v,SystemTime::now(),times + 1);
                     }
@@ -1073,8 +1092,8 @@ impl UdpSender for DefUdpSender
         {
             let mut msg_split = self.msg_split.lock().await;
             while self.send_cache_empty().await && msg_split.need_send() {
-                if let Some((v,ext,tag,is_end)) = msg_split.pop_msg(){
-                    match self.warp(v,ext,tag).await{
+                if let Some((v,ext,tag,is_end,sub_head)) = msg_split.pop_msg(){
+                    match self.warp(v,ext,tag,Some(sub_head.as_slice())).await{
                         Ok(v) => {self.send(v.as_slice()).await?;}
                         Err(USErr::MsgCacheOverflow) => {}
                         Err(e) => { return Err(e);}

@@ -17,6 +17,40 @@ pub trait MsgSplit{
     fn extend_ignore(&mut self,v:&[u32]);
 }
 
+pub trait UdpMsgSplit{
+    fn with_max_unit_size(max_unit_size:usize,min_unit_size:usize)->Self;
+
+    fn is_max_unit_size(&self)->bool;
+
+    fn is_min_unit_size(&self)->bool;
+
+    fn up_unit_size(&mut self);
+
+    fn down_unit_size(&mut self);
+
+    fn need_split(&self,len:usize) ->bool;
+
+    fn open(&self) -> bool;
+
+    fn max_unit_size(&self) -> usize;
+
+    fn need_merge<'a>(&self, tag:u8) -> bool;
+
+    fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8,sub_head:&[u8]) -> Option<Vec<u8>>;
+
+    fn set_max_unit_size(&mut self, max_unit_size: usize);
+    fn set_min_unit_size(&mut self, min_unit_size: usize);
+    fn min_unit_size(&self) -> usize;
+    fn unit_size(&self) -> usize;
+    fn need_send(&self) ->bool;
+
+    fn push_msg(&mut self,v:Vec<u8>);
+
+    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8, bool,Vec<u8>)>;
+
+    fn pop_front_wait_split(&mut self);
+}
+
 pub struct DefMsgSplit{
     msg_cache:HashMap<u16,(Vec<u8>,u16)>,
     ignore_map: HashSet<u32>,
@@ -158,7 +192,7 @@ impl MsgSplit for DefMsgSplit
     }
 }
 
-pub struct UdpMsgSplit
+pub struct DefUdpMsgSplit
 {
     msg_cache:HashMap<u16,(Vec<u8>,u16)>,
     logic_id:u16,
@@ -168,18 +202,7 @@ pub struct UdpMsgSplit
     wait_split_queue:VecDeque<(Vec<u8>,usize,u16,u16)>
 }
 
-impl UdpMsgSplit{
-
-    pub fn with_max_unit_size(max_unit_size:usize,min_unit_size:usize)->UdpMsgSplit{
-        UdpMsgSplit{
-            msg_cache:HashMap::new(),
-            logic_id:0,
-            max_unit_size,
-            min_unit_size,
-            unit_size:max_unit_size,
-            wait_split_queue:VecDeque::new()
-        }
-    }
+impl DefUdpMsgSplit{
 
     pub fn get_id(&mut self)->u16
     {
@@ -199,81 +222,61 @@ impl UdpMsgSplit{
         s.copy_from_slice(&buf[size_of::<u16>()..]);
         (u16::from_be_bytes(f),u16::from_be_bytes(s))
     }
+}
 
-    pub fn is_max_unit_size(&self)->bool
+impl UdpMsgSplit for DefUdpMsgSplit {
+    fn with_max_unit_size(max_unit_size: usize, min_unit_size: usize) -> Self {
+        DefUdpMsgSplit{
+            msg_cache:HashMap::new(),
+            logic_id:0,
+            max_unit_size,
+            min_unit_size,
+            unit_size:max_unit_size,
+            wait_split_queue:VecDeque::new()
+        }
+    }
+
+    fn is_max_unit_size(&self)->bool
     {
         self.max_unit_size == self.unit_size
     }
 
-    pub fn is_min_unit_size(&self)->bool
+    fn is_min_unit_size(&self)->bool
     {
         self.min_unit_size == self.unit_size
     }
 
-    pub fn up_unit_size(&mut self)
+    fn up_unit_size(&mut self)
     {
         let mut n = self.unit_size + (self.unit_size / 10);
         if n > self.max_unit_size { n = self.max_unit_size; }
         self.unit_size = n;
     }
 
-    pub fn down_unit_size(&mut self)
+    fn down_unit_size(&mut self)
     {
         let mut n = self.unit_size - (self.unit_size / 30);
         if n < self.min_unit_size { n = self.min_unit_size; }
         self.unit_size = n;
     }
 
-    pub fn need_split(&self,len:usize) ->bool {
+    fn need_split(&self,len:usize) ->bool {
         (self.open() && len > self.max_unit_size()) || !self.wait_split_queue.is_empty()
     }
 
-    pub fn open(&self) -> bool {
+    fn open(&self) -> bool {
         true
     }
 
-    pub fn max_unit_size(&self) -> usize {
+    fn max_unit_size(&self) -> usize {
         self.unit_size
     }
 
-    pub fn split<'a>(&mut self,data:&'a Vec<u8>) -> Vec<(&'a [u8],u32,u8)> {
-        let mut b = 0usize;
-        let l = self.max_unit_size();
-        let mut res = Vec::new();
-        let id = self.get_id();
-        let id_ = id.to_be_bytes();
-        let mut i = 0u16;
-        let len = data.len();
-        loop{
-            if b >= len { break; }
-            let e = if b + l <= len { b + l } else { len };
-            let sli = &data[b..e];
-            let begin = b == 0;
-
-            let mut ext_buf = [0u8;size_of::<u32>()];
-            (&mut ext_buf[0..size_of::<u16>()]).copy_from_slice(&id_);
-            let i_ = i.to_be_bytes();
-            (&mut ext_buf[size_of::<u16>()..]).copy_from_slice(&i_);
-
-            let tag = if begin{
-                TOKEN_SUBPACKAGE_BEGIN
-            }else if e >= len {
-                TOKEN_SUBPACKAGE_END
-            }else { TOKEN_SUBPACKAGE };
-
-            res.push((sli,u32::from_be_bytes(ext_buf),tag));
-
-            i += 1;
-            b = e;
-        }
-        res
-    }
-
-    pub fn need_merge<'a>(&self, tag:u8) -> bool {
+    fn need_merge<'a>(&self, tag:u8) -> bool {
         tag >= TOKEN_SUBPACKAGE_BEGIN && tag <= TOKEN_SUBPACKAGE_END
     }
 
-    pub fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8) -> Option<Vec<u8>> {
+    fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8,sub_head:&[u8]) -> Option<Vec<u8>> {
         match tag {
             TOKEN_SUBPACKAGE_BEGIN => {
                 let (id,idx) = Self::parse_ext(ext);
@@ -318,31 +321,31 @@ impl UdpMsgSplit{
             _ => {None}
         }
     }
-    pub fn set_max_unit_size(&mut self, max_unit_size: usize) {
+    fn set_max_unit_size(&mut self, max_unit_size: usize) {
         self.max_unit_size = max_unit_size;
     }
-    pub fn set_min_unit_size(&mut self, min_unit_size: usize) {
+    fn set_min_unit_size(&mut self, min_unit_size: usize) {
         self.min_unit_size = min_unit_size;
     }
-    pub fn min_unit_size(&self) -> usize {
+    fn min_unit_size(&self) -> usize {
         self.min_unit_size
     }
-    pub fn unit_size(&self) -> usize {
+    fn unit_size(&self) -> usize {
         self.unit_size
     }
 
-    pub fn need_send(&self) ->bool
+    fn need_send(&self) ->bool
     {
         !self.wait_split_queue.is_empty()
     }
 
-    pub fn push_msg(&mut self,v:Vec<u8>)
+    fn push_msg(&mut self,v:Vec<u8>)
     {
         let id = self.get_id();
         self.wait_split_queue.push_back((v,0,id,0));
     }
 
-    pub fn pop_msg(&mut self) -> Option<(&[u8], u32, u8, bool)>
+    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8, bool,Vec<u8>)>
     {
         //(data begin_pos id idx )
         if let Some(v) = self.wait_split_queue.front_mut()
@@ -369,8 +372,9 @@ impl UdpMsgSplit{
         }else { None }
     }
 
-    pub fn pop_front_wait_split(&mut self)
+    fn pop_front_wait_split(&mut self)
     {
         self.wait_split_queue.pop_front();
     }
+
 }
