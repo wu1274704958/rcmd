@@ -5,6 +5,7 @@ mod model;
 mod client_handlers;
 #[macro_use]
 extern crate lazy_static;
+extern crate get_if_addrs;
 mod comm;
 
 use std::sync::{Arc, Mutex};
@@ -17,7 +18,7 @@ use std::io::*;
 use extc::*;
 use rcmd_suit::tools;
 use rcmd_suit::clients::udp_client::UdpClient;
-use std::net::{SocketAddr, Ipv4Addr, SocketAddrV4};
+use std::net::{SocketAddr, Ipv4Addr, SocketAddrV4, IpAddr};
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::client_handler::{DefHandler, Handle};
 use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE};
@@ -34,7 +35,13 @@ async fn main() -> io::Result<()>
             return Ok(());
         }
     };
-
+    let mut ip = IpAddr::from_str("0.0.0.0").unwrap();
+    for iface in get_if_addrs::get_if_addrs().unwrap() {
+        if !iface.addr.is_loopback() && iface.addr.ip().is_ipv4() {
+            ip = iface.ip();
+            println!("{:#?}", iface);
+        }
+    }
     let msg_queue = Arc::new(Mutex::new(VecDeque::<(Vec<u8>, u32)>::new()));
     if args.acc.is_some(){
         let user = model::user::MinUser{ acc: args.acc.unwrap(),pwd:args.pwd.unwrap()};
@@ -63,7 +70,7 @@ async fn main() -> io::Result<()>
     {
         let msg_queue = msg_queue.clone();
         let client = UdpClient::with_msg_queue_runing(
-            ("0.0.0.0", args.bind_port),
+            (ip, args.bind_port),
             Arc::new(handler),
             DefParser::new(),
             msg_queue.clone(),
