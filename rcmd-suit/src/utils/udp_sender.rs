@@ -85,7 +85,7 @@ pub struct DefUdpSender{
     mid: Arc<Mutex<usize>>,
     queue: Arc<Mutex<VecDeque<usize>>>,
     msg_map: Arc<Mutex<HashMap<usize,(Vec<u8>,SystemTime,u16)>>>,
-    recv_cache: Arc<Mutex<HashMap<usize,(Vec<u8>,u32,u8)>>>,
+    recv_cache: Arc<Mutex<HashMap<usize,(Vec<u8>,u32,u8,Option<Vec<u8>>)>>>,
     expect_id: Arc<Mutex<usize>>,
     addr:SocketAddr,
     subpacker: Arc<Mutex<UdpSubpackage>>,
@@ -274,17 +274,15 @@ impl DefUdpSender
         res.push(tag);
         let sid_buf = sid.to_be_bytes();
         res.extend_from_slice(&sid_buf[..]);
-        res.push(Self::magic_num_3());
         // push sub head
         if let Some(sub_head_buf) = sub_head{
-            res.push(sub_head_buf.len());
-            res.extend_from_slice(sub_head_buf[..]);
-            res.push(Self::magic_num_5());
+            res.push(sub_head_buf.len() as u8);
+            res.extend_from_slice(&sub_head_buf[..]);
         }else{
             res.push(0);
-            res.push(Self::magic_num_5())
         }
-        res.extend_from_slice(v[..]);
+        res.push(Self::magic_num_3());
+        res.extend_from_slice(&v[..]);
         res.push(Self::magic_num_4());
         res
     }
@@ -348,9 +346,9 @@ impl DefUdpSender
             };
             match package_v
             {
-                None => { None }
+                None => { Err(USErr::EmptyMsg) }
                 Some(v) => {
-                    let (msg, id, ext,tag,sid) = self.unwarp_ex(v.as_slice());
+                    let (msg, id, ext,tag,sid,sub_head) = self.unwarp_ex(v.as_slice());
                     if self.check_send_recv(msg,ext,tag,id,sid).await?
                     {
                         return Err(USErr::EmptyMsg);
@@ -373,30 +371,40 @@ impl DefUdpSender
                     //println!("recv msg {}",id);
                     let mut except = self.expect_id.lock().await;
                     if id == *except {
+                        Self::next_expect_ex(&mut except);
                         drop(except);
-                        self.next_expect().await;
                         let mut msg_split = self.msg_split.lock().await;
                         if msg_split.need_merge(tag){
-                            if let Some(v) = msg_split.merge(msg.as_slice(),ext,tag,&[])
+                            if let Some(v) = msg_split.merge(msg,ext,tag,sub_head)
                             {
                                 return Ok(v);
-                            }
+                            }else { Err(USErr::EmptyMsg) }
                         }else{
-                            return Ok(msg);
+                            return Ok(msg.to_vec());
                         }
                     }else if id > *except
                     {
                         let mut recv_cache = self.recv_cache.lock().await;
-                        recv_cache.insert(id, (msg.to_vec(), ext,tag));
+                        recv_cache.insert(id, (msg.to_vec(), ext,tag,if sub_head.len() == 0 { None }else { Some(sub_head.to_vec()) } ));
                         Err(USErr::EmptyMsg)
-                    } else { Err(USErr::EmptyMsg) }
+                    } else {//如果是更早的需要合并的消息也需要运行一次
+                        drop(except);
+                        let mut msg_split = self.msg_split.lock().await;
+                        if msg_split.need_merge(tag){
+                            if let Some(v) = msg_split.merge(msg,ext,tag,sub_head)
+                            {
+                                return Ok(v);
+                            }
+                        }
+                        Err(USErr::EmptyMsg)
+                    }
                 }
-            };
+            }
         }else {
-            if let Some((msg, ext, tag)) = d {
+            if let Some((msg, ext, tag,sub_head)) = d {
                 let mut msg_split = self.msg_split.lock().await;
                 if msg_split.need_merge(tag) {
-                    if let Some(v) = msg_split.merge(msg.as_slice(), ext, tag,&[])
+                    if let Some(v) = msg_split.merge(msg.as_slice(), ext, tag,sub_head.unwrap().as_slice())
                     {
                         return Ok(v);
                     }
@@ -404,8 +412,8 @@ impl DefUdpSender
                     return Ok(msg);
                 }
             }
+            Err(USErr::EmptyMsg)
         }
-        Err(USErr::EmptyMsg)
     }
 
     async fn check_send_recv(&self,msg:&[u8],ext:u32,tag:u8,id:usize,sid:u128) -> Result<bool,USErr>
@@ -575,6 +583,17 @@ impl DefUdpSender
         *expect_id
     }
 
+    fn next_expect_ex(expect_id:&mut MutexGuard<usize>)->usize
+    {
+        if **expect_id == usize::max_value()
+        {
+            **expect_id = usize::one();
+        }else{
+            **expect_id += usize::one();
+        }
+        **expect_id
+    }
+
     async fn get_expect(&self)->usize
     {
         let mut expect_id = self.expect_id.lock().await;
@@ -617,22 +636,36 @@ impl DefUdpSender
         //if len != d.len(){  eprintln!("udp send msg failed expect len {} get {}",d.len(),len); }
     }
 
-    fn unwarp_ex<'a>(&self,data: &'a [u8])->(&'a[u8],usize,u32,u8,u128)
+    fn unwarp_ex<'a>(&self,data: &'a [u8])->(&'a[u8],usize,u32,u8,u128,&'a[u8])
     {
-        let id_p = size_of::<u8>() + size_of::<u32>();
-        let ext_p = id_p + size_of::<usize>() + size_of::<u8>();
-        let tag = data[ext_p + size_of::<u32>()];
-        let sid_p = ext_p + size_of::<u32>() + size_of::<u8>();
-        let msg_p = ext_p + size_of::<u32>() + size_of::<u128>() + size_of::<u8>() * 2;
+        const u8l:usize =  size_of::<u8>();
+        const u32l:usize =  size_of::<u32>();
+        const usizel:usize =  size_of::<usize>();
+        const u128l:usize =  size_of::<u128>();
 
-        let mut id_buf = [0u8;size_of::<usize>()];
-        id_buf.copy_from_slice(&data[id_p..(id_p + size_of::<usize>())]);
-        let mut ext_buf = [0u8;size_of::<u32>()];
-        ext_buf.copy_from_slice(&data[ext_p..(ext_p + size_of::<u32>())]);
+        let id_p = u8l + u32l;
+        let ext_p = id_p + usizel + u8l;
+        let tag = data[ext_p + u32l];
+        let sid_p = ext_p + u32l + u8l;
+        let sub_head_len = data[sid_p + u128l];
+        let sub_head_p = sid_p + u128l + u8l;
+        let msg_p = sub_head_p + sub_head_len as usize + u8l;
+
+        let mut id_buf = [0u8;usizel];
+        id_buf.copy_from_slice(&data[id_p..(id_p + usizel)]);
+        let mut ext_buf = [0u8;u32l];
+        ext_buf.copy_from_slice(&data[ext_p..(ext_p + u32l)]);
         let mut sid_buf = [0u8;size_of::<u128>()];
         sid_buf.copy_from_slice(&data[sid_p..(sid_p + size_of::<u128>())]);
 
-        (&data[msg_p..data.len()],usize::from_be_bytes(id_buf),u32::from_be_bytes(ext_buf),tag,u128::from_be_bytes(sid_buf))
+        (
+            &data[msg_p..data.len()],
+            usize::from_be_bytes(id_buf),
+            u32::from_be_bytes(ext_buf),
+            tag,
+            u128::from_be_bytes(sid_buf),
+            &data[sub_head_p..(sub_head_p + sub_head_len as usize)]
+        )
     }
 
     async fn need_check_in(&self)-> bool
@@ -651,7 +684,6 @@ impl DefUdpSender
     const fn magic_num_2()->u8 {7}
     const fn magic_num_3()->u8 {2}
     const fn magic_num_4()->u8 {6}
-    const fn magic_num_5()->u8 {4}
 
 
     fn package_len()->usize
@@ -798,14 +830,14 @@ impl DefUdpSender
 
     async fn push_cache_no_sid(&self,v:Vec<u8>)
     {
-        assert!(!self.has_sid().await);
+        //assert!(!self.has_sid().await);
         let mut queue = self.msg_cache_on_no_sid.lock().await;
         queue.push_back(v);
     }
 
     async fn send_cache_no_sid(&self) -> Result<(),USErr>
     {
-        assert!(self.has_sid().await);
+        //assert!(self.has_sid().await);
         let mut queue = self.msg_cache_on_no_sid.lock().await;
         while !queue.is_empty() {
             let v = queue.pop_front().unwrap();

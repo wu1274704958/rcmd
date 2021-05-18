@@ -350,11 +350,12 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         //(data begin_pos id idx )
         if let Some(v) = self.wait_split_queue.front_mut()
         {
+            let mut sub_head = vec![];
             let end = (*v).0.len() - (*v).1 <= self.unit_size;
             let e = (*v).1 + self.unit_size;
             let sli = if end { &(*v).0[(*v).1..] }else { &(*v).0[(*v).1..e] };
             let begin = (*v).1 == 0;
-            if begin && end { return Some((sli,0,TOKEN_NORMAL,true))}
+            if begin && end { return Some((sli,0,TOKEN_NORMAL,true,sub_head))}
             let id_ = (*v).2.to_be_bytes();
             let i_ = (*v).3.to_be_bytes();
 
@@ -368,7 +369,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             }else if end {
                 TOKEN_SUBPACKAGE_END
             }else { TOKEN_SUBPACKAGE };
-            Some((sli,u32::from_be_bytes(ext_buf),tag,end))
+            Some((sli,u32::from_be_bytes(ext_buf),tag,end,sub_head))
         }else { None }
     }
 
