@@ -1124,14 +1124,11 @@ impl UdpSender for DefUdpSender
         {
             let mut msg_split = self.msg_split.lock().await;
             while self.send_cache_empty().await && msg_split.need_send() {
-                if let Some((v,ext,tag,is_end,sub_head)) = msg_split.pop_msg(){
-                    match self.warp(v,ext,tag,Some(sub_head.as_slice())).await{
+                if let Some((v,ext,tag,sub_head)) = msg_split.pop_msg(){
+                    match self.warp(v,ext,tag,sub_head).await{
                         Ok(v) => {self.send(v.as_slice()).await?;}
                         Err(USErr::MsgCacheOverflow) => {}
                         Err(e) => { return Err(e);}
-                    }
-                    if is_end {
-                        msg_split.pop_front_wait_split();
                     }
                 }
             }

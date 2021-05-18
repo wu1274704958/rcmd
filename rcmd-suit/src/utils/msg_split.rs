@@ -3,6 +3,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem::size_of;
 use crate::tools::{TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END, TOKEN_SUBPACKAGE_BEGIN, TOKEN_NORMAL};
 use crate::ext_code::*;
+use std::time::SystemTime;
+extern crate chorno;
+use chrono::prelude::*;
+use mysql::chrono::Local;
 
 pub trait MsgSplit{
     fn open(&self) ->bool { false }
@@ -46,9 +50,7 @@ pub trait UdpMsgSplit{
 
     fn push_msg(&mut self,v:Vec<u8>);
 
-    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8, bool,Vec<u8>)>;
-
-    fn pop_front_wait_split(&mut self);
+    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8,Option<Vec<u8>>)>;
 }
 
 pub struct DefMsgSplit{
@@ -194,33 +196,25 @@ impl MsgSplit for DefMsgSplit
 
 pub struct DefUdpMsgSplit
 {
-    msg_cache:HashMap<u16,(Vec<u8>,u16)>,
-    logic_id:u16,
+    msg_cache:HashMap<u32,(Vec<u8>,u32)>,
+    logic_id:u32,
     max_unit_size:usize,
     min_unit_size:usize,
     unit_size:usize,
-    wait_split_queue:VecDeque<(Vec<u8>,usize,u16,u16)>
+    curr_idx:usize,
+    wait_split_queue:VecDeque<(Vec<u8>,usize,u32)>,
+    cache_size:usize
 }
 
 impl DefUdpMsgSplit{
 
-    pub fn get_id(&mut self)->u16
+    pub fn get_id(&mut self)->u32
     {
-        if self.logic_id == u16::max_value(){
+        if self.logic_id == u32::max_value(){
             self.logic_id = 0
         }
         self.logic_id += 1;
         self.logic_id
-    }
-
-    pub fn parse_ext(ext:u32)->(u16,u16)
-    {
-        let buf = ext.to_be_bytes();
-        let mut f = [0u8;size_of::<u16>()];
-        let mut s = [0u8;size_of::<u16>()];
-        f.copy_from_slice(&buf[0..size_of::<u16>()]);
-        s.copy_from_slice(&buf[size_of::<u16>()..]);
-        (u16::from_be_bytes(f),u16::from_be_bytes(s))
     }
 }
 
@@ -232,7 +226,9 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             max_unit_size,
             min_unit_size,
             unit_size:max_unit_size,
-            wait_split_queue:VecDeque::new()
+            wait_split_queue:VecDeque::new(),
+            curr_idx: 0,
+            cache_size: 10
         }
     }
 
@@ -343,40 +339,41 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     fn push_msg(&mut self,v:Vec<u8>)
     {
         let id = self.get_id();
-        self.wait_split_queue.push_back((v,0,id,0));
+        self.wait_split_queue.push_back((v,0,id));
     }
 
-    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8, bool,Vec<u8>)>
+    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8,Option<Vec<u8>>)>
     {
-        //(data begin_pos id idx )
-        if let Some(v) = self.wait_split_queue.front_mut()
+        if self.curr_idx >= self.wait_split_queue.len()  { return None; }
+        //(data begin_pos id )
+        if let Some(v) = self.wait_split_queue.get_mut(&self.curr_idx)
         {
-            let mut sub_head = vec![88,120];
             let end = (*v).0.len() - (*v).1 <= self.unit_size;
-            let e = (*v).1 + self.unit_size;
-            let sli = if end { &(*v).0[(*v).1..] }else { &(*v).0[(*v).1..e] };
+            let e = if end { (*v).0.len()  } else{ (*v).1 + self.unit_size};
+            let sli =  &(*v).0[(*v).1..e] ;
             let begin = (*v).1 == 0;
-            if begin && end { return Some((sli,0,TOKEN_NORMAL,true,sub_head))}
-            let id_ = (*v).2.to_be_bytes();
-            let i_ = (*v).3.to_be_bytes();
+            if begin && end { return Some((sli,0,TOKEN_NORMAL,None))}
+
+            let ticks = Local::now().timestamp_millis();
+
+            let mut sub_head = Vec::with_capacity(size_of::<i64>() + size_of::<u32>() * 2);
+            sub_head.extend_from_slice(&ticks.to_be_bytes());
+            sub_head.extend_from_slice(&((*v).1 as u32).to_be_bytes());
+            sub_head.extend_from_slice(&(e as u32).to_be_bytes());
+            sub_head.extend_from_slice((*v).2.to_be_bytes());
 
             let mut ext_buf = [0u8;size_of::<u32>()];
-            (&mut ext_buf[0..size_of::<u16>()]).copy_from_slice(&id_);
-            (&mut ext_buf[size_of::<u16>()..]).copy_from_slice(&i_);
+
+            let ext = (*v).0.len() as u32;
+
             (*v).1 = e;
-            (*v).3 = (*v).3 + 1;
+
             let tag = if begin{
                 TOKEN_SUBPACKAGE_BEGIN
             }else if end {
                 TOKEN_SUBPACKAGE_END
             }else { TOKEN_SUBPACKAGE };
-            Some((sli,u32::from_be_bytes(ext_buf),tag,end,sub_head))
+            Some((sli,ext,tag,sub_head))
         }else { None }
     }
-
-    fn pop_front_wait_split(&mut self)
-    {
-        self.wait_split_queue.pop_front();
-    }
-
 }
