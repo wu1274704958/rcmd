@@ -153,15 +153,16 @@ impl UdpSubpackage{
     {
         let o2 = size_of::<u8>() * 2 + size_of::<u32>() + size_of::<usize>();
         let tag_p = o2 + size_of::<u32>() + size_of::<u8>();
-        let o3 = tag_p + size_of::<u128>() + size_of::<u8>();
+        let sub_len = data[tag_p + size_of::<u128>() + size_of::<u8>()];
+        let o3 = tag_p + size_of::<u128>() + size_of::<u8>() + sub_len as usize + size_of::<u8>();
         data[o2] == Self::mn_2() &&  Self::good_tag(data[tag_p]) && data[o3] == Self::mn_3()
     }
 
-    fn mn_0()->u8 {3}
-    fn mn_1()->u8 {1}
-    fn mn_2()->u8 {7}
-    fn mn_3()->u8 {2}
-    fn mn_4()->u8 {6}
+    const fn mn_0()->u8 {3}
+    const fn mn_1()->u8 {1}
+    const fn mn_2()->u8 {7}
+    const fn mn_3()->u8 {2}
+    const fn mn_4()->u8 {6}
     pub fn good_sign(b:u8) -> bool
     {
         match b {

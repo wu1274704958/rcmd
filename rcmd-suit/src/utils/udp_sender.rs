@@ -260,7 +260,7 @@ impl DefUdpSender
     fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize,sid:u128,sub_head:Option<&[u8]>)->Vec<u8>
     {
         assert!(!v.is_empty());
-        let len = v.len() + Self::package_len();
+        let len = v.len() + Self::package_len() + if let Some(sub) = sub_head{ sub.len() }else { 0 };
         let mut res = Vec::with_capacity(len);
         res.push(Self::magic_num_0());
         let len_buf = (len as u32).to_be_bytes();
@@ -686,9 +686,9 @@ impl DefUdpSender
     const fn magic_num_4()->u8 {6}
 
 
-    fn package_len()->usize
+    const fn package_len()->usize
     {
-        size_of::<u8>() * 4 + size_of::<usize>() + size_of::<u32>() * 2 + size_of::<u128>()
+        size_of::<u8>() * 5 + size_of::<usize>() + size_of::<u32>() * 2 + size_of::<u128>()
     }
 
     async fn adjust_unit_size(&self,times_frequency:f32)

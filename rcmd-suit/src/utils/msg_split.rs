@@ -277,6 +277,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     }
 
     fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8,sub_head:&[u8]) -> Option<Vec<u8>> {
+        dbg!(sub_head);
         match tag {
             TOKEN_SUBPACKAGE_BEGIN => {
                 let (id,idx) = Self::parse_ext(ext);
@@ -350,7 +351,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         //(data begin_pos id idx )
         if let Some(v) = self.wait_split_queue.front_mut()
         {
-            let mut sub_head = vec![];
+            let mut sub_head = vec![88,120];
             let end = (*v).0.len() - (*v).1 <= self.unit_size;
             let e = (*v).1 + self.unit_size;
             let sli = if end { &(*v).0[(*v).1..] }else { &(*v).0[(*v).1..e] };
