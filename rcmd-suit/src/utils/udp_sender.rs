@@ -1125,7 +1125,7 @@ impl UdpSender for DefUdpSender
             let mut msg_split = self.msg_split.lock().await;
             while self.send_cache_empty().await && msg_split.need_send() {
                 if let Some((v,ext,tag,sub_head)) = msg_split.pop_msg(){
-                    match self.warp(v,ext,tag,sub_head).await{
+                    match self.warp(v,ext,tag,if let Some(ref v) = sub_head{Some(v.as_slice())}else{None}).await{
                         Ok(v) => {self.send(v.as_slice()).await?;}
                         Err(USErr::MsgCacheOverflow) => {}
                         Err(e) => { return Err(e);}

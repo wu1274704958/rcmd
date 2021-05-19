@@ -4,7 +4,6 @@ use std::mem::size_of;
 use crate::tools::{TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END, TOKEN_SUBPACKAGE_BEGIN, TOKEN_NORMAL};
 use crate::ext_code::*;
 use std::time::SystemTime;
-extern crate chorno;
 use chrono::prelude::*;
 use mysql::chrono::Local;
 
@@ -201,8 +200,9 @@ pub struct DefUdpMsgSplit
     max_unit_size:usize,
     min_unit_size:usize,
     unit_size:usize,
-    curr_idx:usize,
+    curr_idx:Option<usize>,
     wait_split_queue:VecDeque<(Vec<u8>,usize,u32)>,
+    recovery_info : VecDeque<(u32,u32,u32)>,
     cache_size:usize
 }
 
@@ -216,6 +216,42 @@ impl DefUdpMsgSplit{
         self.logic_id += 1;
         self.logic_id
     }
+
+    fn check_wait_split_queue(&mut self)
+    {
+        while self.wait_split_queue.len() > self.cache_size {
+            let using = if let Some(v) = self.curr_idx{
+                v == 0
+            }else{
+                false
+            };
+            if !using {
+                let v = self.wait_split_queue.pop_front().unwrap();
+                while let Some(info) = self.recovery_info.front() {
+                    if (*info).0 == v.2{
+                        drop(info);
+                        self.recovery_info.pop_front();
+                    }else { break; }
+                }
+                if let Some(v) = self.curr_idx{
+                    self.curr_idx = Some(v - 1);
+                }
+            }else{
+                break;
+            }
+        }
+    }
+
+    fn move_next_msg(&mut self)
+    {
+        let mut v = self.curr_idx.unwrap();
+        if v + 1 < self.wait_split_queue.len()
+        {
+            self.curr_idx = Some(v + 1);
+        }else{
+            self.curr_idx = None;
+        }
+    }
 }
 
 impl UdpMsgSplit for DefUdpMsgSplit {
@@ -227,8 +263,9 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             min_unit_size,
             unit_size:max_unit_size,
             wait_split_queue:VecDeque::new(),
-            curr_idx: 0,
-            cache_size: 10
+            curr_idx: None,
+            cache_size: 3,
+            recovery_info : VecDeque::new()
         }
     }
 
@@ -274,49 +311,50 @@ impl UdpMsgSplit for DefUdpMsgSplit {
 
     fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8,sub_head:&[u8]) -> Option<Vec<u8>> {
         dbg!(sub_head);
-        match tag {
-            TOKEN_SUBPACKAGE_BEGIN => {
-                let (id,idx) = Self::parse_ext(ext);
-                assert_eq!(idx,0);
-                if self.msg_cache.contains_key(&id)
-                {
-                    eprintln!("Has not ended subpackage will drop!!!");
-                    self.msg_cache.remove(&id);
-                }
-                self.msg_cache.insert(id,(msg.to_vec(),idx));
-                None
-            }
-            TOKEN_SUBPACKAGE => {
-                let (id,idx) = Self::parse_ext(ext);
-                if self.msg_cache.contains_key(&id)
-                {
-                    let (cache,idx_) = self.msg_cache.get_mut(&id).unwrap();
-                    assert_eq!(*idx_+1,idx);
-                    cache.reserve(msg.len());
-                    cache.extend_from_slice(&msg[..]);
-                    *idx_ = idx;
-                }else{
-                    eprintln!("Not found this subpackage id!!!");
-                }
-                None
-            }
-            TOKEN_SUBPACKAGE_END => {
-
-                let (id,idx) = Self::parse_ext(ext);
-                if self.msg_cache.contains_key(&id)
-                {
-                    let (mut cache,idx_) = self.msg_cache.remove(&id).unwrap();
-                    assert_eq!(idx_+1,idx);
-                    cache.reserve(msg.len());
-                    cache.extend_from_slice(&msg[..]);
-                    return Some(cache);
-                }else{
-                    eprintln!("Not found this subpackage id!!!");
-                }
-                None
-            }
-            _ => {None}
-        }
+        // match tag {
+        //     TOKEN_SUBPACKAGE_BEGIN => {
+        //         let (id,idx) = Self::parse_ext(ext);
+        //         assert_eq!(idx,0);
+        //         if self.msg_cache.contains_key(&id)
+        //         {
+        //             eprintln!("Has not ended subpackage will drop!!!");
+        //             self.msg_cache.remove(&id);
+        //         }
+        //         self.msg_cache.insert(id,(msg.to_vec(),idx));
+        //         None
+        //     }
+        //     TOKEN_SUBPACKAGE => {
+        //         let (id,idx) = Self::parse_ext(ext);
+        //         if self.msg_cache.contains_key(&id)
+        //         {
+        //             let (cache,idx_) = self.msg_cache.get_mut(&id).unwrap();
+        //             assert_eq!(*idx_+1,idx);
+        //             cache.reserve(msg.len());
+        //             cache.extend_from_slice(&msg[..]);
+        //             *idx_ = idx;
+        //         }else{
+        //             eprintln!("Not found this subpackage id!!!");
+        //         }
+        //         None
+        //     }
+        //     TOKEN_SUBPACKAGE_END => {
+        //
+        //         let (id,idx) = Self::parse_ext(ext);
+        //         if self.msg_cache.contains_key(&id)
+        //         {
+        //             let (mut cache,idx_) = self.msg_cache.remove(&id).unwrap();
+        //             assert_eq!(idx_+1,idx);
+        //             cache.reserve(msg.len());
+        //             cache.extend_from_slice(&msg[..]);
+        //             return Some(cache);
+        //         }else{
+        //             eprintln!("Not found this subpackage id!!!");
+        //         }
+        //         None
+        //     }
+        //     _ => {None}
+        // }
+        None
     }
     fn set_max_unit_size(&mut self, max_unit_size: usize) {
         self.max_unit_size = max_unit_size;
@@ -338,42 +376,72 @@ impl UdpMsgSplit for DefUdpMsgSplit {
 
     fn push_msg(&mut self,v:Vec<u8>)
     {
+        self.check_wait_split_queue();
         let id = self.get_id();
         self.wait_split_queue.push_back((v,0,id));
+        if let None = self.curr_idx
+        {
+            self.curr_idx = Some(0);
+        }
     }
 
     fn pop_msg(&mut self) -> Option<(&[u8], u32, u8,Option<Vec<u8>>)>
     {
-        if self.curr_idx >= self.wait_split_queue.len()  { return None; }
+        let curr_idx = if let Some(v) = self.curr_idx {
+            v
+        }else{
+            return None;
+        };
+        let mut recovery_info = None;
+        let mut move_next = false;
+        let wait_split_queue_len = self.wait_split_queue.len();
         //(data begin_pos id )
-        if let Some(v) = self.wait_split_queue.get_mut(&self.curr_idx)
+        let res = if let Some(v) = self.wait_split_queue.get_mut(curr_idx)
         {
             let end = (*v).0.len() - (*v).1 <= self.unit_size;
             let e = if end { (*v).0.len()  } else{ (*v).1 + self.unit_size};
             let sli =  &(*v).0[(*v).1..e] ;
             let begin = (*v).1 == 0;
-            if begin && end { return Some((sli,0,TOKEN_NORMAL,None))}
+            if begin && end {
+                move_next = true;
+                recovery_info = Some(((*v).2,0,e as u32));
+                Some((sli,0,TOKEN_NORMAL,None))
+            }else {
+                let ticks = Local::now().timestamp_millis();
 
-            let ticks = Local::now().timestamp_millis();
+                let mut sub_head = Vec::with_capacity(size_of::<i64>() + size_of::<u32>() * 2);
+                sub_head.extend_from_slice(&ticks.to_be_bytes());
+                sub_head.extend_from_slice(&((*v).1 as u32).to_be_bytes()); //Begin pos
+                sub_head.extend_from_slice(&((*v).0.len() as u32).to_be_bytes());//Message length
 
-            let mut sub_head = Vec::with_capacity(size_of::<i64>() + size_of::<u32>() * 2);
-            sub_head.extend_from_slice(&ticks.to_be_bytes());
-            sub_head.extend_from_slice(&((*v).1 as u32).to_be_bytes());
-            sub_head.extend_from_slice(&(e as u32).to_be_bytes());
-            sub_head.extend_from_slice((*v).2.to_be_bytes());
+                let ext = (*v).2;
 
-            let mut ext_buf = [0u8;size_of::<u32>()];
+                (*v).1 = e;
 
-            let ext = (*v).0.len() as u32;
+                recovery_info = Some(((*v).2, (*v).1 as u32, e as u32));
 
-            (*v).1 = e;
+                let tag = if begin {
+                    TOKEN_SUBPACKAGE_BEGIN
+                } else if end {
+                    TOKEN_SUBPACKAGE_END
+                } else { TOKEN_SUBPACKAGE };
 
-            let tag = if begin{
-                TOKEN_SUBPACKAGE_BEGIN
-            }else if end {
-                TOKEN_SUBPACKAGE_END
-            }else { TOKEN_SUBPACKAGE };
-            Some((sli,ext,tag,sub_head))
-        }else { None }
+                if end { move_next = true; }
+                Some((sli, ext, tag, Some(sub_head)))
+            }
+        }else { return None; };
+        if let Some(v) = recovery_info{
+            self.recovery_info.push_back(v);
+        }
+        if move_next {
+            let mut v = self.curr_idx.unwrap();
+            if v + 1 < wait_split_queue_len
+            {
+                self.curr_idx = Some(v + 1);
+            }else{
+                self.curr_idx = None;
+            }
+        }
+        res
     }
 }
