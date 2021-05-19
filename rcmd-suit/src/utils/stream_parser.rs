@@ -8,7 +8,7 @@ pub struct Stream<'a>{
 }
 
 impl<'a> Stream<'a>{
-    fn new(data:&'a[u8])->Stream<'a>
+    pub fn new(data:&'a[u8])->Stream<'a>
     {
         Stream{
             data,
@@ -16,7 +16,7 @@ impl<'a> Stream<'a>{
         }
     }
 
-    fn next(&mut self)-> Option<u8>
+    pub fn next(&mut self)-> Option<u8>
     {
         if self.ptr >= self.data.len() { return None;}
         let p = self.ptr;
@@ -24,7 +24,7 @@ impl<'a> Stream<'a>{
         Some(self.data[p])
     }
 
-    fn next_range(&mut self,len:usize) -> Option<&'a[u8]>
+    pub fn next_range(&mut self,len:usize) -> Option<&'a[u8]>
     {
         let e = self.ptr + (len - 1);
         if e >= self.data.len() { return None;}
@@ -33,7 +33,7 @@ impl<'a> Stream<'a>{
         Some(&self.data[p..=e])
     }
 
-    fn skip(&mut self,n:usize) -> bool
+    pub fn skip(&mut self,n:usize) -> bool
     {
         let e = self.ptr + (n - 1);
         if e >= self.data.len() { return false;}

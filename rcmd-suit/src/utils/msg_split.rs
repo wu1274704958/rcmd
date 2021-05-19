@@ -5,7 +5,8 @@ use crate::tools::{TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END, TOKEN_SUBPACKAGE_BEGI
 use crate::ext_code::*;
 use std::time::SystemTime;
 use chrono::prelude::*;
-use mysql::chrono::Local;
+use chrono::Local;
+use crate::utils::stream_parser::{Stream,StreamParse};
 
 pub trait MsgSplit{
     fn open(&self) ->bool { false }
@@ -195,7 +196,7 @@ impl MsgSplit for DefMsgSplit
 
 pub struct DefUdpMsgSplit
 {
-    msg_cache:HashMap<u32,(Vec<u8>,u32)>,
+    msg_cache:HashMap<u32,(Vec<u8>,u32,i64)>,
     logic_id:u32,
     max_unit_size:usize,
     min_unit_size:usize,
@@ -311,49 +312,53 @@ impl UdpMsgSplit for DefUdpMsgSplit {
 
     fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8,sub_head:&[u8]) -> Option<Vec<u8>> {
         dbg!(sub_head);
-        // match tag {
-        //     TOKEN_SUBPACKAGE_BEGIN => {
-        //         let (id,idx) = Self::parse_ext(ext);
-        //         assert_eq!(idx,0);
-        //         if self.msg_cache.contains_key(&id)
-        //         {
-        //             eprintln!("Has not ended subpackage will drop!!!");
-        //             self.msg_cache.remove(&id);
-        //         }
-        //         self.msg_cache.insert(id,(msg.to_vec(),idx));
-        //         None
-        //     }
-        //     TOKEN_SUBPACKAGE => {
-        //         let (id,idx) = Self::parse_ext(ext);
-        //         if self.msg_cache.contains_key(&id)
-        //         {
-        //             let (cache,idx_) = self.msg_cache.get_mut(&id).unwrap();
-        //             assert_eq!(*idx_+1,idx);
-        //             cache.reserve(msg.len());
-        //             cache.extend_from_slice(&msg[..]);
-        //             *idx_ = idx;
-        //         }else{
-        //             eprintln!("Not found this subpackage id!!!");
-        //         }
-        //         None
-        //     }
-        //     TOKEN_SUBPACKAGE_END => {
-        //
-        //         let (id,idx) = Self::parse_ext(ext);
-        //         if self.msg_cache.contains_key(&id)
-        //         {
-        //             let (mut cache,idx_) = self.msg_cache.remove(&id).unwrap();
-        //             assert_eq!(idx_+1,idx);
-        //             cache.reserve(msg.len());
-        //             cache.extend_from_slice(&msg[..]);
-        //             return Some(cache);
-        //         }else{
-        //             eprintln!("Not found this subpackage id!!!");
-        //         }
-        //         None
-        //     }
-        //     _ => {None}
-        // }
+        let mut stream = Stream::new(sub_head);
+        let ticks = i64::stream_parse(&mut stream).unwrap();
+        let begin_pos = u32::stream_parse(&mut stream).unwrap() as usize;
+        let msg_len = u32::stream_parse(&mut stream).unwrap() as usize;
+        if msg_len == 0 { return None; }
+        match tag {
+            TOKEN_SUBPACKAGE_BEGIN => {
+                if self.msg_cache.contains_key(&ext)
+                {
+                    if let Some(d) = self.msg_cache.get_mut(&ext){
+                        if (*d).0.len() != msg_len { return None; }
+                        if ticks > (*d).2 {
+                            (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
+                            (*d).1 = (begin_pos + msg.len()) as u32;
+                            (*d).2 = ticks;
+                        }
+                    }
+                }else{
+                    let mut d = Vec::with_capacity(msg_len);
+                    d.fill(0u8);
+                    (&mut d[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
+                    self.msg_cache.insert(ext,(d,(begin_pos + msg.len()) as u32,ticks));
+                }
+            }
+            TOKEN_SUBPACKAGE => {
+                if let Some(d) = self.msg_cache.get_mut(&ext){
+                    if (*d).0.len() != msg_len { return None; }
+                    if ticks > (*d).2 {
+                        (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
+                        (*d).1 = (begin_pos + msg.len()) as u32;
+                        (*d).2 = ticks;
+                    }
+                }
+            }
+            TOKEN_SUBPACKAGE_END => {
+                if let Some(d) = self.msg_cache.get_mut(&ext){
+                    if (*d).0.len() != msg_len || begin_pos + msg.len() != msg_len  { return None; }
+                    if ticks > (*d).2 {
+                        (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
+                        (*d).1 = (begin_pos + msg.len()) as u32;
+                        (*d).2 = ticks;
+                    }
+                }
+
+            }
+             _ => {}
+        }
         None
     }
     fn set_max_unit_size(&mut self, max_unit_size: usize) {
