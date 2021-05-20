@@ -259,6 +259,7 @@ impl DefUdpSender
 
     fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize,sid:u128,sub_head:Option<&[u8]>)->Vec<u8>
     {
+        if v.is_empty(){  dbg!((v,ext,tag,sid,sub_head)); }
         assert!(!v.is_empty());
         let len = v.len() + Self::package_len() + if let Some(sub) = sub_head{ sub.len() }else { 0 };
         let mut res = Vec::with_capacity(len);
@@ -388,14 +389,14 @@ impl DefUdpSender
                         recv_cache.insert(id, (msg.to_vec(), ext,tag,if sub_head.len() == 0 { None }else { Some(sub_head.to_vec()) } ));
                         Err(USErr::EmptyMsg)
                     } else {//如果是更早的需要合并的消息也需要运行一次
-                        drop(except);
-                        let mut msg_split = self.msg_split.lock().await;
-                        if msg_split.need_merge(tag){
-                            if let Some(v) = msg_split.merge(msg,ext,tag,sub_head)
-                            {
-                                return Ok(v);
-                            }
-                        }
+                        // drop(except);
+                        // let mut msg_split = self.msg_split.lock().await;
+                        // if msg_split.need_merge(tag){
+                        //     if let Some(v) = msg_split.merge(msg,ext,tag,sub_head)
+                        //     {
+                        //         return Ok(v);
+                        //     }
+                        // }
                         Err(USErr::EmptyMsg)
                     }
                 }
@@ -987,7 +988,7 @@ impl UdpSender for DefUdpSender
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
         let max_cache_size = 50;
-        let max_len = 65500 - Self::package_len();
+        let max_len = 65500 - (Self::package_len() + 16);
         let min_len = 1500 - Self::package_len();
         DefUdpSender{
             addr,
@@ -1130,7 +1131,7 @@ impl UdpSender for DefUdpSender
                         Err(USErr::MsgCacheOverflow) => {}
                         Err(e) => { return Err(e);}
                     }
-                }
+                }else{break;}
             }
         }
 

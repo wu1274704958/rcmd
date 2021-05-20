@@ -331,7 +331,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                     }
                 }else{
                     let mut d = Vec::with_capacity(msg_len);
-                    d.fill(0u8);
+                    d.resize(msg_len,0u8);
                     (&mut d[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
                     self.msg_cache.insert(ext,(d,(begin_pos + msg.len()) as u32,ticks));
                 }
@@ -358,7 +358,12 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                         pop = true;
                     }
                 }
-
+                if pop {
+                    if let Some(d) = self.msg_cache.remove(&ext)
+                    {
+                        return Some(d.0);
+                    }
+                }
             }
              _ => {}
         }
