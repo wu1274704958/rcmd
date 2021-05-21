@@ -311,12 +311,13 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     }
 
     fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8,sub_head:&[u8]) -> Option<Vec<u8>> {
-        dbg!(sub_head);
+        //dbg!(sub_head);
         let mut stream = Stream::new(sub_head);
         let ticks = i64::stream_parse(&mut stream).unwrap();
         let begin_pos = u32::stream_parse(&mut stream).unwrap() as usize;
         let msg_len = u32::stream_parse(&mut stream).unwrap() as usize;
         if msg_len == 0 { return None; }
+        //println!("b {:?} tick {:?} data len {:?} ",begin_pos,ticks,msg_len);
         match tag {
             TOKEN_SUBPACKAGE_BEGIN => {
                 if self.msg_cache.contains_key(&ext)
@@ -394,7 +395,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         self.wait_split_queue.push_back((v,0,id));
         if let None = self.curr_idx
         {
-            self.curr_idx = Some(0);
+            self.curr_idx = Some(self.wait_split_queue.len() - 1);
         }
     }
 
@@ -420,7 +421,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                 recovery_info = Some(((*v).2,0,e as u32));
                 Some((sli,0,TOKEN_NORMAL,None))
             }else {
-                let ticks = Local::now().timestamp_millis();
+                let ticks = Local::now().timestamp_nanos();
 
                 let mut sub_head = Vec::with_capacity(size_of::<i64>() + size_of::<u32>() * 2);
                 sub_head.extend_from_slice(&ticks.to_be_bytes());
