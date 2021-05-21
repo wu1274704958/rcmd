@@ -51,6 +51,8 @@ pub trait UdpMsgSplit{
     fn push_msg(&mut self,v:Vec<u8>);
 
     fn pop_msg(&mut self) -> Option<(&[u8], u32, u8,Option<Vec<u8>>)>;
+
+    fn recovery(&mut self,id:u32)->bool;
 }
 
 pub struct DefMsgSplit{
@@ -289,7 +291,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
 
     fn down_unit_size(&mut self)
     {
-        let mut n = self.unit_size - (self.unit_size / 30);
+        let mut n = self.unit_size - (self.unit_size / 50);
         if n < self.min_unit_size { n = self.min_unit_size; }
         self.unit_size = n;
     }
@@ -430,9 +432,9 @@ impl UdpMsgSplit for DefUdpMsgSplit {
 
                 let ext = (*v).2;
 
-                (*v).1 = e;
-
                 recovery_info = Some(((*v).2, (*v).1 as u32, e as u32));
+
+                (*v).1 = e;
 
                 let tag = if begin {
                     TOKEN_SUBPACKAGE_BEGIN
@@ -457,5 +459,20 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             }
         }
         res
+    }
+
+    fn recovery(&mut self, id: u32) -> bool {
+        if let Some(v) = self.recovery_info.back(){
+            if (*v).0 != id {
+                return false;
+            }
+        }else{
+            return false;
+        }
+        let info =  self.recovery_info.pop_back().unwrap();
+        if self.curr_idx.is_none(){  self.curr_idx = Some(info.0 as usize);  }
+        let v = self.wait_split_queue.get_mut(info.0 as usize).unwrap();
+        (*v).1 = info.1 as usize;
+        true
     }
 }

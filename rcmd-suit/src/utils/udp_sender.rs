@@ -83,7 +83,7 @@ pub struct DefUdpSender{
     min_cache_size:u16,
     max_cache_size:u16,
     mid: Arc<Mutex<usize>>,
-    queue: Arc<Mutex<VecDeque<usize>>>,
+    queue: Arc<Mutex<VecDeque<(usize,Option<u32>)>>>,
     msg_map: Arc<Mutex<HashMap<usize,(Vec<u8>,SystemTime,u16)>>>,
     recv_cache: Arc<Mutex<HashMap<usize,(Vec<u8>,u32,u8,Option<Vec<u8>>)>>>,
     expect_id: Arc<Mutex<usize>>,
@@ -92,7 +92,7 @@ pub struct DefUdpSender{
     timeout: Duration,
     msg_split: Arc<Mutex<DefUdpMsgSplit>>,
     max_retry_times: u16,
-    msg_cache_queue: Arc<Mutex<VecDeque<(usize,Vec<u8>)>>>,
+    msg_cache_queue: Arc<Mutex<VecDeque<(usize,Vec<u8>,Option<u32>)>>>,
     recv_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
     error: Arc<Mutex<Option<USErr>>>,
     sid: Arc<Mutex<SessionState>>,
@@ -253,7 +253,7 @@ impl DefUdpSender
         let mid = self.get_mid().await;
         //println!("send id {}",mid);
         let res = Self::warp_ex(v,ext,tag,mid,sid,sub_head);
-        self.push_cache(mid,res.clone()).await?;
+        self.push_cache(mid,res.clone(), if sub_head.is_some(){Some(ext)}else{None}).await?;
         Ok(res)
     }
 
@@ -288,16 +288,16 @@ impl DefUdpSender
         res
     }
 
-    async fn push_cache(&self, id:usize, v:Vec<u8>) -> Result<(), USErr>
+    async fn push_cache(&self, id:usize, v:Vec<u8>,ext:Option<u32>) -> Result<(), USErr>
     {
         let mut queue = self.queue.lock().await;
         if queue.len() == self.get_cache_size().await as usize  {
             let mut msg_cache_queue = self.msg_cache_queue.lock().await;
-            msg_cache_queue.push_back((id,v));
+            msg_cache_queue.push_back((id,v,ext));
             return Err(USErr::MsgCacheOverflow);
             //self.drop_one_cache();
         }
-        queue.push_back(id);
+        queue.push_back((id,ext));
         let mut msg_map = self.msg_map.lock().await;
         msg_map.insert(id,(v,SystemTime::now(),1));
         Ok(())
@@ -308,7 +308,7 @@ impl DefUdpSender
         let mut queue = self.queue.lock().await;
         let mut rmi = None;
         for (i,v) in queue.iter().enumerate(){
-            if *v == mid
+            if (*v).0 == mid
             {
                 rmi = Some(i);
                 break;
@@ -697,12 +697,14 @@ impl DefUdpSender
         let mut msg_split = self.msg_split.lock().await;
         let mut cache_size = self.cache_size.lock().await;
         let curr_cache_size = *cache_size as usize;
-        let cache_len = self.get_cache_len().await;
+        let mut msg_map = self.msg_map.lock().await;
+        let cache_len = msg_map.len();
         if msg_split.is_max_unit_size(){
             if cache_len >= curr_cache_size / 2  && times_frequency >= 3f32 {
                 if curr_cache_size as u16 <= self.min_cache_size
                 {
                     msg_split.down_unit_size();
+                    self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
                 }else{
                     let v = self.adjust_cache_size_no_await(&mut cache_size,-1,5);
                     println!("down cache size curr = {} ",v);
@@ -714,6 +716,7 @@ impl DefUdpSender
         }else{
             if cache_len >= curr_cache_size / 2  && times_frequency >= 3f32 {
                 msg_split.down_unit_size();
+                self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
                 println!("down unit size curr = {} ",msg_split.unit_size());
             }else if cache_len == curr_cache_size && times_frequency <= 1f32 {
                 msg_split.up_unit_size();
@@ -721,6 +724,25 @@ impl DefUdpSender
             }
         }
 
+    }
+
+    async fn try_recovery_msg(&self,msg_map:&mut MutexGuard<'_,HashMap<usize,(Vec<u8>,SystemTime,u16)>>,msg_split:&mut MutexGuard<'_,DefUdpMsgSplit>)
+    {
+        let mut queue = self.queue.lock().await;
+        while !queue.is_empty() {
+            if let Some(id) = queue.back()
+            {
+                if (*id).1.is_some(){
+                    let sub_id = (*id).1.unwrap();
+                    if msg_split.recovery(sub_id){
+                        println!("Recovery id {} " ,sub_id);
+                    }else { return; }
+                }else { return; }
+            }else { return; }
+            if let (id,Some(e)) = queue.pop_back().unwrap(){
+                msg_map.remove(&id).unwrap();
+            }
+        }
     }
 
     async fn get_cache_len(&self) ->usize
@@ -735,7 +757,7 @@ impl DefUdpSender
         loop {
             if queue.len() < self.get_cache_size().await as usize
             {
-                if let Some((id, v)) = {
+                if let Some((id, v,ext)) = {
                     let mut msg_cache_queue = self.msg_cache_queue.lock().await;
                     msg_cache_queue.pop_front()
                 }{
@@ -743,7 +765,7 @@ impl DefUdpSender
                     let sock = self.sock.clone();
                     let addr = self.addr;
 
-                    queue.push_back(id);
+                    queue.push_back((id,ext));
                     let mut msg_map = self.msg_map.lock().await;
                     Self::send_ex(sock, addr, v.as_slice()).await;
                     msg_map.insert(id,(v,SystemTime::now(),1));
@@ -1098,7 +1120,7 @@ impl UdpSender for DefUdpSender
             let mut msg_map = self.msg_map.lock().await;
             let mut l = 0;
             let mut sum = 0;
-            for id in queue.iter(){
+            for (id,_) in queue.iter(){
                 if let Some((v,t,times)) = msg_map.get_mut(id){
                     if l >= self.get_cache_size().await {
                         break;
@@ -1140,7 +1162,7 @@ impl UdpSender for DefUdpSender
             let mut retry_times = self.avg_retry_times.lock().await;
             (*retry_times).0 += 1;
             (*retry_times).1 += avg_times;
-            if dur.as_secs_f32() > 3.6 {
+            if dur.as_secs_f32() >  self.timeout.as_secs_f32() * 5f32 {
                 let avg =  (*retry_times).1 / (*retry_times).0 as f32;
                 self.adjust_unit_size(avg).await;
                 *retry_times = (0,0f32);
