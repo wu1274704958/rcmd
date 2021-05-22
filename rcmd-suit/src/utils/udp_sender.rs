@@ -388,15 +388,7 @@ impl DefUdpSender
                         let mut recv_cache = self.recv_cache.lock().await;
                         recv_cache.insert(id, (msg.to_vec(), ext,tag,if sub_head.len() == 0 { None }else { Some(sub_head.to_vec()) } ));
                         Err(USErr::EmptyMsg)
-                    } else {//如果是更早的需要合并的消息也需要运行一次
-                        drop(except);
-                        let mut msg_split = self.msg_split.lock().await;
-                        if msg_split.need_merge(tag){
-                            if let Some(v) = msg_split.merge(msg,ext,tag,sub_head)
-                            {
-                                return Ok(v);
-                            }
-                        }
+                    } else {
                         Err(USErr::EmptyMsg)
                     }
                 }
@@ -728,6 +720,7 @@ impl DefUdpSender
 
     async fn try_recovery_msg(&self,msg_map:&mut MutexGuard<'_,HashMap<usize,(Vec<u8>,SystemTime,u16)>>,msg_split:&mut MutexGuard<'_,DefUdpMsgSplit>)
     {
+        println!("try_recovery_msg  b");
         let mut queue = self.queue.lock().await;
         while !queue.is_empty() {
             if let Some(id) = queue.back()
@@ -736,13 +729,15 @@ impl DefUdpSender
                     let sub_id = (*id).1.unwrap();
                     if msg_split.recovery(sub_id){
                         println!("Recovery id {} " ,sub_id);
-                    }else { return; }
-                }else { return; }
-            }else { return; }
+                    }else { break; }
+                }else { break; }
+            }else { break; }
             if let (id,Some(e)) = queue.pop_back().unwrap(){
+                println!("pop msg id {} " ,id);
                 msg_map.remove(&id).unwrap();
             }
         }
+        println!("try_recovery_msg  e");
     }
 
     async fn get_cache_len(&self) ->usize
@@ -914,6 +909,14 @@ impl DefUdpSender
         queue.len() < self.get_cache_size().await as usize && msg_cache_queue.is_empty()
     }
 
+    fn send_cache_empty_ex(
+        queue:&MutexGuard<'_,VecDeque<(usize,Option<u32>)>>,
+        msg_cache_queue:&MutexGuard<'_,VecDeque<(usize,Vec<u8>,Option<u32>)>>,
+        cache_size:u16) ->bool
+    {
+        queue.len() < cache_size as usize && msg_cache_queue.is_empty()
+    }
+
     async fn send_close_session(&self) ->Result<(),USErr>
     {
         let sid_ = self.get_sid().await.unwrap();
@@ -1028,7 +1031,7 @@ impl UdpSender for DefUdpSender
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
             timeout: Duration::from_millis(400),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 50,
+            max_retry_times: 10,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
