@@ -10,7 +10,7 @@ use tokio::time::Duration;
 use std::time::SystemTime;
 use async_std::io::Error;
 use crate::tools::{TOKEN_NORMAL};
-use crate::utils::msg_split::{UdpMsgSplit,DefUdpMsgSplit};
+use crate::utils::msg_split::{UdpMsgSplit, DefUdpMsgSplit, MsgSlicesInfo};
 use tokio::sync::{Mutex,MutexGuard};
 use crate::utils::udp_sender::USErr::Warp;
 use std::fmt::Debug;
@@ -21,6 +21,7 @@ use crate::utils::udp_sender::SpecialExt::send_recv;
 use num_enum::TryFromPrimitive;
 use std::convert::TryFrom;
 use std::thread::sleep;
+use crate::utils::data_current_limiter::DataCurrentLimiter;
 
 #[async_trait]
 pub trait UdpSender{
@@ -98,7 +99,8 @@ pub struct DefUdpSender{
     sid: Arc<Mutex<SessionState>>,
     msg_cache_on_no_sid: Arc<Mutex<VecDeque<Vec<u8>>>>,
     adjust_cache_size_time:Arc<Mutex<SystemTime>>,
-    avg_retry_times: Arc<Mutex<(u32,f32)>>
+    avg_retry_times: Arc<Mutex<(u32,f32)>>,
+    data_current_limiter:Arc<DataCurrentLimiter>
 }
 
 #[derive(Clone)]
@@ -241,7 +243,8 @@ impl DefUdpSender
             Ok(())
         }
     }
-    async fn warp(&self,v:&[u8],ext:u32,tag:u8,sub_head:Option<&[u8]>)->Result<Vec<u8>,USErr>
+    ///rid RecoveryID
+    async fn warp(&self,v:&[u8],ext:u32,tag:u8,sub_head:Option<&[u8]>,rid:Option<u32>)->Result<Vec<u8>,USErr>
     {
         let sid = {
             if let Some(v) = self.get_sid().await{
@@ -253,13 +256,12 @@ impl DefUdpSender
         let mid = self.get_mid().await;
         //println!("send id {}",mid);
         let res = Self::warp_ex(v,ext,tag,mid,sid,sub_head);
-        self.push_cache(mid,res.clone(), if sub_head.is_some(){Some(ext)}else{None}).await?;
+        self.push_cache(mid,res.clone(), rid).await?;
         Ok(res)
     }
 
     fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize,sid:u128,sub_head:Option<&[u8]>)->Vec<u8>
     {
-        if v.is_empty(){  dbg!((v,ext,tag,sid,sub_head)); }
         assert!(!v.is_empty());
         let len = v.len() + Self::package_len() + if let Some(sub) = sub_head{ sub.len() }else { 0 };
         let mut res = Vec::with_capacity(len);
@@ -288,16 +290,16 @@ impl DefUdpSender
         res
     }
 
-    async fn push_cache(&self, id:usize, v:Vec<u8>,ext:Option<u32>) -> Result<(), USErr>
+    async fn push_cache(&self, id:usize, v:Vec<u8>,rid:Option<u32>) -> Result<(), USErr>
     {
         let mut queue = self.queue.lock().await;
         if queue.len() == self.get_cache_size().await as usize  {
             let mut msg_cache_queue = self.msg_cache_queue.lock().await;
-            msg_cache_queue.push_back((id,v,ext));
+            msg_cache_queue.push_back((id,v,rid));
             return Err(USErr::MsgCacheOverflow);
             //self.drop_one_cache();
         }
-        queue.push_back((id,ext));
+        queue.push_back((id,rid));
         let mut msg_map = self.msg_map.lock().await;
         msg_map.insert(id,(v,SystemTime::now(),1));
         Ok(())
@@ -961,19 +963,19 @@ impl UdpSender for DefUdpSender
 
             return Ok(());
         }
-        if self.need_split(v.len()).await
+        //if self.need_split(v.len()).await
         {
             let mut msg_split = self.msg_split.lock().await;
             msg_split.push_msg(v);
             Ok(())
-        }else{
+        }/*else{
             match self.warp(v.as_slice(),0,TOKEN_NORMAL,None).await{
                 Ok(v) => {self.send(v.as_slice()).await?;}
                 Err(USErr::MsgCacheOverflow) => {}
                 Err(e) => { return Err(e);}
             }
             Ok(())
-        }
+        }*/
     }
 
     async fn check_recv(&self, data: &[u8]) -> Result<(),USErr> {
@@ -1031,7 +1033,7 @@ impl UdpSender for DefUdpSender
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
             timeout: Duration::from_millis(400),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 10,
+            max_retry_times: 72,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
@@ -1039,6 +1041,10 @@ impl UdpSender for DefUdpSender
             msg_cache_on_no_sid: Arc::new(Mutex::new(VecDeque::new())),
             adjust_cache_size_time: Arc::new(Mutex::new(SystemTime::now())),
             avg_retry_times: Arc::new(Mutex::new((0,0f32))),
+            data_current_limiter: Arc::new(DataCurrentLimiter::new(
+                Duration::from_millis(20),
+                (1024*1024*5) / (1000/20) ,10,10
+            ))
         }
     }
 
@@ -1137,9 +1143,11 @@ impl UdpSender for DefUdpSender
                     {
                         if dur > self.timeout
                         {
-                            *times += 1;
-                            *t = SystemTime::now();
-                            Self::send_ex(self.sock.clone(), self.addr, v.as_slice()).await;
+                            if self.data_current_limiter.can_send(v.len()).await {
+                                *t = SystemTime::now();
+                                *times += 1;
+                                Self::send_ex(self.sock.clone(), self.addr, v.as_slice()).await?;
+                            }
                         }
                     }
                     l += 1;
@@ -1149,10 +1157,19 @@ impl UdpSender for DefUdpSender
         }
         {
             let mut msg_split = self.msg_split.lock().await;
-            while self.send_cache_empty().await && msg_split.need_send() {
-                if let Some((v,ext,tag,sub_head)) = msg_split.pop_msg(){
-                    match self.warp(v,ext,tag,if let Some(ref v) = sub_head{Some(v.as_slice())}else{None}).await{
-                        Ok(v) => {self.send(v.as_slice()).await?;}
+            while self.send_cache_empty().await /*&& msg_split.need_send()*/ {
+                if let Some((v,ext,tag,msg_slices_info)) = msg_split.pop_msg(){
+                    let (sub_head,rid) = match msg_slices_info{
+                        MsgSlicesInfo::Complete(rid) => {  (None,Some(rid))  }
+                        MsgSlicesInfo::Part(ref v) => { (Some(v.as_slice()),Some(ext)) }
+                    };
+                    match self.warp(v,ext,tag, sub_head,rid).await{
+                        Ok(v) => {
+                            if self.data_current_limiter.can_send(v.len()).await
+                            {
+                                self.send(v.as_slice()).await?;
+                            }
+                        }
                         Err(USErr::MsgCacheOverflow) => {}
                         Err(e) => { return Err(e);}
                     }

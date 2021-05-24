@@ -50,7 +50,7 @@ pub trait UdpMsgSplit{
 
     fn push_msg(&mut self,v:Vec<u8>);
 
-    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8,Option<Vec<u8>>)>;
+    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8,MsgSlicesInfo)>;
 
     fn recovery(&mut self,id:u32)->bool;
 }
@@ -194,6 +194,11 @@ impl MsgSplit for DefMsgSplit
     fn extend_ignore(&mut self, v: &[u32]) {
         self.ignore_map.extend(v.iter());
     }
+}
+
+pub enum MsgSlicesInfo {
+    Complete(u32),
+    Part(Vec<u8>),
 }
 
 pub struct DefUdpMsgSplit
@@ -401,7 +406,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         }
     }
 
-    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8,Option<Vec<u8>>)>
+    fn pop_msg(&mut self) -> Option<(&[u8], u32, u8,MsgSlicesInfo)>
     {
         let curr_idx = if let Some(v) = self.curr_idx {
             v
@@ -421,7 +426,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             if begin && end {
                 move_next = true;
                 recovery_info = Some(((*v).2,0,e as u32));
-                Some((sli,0,TOKEN_NORMAL,None))
+                Some((sli,0,TOKEN_NORMAL,MsgSlicesInfo::Complete((*v).2)))
             }else {
                 let ticks = Local::now().timestamp_nanos();
 
@@ -443,7 +448,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                 } else { TOKEN_SUBPACKAGE };
 
                 if end { move_next = true; }
-                Some((sli, ext, tag, Some(sub_head)))
+                Some((sli, ext, tag, MsgSlicesInfo::Part(sub_head)))
             }
         }else { return None; };
         if let Some(v) = recovery_info{
@@ -462,17 +467,18 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     }
 
     fn recovery(&mut self, id: u32) -> bool {
-        if let Some(v) = self.recovery_info.back(){
-            if (*v).0 != id {
-                return false;
-            }
-        }else{
-            return false;
-        }
-        let info =  self.recovery_info.pop_back().unwrap();
-        self.curr_idx = Some(info.0 as usize);
-        let v = self.wait_split_queue.get_mut(info.0 as usize).unwrap();
-        (*v).1 = info.1 as usize;
-        true
+        // if let Some(v) = self.recovery_info.back(){
+        //     if (*v).0 != id {
+        //         return false;
+        //     }
+        // }else{
+        //     return false;
+        // }
+        // let info =  self.recovery_info.pop_back().unwrap();
+        // self.curr_idx = Some(info.0 as usize);
+        // let v = self.wait_split_queue.get_mut(info.0 as usize).unwrap();
+        // (*v).1 = info.1 as usize;
+        // true
+        false
     }
 }
