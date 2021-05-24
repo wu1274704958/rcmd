@@ -330,6 +330,7 @@ impl DefUdpSender
 
     async fn unwarp(&self,data:&[u8])-> Result<Vec<u8>,USErr>
     {
+        //print!("unwarp 1 {} ",data.len());
         let mut d = None;
         if data.is_empty() && self.need_check_in().await
         {
@@ -351,15 +352,20 @@ impl DefUdpSender
             {
                 None => { Err(USErr::EmptyMsg) }
                 Some(v) => {
+                    //print!(" step2 ");
                     let (msg, id, ext,tag,sid,sub_head) = self.unwarp_ex(v.as_slice());
+                    //print!(" step3 ext {} ",ext);
                     if self.check_send_recv(msg,ext,tag,id,sid).await?
                     {
+                        //print!("\n");
                         return Err(USErr::EmptyMsg);
                     }
+                    //print!(" step4  ");
                     if self.is_close().await{
                         self.send_ext(SpecialExt::err_already_closed.into()).await?;
                         return Err(USErr::EmptyMsg);
                     }
+                    //print!(" step5  ");
                     if let Some(sid_) = self.get_sid().await{
                         if sid_ != sid
                         {
@@ -370,12 +376,12 @@ impl DefUdpSender
                         self.send_ext(SpecialExt::err_no_session.into()).await?;
                         return Err(USErr::EmptyMsg);
                     }
+                    //print!(" step6 id {} \n",id);
                     self.send_recv(id).await?;
                     //println!("recv msg {}",id);
                     let mut except = self.expect_id.lock().await;
                     if id == *except {
                         Self::next_expect_ex(&mut except);
-                        drop(except);
                         let mut msg_split = self.msg_split.lock().await;
                         if msg_split.need_merge(tag){
                             if let Some(v) = msg_split.merge(msg,ext,tag,sub_head)

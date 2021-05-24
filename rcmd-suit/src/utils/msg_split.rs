@@ -296,7 +296,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
 
     fn down_unit_size(&mut self)
     {
-        let mut n = self.unit_size - (self.unit_size / 2);
+        let mut n = self.unit_size - (self.unit_size / 30);
         if n < self.min_unit_size { n = self.min_unit_size; }
         self.unit_size = n;
     }
