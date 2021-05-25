@@ -733,10 +733,9 @@ impl DefUdpSender
         while !queue.is_empty() {
             if let Some(id) = queue.back()
             {
-                if (*id).1.is_some(){
-                    let sub_id = (*id).1.unwrap();
-                    if msg_split.recovery(sub_id){
-                        println!("Recovery id {} " ,sub_id);
+                if let Some(ref sub_id ) = (*id).1{
+                    if msg_split.recovery(*sub_id){
+                        println!("Recovery id {} " ,*sub_id);
                     }else { return; }
                 }else { return; }
             }else { return; }
