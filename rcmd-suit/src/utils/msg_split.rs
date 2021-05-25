@@ -467,18 +467,29 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     }
 
     fn recovery(&mut self, id: u32) -> bool {
-        // if let Some(v) = self.recovery_info.back(){
-        //     if (*v).0 != id {
-        //         return false;
-        //     }
-        // }else{
-        //     return false;
-        // }
-        // let info =  self.recovery_info.pop_back().unwrap();
-        // self.curr_idx = Some(info.0 as usize);
-        // let v = self.wait_split_queue.get_mut(info.0 as usize).unwrap();
-        // (*v).1 = info.1 as usize;
-        // true
+        if let Some(v) = self.recovery_info.back(){
+            if (*v).0 != id {
+                return false;
+            }
+        }else{
+            return false;
+        }
+        if let Some(info) =  self.recovery_info.back(){
+            for msg in self.wait_split_queue.iter_mut().enumerate()
+            {
+                if (*info).0 == (*msg.1).2{
+                    //把当前消息的指针往前移 实现回收消息
+                    (*msg.1).1 = info.1 as usize;
+                    let idx = msg.0;
+                    drop(msg);
+                    self.wait_split_queue.remove(idx).unwrap();
+                    self.curr_idx = Some(info.0 as usize);
+                    drop(info);
+                    self.recovery_info.pop_back().unwrap();
+                    return true;
+                }
+            }
+        }
         false
     }
 }

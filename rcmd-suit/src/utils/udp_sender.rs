@@ -204,6 +204,7 @@ enum SpecialExt {
     response_send_sid = 101,
     response_cp_send_sid = 102,
     send_close = 103,
+    skip_message = 104,
     err_already_has_sid = 5000,
     err_waiting_response = 5001,
     err_bad_session = 5002,
@@ -339,7 +340,8 @@ impl DefUdpSender
                 None => {}
                 Some(v) => {
                     self.next_expect().await;
-                    d = Some(v);
+                    if v.0.is_empty(){ d = None; }
+                    else{ d = Some(v);}
                 }
             }
         }
@@ -430,6 +432,18 @@ impl DefUdpSender
                     {
                         //println!("op recv msg id = {} times = {}",id,times);
                         self.check_msg_cache_queue().await;
+                    }
+                    Ok(true)
+                }
+                SpecialExt::skip_message => {
+                    println!("op send skip message id = {}",id);
+                    self.send_recv(id).await?;
+                    let mut expect_id = self.expect_id.lock().await;
+                    if *expect_id == id{
+                        Self::next_expect_ex(&mut expect_id);
+                    }else if id > *expect_id{
+                        let mut recv_cache = self.recv_cache.lock().await;
+                        recv_cache.insert(id, (Vec::new(), ext,tag,None));
                     }
                     Ok(true)
                 }
@@ -704,7 +718,7 @@ impl DefUdpSender
                 if curr_cache_size as u16 <= self.min_cache_size
                 {
                     msg_split.down_unit_size();
-                    self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
+                    //self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
                 }else{
                     let v = self.adjust_cache_size_no_await(&mut cache_size,-1,5);
                     println!("down cache size curr = {} ",v);
@@ -716,7 +730,7 @@ impl DefUdpSender
         }else{
             if cache_len >= curr_cache_size / 2  && times_frequency >= 3f32 {
                 msg_split.down_unit_size();
-                self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
+                //self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
                 println!("down unit size curr = {} ",msg_split.unit_size());
             }else if cache_len == curr_cache_size && times_frequency <= 1f32 {
                 msg_split.up_unit_size();
@@ -730,20 +744,32 @@ impl DefUdpSender
     {
         println!("try_recovery_msg  b");
         let mut queue = self.queue.lock().await;
-        while !queue.is_empty() {
-            if let Some(id) = queue.back()
-            {
-                if let Some(ref sub_id ) = (*id).1{
-                    if msg_split.recovery(*sub_id){
-                        println!("Recovery id {} " ,*sub_id);
-                    }else { return; }
-                }else { return; }
-            }else { return; }
-            if let (id,Some(e)) = queue.pop_back().unwrap(){
-                println!("pop msg id {} " ,id);
-                msg_map.remove(&id).unwrap();
+        if !queue.is_empty() {
+            let mut i = queue.len();
+            loop {
+                i -= 1;
+                if let Some(id) = queue.get_mut(i)
+                {
+                    if let Some(ref sub_id ) = (*id).1{
+                        if msg_split.recovery(*sub_id){
+                            print!("Recovery id {} mid {} " ,*sub_id,(*id).0);
+                            if let Some(msg) = msg_map.get_mut(&(*id).0)
+                            {
+                                print!("Recovery step2 \n");
+                                (*msg).2 = 1;
+                                (*msg).0 = Self::warp_ex(
+                                    &[199], SpecialExt::skip_message.into(),
+                                    TOKEN_NORMAL, (*id).0, 0, None);
+
+                                (*id).1 = None;
+                            }
+                        }
+                    }else { continue; }
+                }
+                if i == 0 { break;}
             }
         }
+        println!("try_recovery_msg  e");
     }
 
     async fn get_cache_len(&self) ->usize
@@ -1147,7 +1173,7 @@ impl UdpSender for DefUdpSender
                     {
                         if dur > self.timeout
                         {
-                            //if self.data_current_limiter.can_send(v.len()).await
+                            if self.data_current_limiter.can_send(v.len()).await
                             {
                                 *t = SystemTime::now();
                                 *times += 1;
@@ -1170,7 +1196,7 @@ impl UdpSender for DefUdpSender
                     };
                     match self.warp(v,ext,tag, sub_head,rid).await{
                         Ok(v) => {
-                            //if self.data_current_limiter.can_send(v.len()).await
+                            if self.data_current_limiter.can_send(v.len()).await
                             {
                                 self.send(v.as_slice()).await?;
                             }
