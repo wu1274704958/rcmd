@@ -354,7 +354,7 @@ impl DefUdpSender
                 Some(v) => {
                     //print!(" step2 ");
                     let (msg, id, ext,tag,sid,sub_head) = self.unwarp_ex(v.as_slice());
-                    //print!(" step3 ext {} ",ext);
+                    //print!(" step3 ext {} id {} \n",ext,id);
                     if self.check_send_recv(msg,ext,tag,id,sid).await?
                     {
                         //print!("\n");
@@ -737,15 +737,14 @@ impl DefUdpSender
                     let sub_id = (*id).1.unwrap();
                     if msg_split.recovery(sub_id){
                         println!("Recovery id {} " ,sub_id);
-                    }else { break; }
-                }else { break; }
-            }else { break; }
+                    }else { return; }
+                }else { return; }
+            }else { return; }
             if let (id,Some(e)) = queue.pop_back().unwrap(){
                 println!("pop msg id {} " ,id);
                 msg_map.remove(&id).unwrap();
             }
         }
-        println!("try_recovery_msg  e");
     }
 
     async fn get_cache_len(&self) ->usize
@@ -1149,7 +1148,8 @@ impl UdpSender for DefUdpSender
                     {
                         if dur > self.timeout
                         {
-                            if self.data_current_limiter.can_send(v.len()).await {
+                            //if self.data_current_limiter.can_send(v.len()).await
+                            {
                                 *t = SystemTime::now();
                                 *times += 1;
                                 Self::send_ex(self.sock.clone(), self.addr, v.as_slice()).await?;
@@ -1171,7 +1171,7 @@ impl UdpSender for DefUdpSender
                     };
                     match self.warp(v,ext,tag, sub_head,rid).await{
                         Ok(v) => {
-                            if self.data_current_limiter.can_send(v.len()).await
+                            //if self.data_current_limiter.can_send(v.len()).await
                             {
                                 self.send(v.as_slice()).await?;
                             }
