@@ -155,6 +155,7 @@ impl UdpSubpackage{
         let tag_p = o2 + size_of::<u32>() + size_of::<u8>();
         let sub_len = data[tag_p + size_of::<u128>() + size_of::<u8>()];
         let o3 = tag_p + size_of::<u128>() + size_of::<u8>() + sub_len as usize + size_of::<u8>();
+        if o3 >= data.len() { return false;}
         data[o2] == Self::mn_2() &&  Self::good_tag(data[tag_p]) && data[o3] == Self::mn_3()
     }
 
