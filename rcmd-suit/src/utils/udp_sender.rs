@@ -745,10 +745,9 @@ impl DefUdpSender
         println!("try_recovery_msg  b");
         let mut queue = self.queue.lock().await;
         if !queue.is_empty() {
-            let mut i = queue.len();
+            let mut i = (queue.len() - 1) as isize;
             loop {
-                i -= 1;
-                if let Some(id) = queue.get_mut(i)
+                if let Some(id) = queue.get_mut(i as usize)
                 {
                     if let Some(ref sub_id ) = (*id).1{
                         if msg_split.recovery(*sub_id){
@@ -766,7 +765,8 @@ impl DefUdpSender
                         }
                     }else { continue; }
                 }
-                if i == 0 { break;}
+                i -= 1;
+                if i <= 0 { break;}
             }
         }
         println!("try_recovery_msg  e");
