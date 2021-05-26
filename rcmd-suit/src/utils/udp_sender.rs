@@ -1048,7 +1048,7 @@ impl UdpSender for DefUdpSender
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        let max_cache_size = 10;
+        let max_cache_size = 1;
         let max_len = 65500 - (Self::package_len() + 16);
         let min_len = 1472 - (Self::package_len() + 16);
         DefUdpSender{
@@ -1067,7 +1067,7 @@ impl UdpSender for DefUdpSender
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
             timeout: Duration::from_millis(400),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 30,
+            max_retry_times: 12,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
@@ -1193,7 +1193,8 @@ impl UdpSender for DefUdpSender
         }
         {
             let mut msg_split = self.msg_split.lock().await;
-            while self.send_cache_empty().await /*&& msg_split.need_send()*/ {
+            while self.send_cache_empty().await && msg_split.need_send() {
+                //println!("pop msg");
                 if let Some((v,ext,tag,msg_slices_info)) = msg_split.pop_msg(){
                     let (sub_head,rid) = match msg_slices_info{
                         MsgSlicesInfo::Complete(rid) => {  (None,Some(rid))  }
