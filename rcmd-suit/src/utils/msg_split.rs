@@ -7,6 +7,7 @@ use std::time::SystemTime;
 use chrono::prelude::*;
 use chrono::Local;
 use crate::utils::stream_parser::{Stream,StreamParse};
+use std::process::abort;
 
 pub trait MsgSplit{
     fn open(&self) ->bool { false }
@@ -296,7 +297,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
 
     fn down_unit_size(&mut self)
     {
-        let mut n = self.unit_size - (self.unit_size / 30);
+        let mut n = self.unit_size - (self.unit_size / 5);
         if n < self.min_unit_size { n = self.min_unit_size; }
         self.unit_size = n;
     }
@@ -425,7 +426,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             let begin = (*v).1 == 0;
             if begin && end {
                 move_next = true;
-                recovery_info = Some(((*v).2,0,e as u32));
+                recovery_info = Some(((*v).2,0,curr_idx as u32));
                 Some((sli,0,TOKEN_NORMAL,MsgSlicesInfo::Complete((*v).2)))
             }else {
                 let ticks = Local::now().timestamp_nanos();
@@ -437,7 +438,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
 
                 let ext = (*v).2;
 
-                recovery_info = Some(((*v).2, (*v).1 as u32, e as u32));
+                recovery_info = Some(((*v).2, (*v).1 as u32, curr_idx as u32));
 
                 (*v).1 = e;
 
@@ -474,22 +475,16 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         }else{
             return false;
         }
-        if let Some(info) =  self.recovery_info.back(){
-            for msg in self.wait_split_queue.iter_mut().enumerate()
-            {
-                if (*info).0 == (*msg.1).2{
-                    //把当前消息的指针往前移 实现回收消息
-                    (*msg.1).1 = info.1 as usize;
-                    let idx = msg.0;
-                    drop(msg);
-                    self.wait_split_queue.remove(idx).unwrap();
-                    self.curr_idx = Some(info.0 as usize);
-                    drop(info);
-                    self.recovery_info.pop_back().unwrap();
-                    return true;
-                }
-            }
+        let info = self.recovery_info.pop_back().unwrap();
+        //println!("reco {:?}",info);
+        self.curr_idx = Some(info.2 as usize);
+        if let Some(msg) = self.wait_split_queue.get_mut(info.2 as usize)
+        {
+            (*msg).1 = info.1 as usize;
+        }else{
+            println!("Not find recovery message!");
+            abort();
         }
-        false
+        true
     }
 }
