@@ -332,7 +332,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                 {
                     if let Some(d) = self.msg_cache.get_mut(&ext){
                         if (*d).0.len() != msg_len { return None; }
-                        if ticks > (*d).2 {
+                        if ticks >= (*d).2 {
                             (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
                             (*d).1 = (begin_pos + msg.len()) as u32;
                             (*d).2 = ticks;
@@ -348,7 +348,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             TOKEN_SUBPACKAGE => {
                 if let Some(d) = self.msg_cache.get_mut(&ext){
                     if (*d).0.len() != msg_len { return None; }
-                    if ticks > (*d).2 {
+                    if ticks >= (*d).2 {
                         (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
                         (*d).1 = (begin_pos + msg.len()) as u32;
                         (*d).2 = ticks;
@@ -360,7 +360,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                 let mut pop = false;
                 if let Some(d) = self.msg_cache.get_mut(&ext){
                     if (*d).0.len() != msg_len {return None;}
-                    if ticks > (*d).2 {
+                    if ticks >= (*d).2 {
                         (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
                         (*d).1 = (begin_pos + msg.len()) as u32;
                         (*d).2 = ticks;
