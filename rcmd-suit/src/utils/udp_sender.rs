@@ -714,25 +714,27 @@ impl DefUdpSender
         let mut msg_map = self.msg_map.lock().await;
         let cache_len = msg_map.len();
         if msg_split.is_max_unit_size(){
-            if cache_len >= curr_cache_size / 2  && times_frequency >= 3f32 {
+            if cache_len >= curr_cache_size / 2  && times_frequency > 2f32 {
                 if curr_cache_size as u16 <= self.min_cache_size
                 {
                     msg_split.down_unit_size();
-                    //self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
+                    self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
+                    println!("down unit size curr = {} ",msg_split.unit_size());
                 }else{
-                    let v = self.adjust_cache_size_no_await(&mut cache_size,-1,5);
-                    println!("down cache size curr = {} ",v);
+                    *cache_size = self.min_cache_size;
+                    msg_split.down_unit_size();
+                    self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
+                    println!("down unit size curr = {} ",msg_split.unit_size());
                 }
             }else if cache_len == curr_cache_size && times_frequency <= 1f32 {
                 let v = self.adjust_cache_size_ex(&mut cache_size,1);
                 println!("up cache size curr = {} ",v);
             }
         }else{
-            if cache_len >= curr_cache_size / 2  && times_frequency >= 3f32 {
-                let v = self.adjust_cache_size_no_await(&mut cache_size,-1,5);
-                println!("down cache size curr = {} ",v);
+            if cache_len >= curr_cache_size / 2  && times_frequency > 2f32 {
+                *cache_size = self.min_cache_size;
                 msg_split.down_unit_size();
-                //self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
+                self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
                 println!("down unit size curr = {} ",msg_split.unit_size());
             }else if cache_len == curr_cache_size && times_frequency <= 1f32 {
                 msg_split.up_unit_size();
@@ -747,13 +749,15 @@ impl DefUdpSender
         println!("try_recovery_msg  b");
         let mut queue = self.queue.lock().await;
         if !queue.is_empty() {
-            let mut i = (queue.len() - 1) as isize;
+            let mut i = (queue.len()) as isize;
             loop {
+                i -= 1;
+                if i < 0 { break; }
                 if let Some(id) = queue.get_mut(i as usize)
                 {
-                    if let Some(ref sub_id ) = (*id).1{
-                        if msg_split.recovery(*sub_id){
-                            print!("Recovery id {} mid {} " ,*sub_id,(*id).0);
+                    if let Some(ref sub_id) = (*id).1 {
+                        if msg_split.recovery(*sub_id) {
+                            print!("Recovery id {} mid {} ", *sub_id, (*id).0);
                             if let Some(msg) = msg_map.get_mut(&(*id).0)
                             {
                                 print!("Recovery step2 \n");
@@ -765,13 +769,11 @@ impl DefUdpSender
                                 (*id).1 = None;
                             }
                         }
-                    }else { continue; }
+                    }
                 }
-                i -= 1;
-                if i <= 0 { break;}
             }
         }
-        println!("try_recovery_msg  e");
+        println!("try_recovery_msg  e ----------------");
     }
 
     async fn get_cache_len(&self) ->usize
@@ -1048,7 +1050,7 @@ impl UdpSender for DefUdpSender
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
         let max_cache_size = 10;
         let max_len = 65500 - (Self::package_len() + 16);
-        let min_len = 1500 - Self::package_len();
+        let min_len = 1472 - (Self::package_len() + 16);
         DefUdpSender{
             addr,
             sock,
@@ -1063,9 +1065,9 @@ impl UdpSender for DefUdpSender
             expect_id: Arc::new(Mutex::new(1)),
             recv_cache: Arc::new(Mutex::new(HashMap::new())),
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
-            timeout: Duration::from_millis(400),
+            timeout: Duration::from_millis(500),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 10,
+            max_retry_times: 12,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
