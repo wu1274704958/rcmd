@@ -100,7 +100,7 @@ pub struct DefUdpSender{
     msg_cache_on_no_sid: Arc<Mutex<VecDeque<Vec<u8>>>>,
     adjust_cache_size_time:Arc<Mutex<SystemTime>>,
     avg_retry_times: Arc<Mutex<(u32,f32)>>,
-    data_current_limiter:Arc<DataCurrentLimiter>
+    //data_current_limiter:Arc<DataCurrentLimiter>
 }
 
 #[derive(Clone)]
@@ -729,6 +729,8 @@ impl DefUdpSender
             }
         }else{
             if cache_len >= curr_cache_size / 2  && times_frequency >= 3f32 {
+                let v = self.adjust_cache_size_no_await(&mut cache_size,-1,5);
+                println!("down cache size curr = {} ",v);
                 msg_split.down_unit_size();
                 //self.try_recovery_msg(&mut msg_map,&mut msg_split).await;
                 println!("down unit size curr = {} ",msg_split.unit_size());
@@ -1044,7 +1046,7 @@ impl UdpSender for DefUdpSender
     }
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        let max_cache_size = 50;
+        let max_cache_size = 10;
         let max_len = 65500 - (Self::package_len() + 16);
         let min_len = 1500 - Self::package_len();
         DefUdpSender{
@@ -1063,7 +1065,7 @@ impl UdpSender for DefUdpSender
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
             timeout: Duration::from_millis(400),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 72,
+            max_retry_times: 10,
             msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
@@ -1071,10 +1073,10 @@ impl UdpSender for DefUdpSender
             msg_cache_on_no_sid: Arc::new(Mutex::new(VecDeque::new())),
             adjust_cache_size_time: Arc::new(Mutex::new(SystemTime::now())),
             avg_retry_times: Arc::new(Mutex::new((0,0f32))),
-            data_current_limiter: Arc::new(DataCurrentLimiter::new(
-                Duration::from_millis(20),
-                (1024*1024*5) / (1000/20) ,10,10
-            ))
+            // data_current_limiter: Arc::new(DataCurrentLimiter::new(
+            //     Duration::from_millis(20),
+            //     (1024*1024*4) / (1000/20) ,10,10
+            // ))
         }
     }
 
@@ -1173,10 +1175,11 @@ impl UdpSender for DefUdpSender
                     {
                         if dur > self.timeout
                         {
-                            if self.data_current_limiter.can_send(v.len()).await
+                            //if self.data_current_limiter.can_send(v.len()).await
                             {
                                 *t = SystemTime::now();
                                 *times += 1;
+                                //println!("send {} {} {}",*id,times,v.len());
                                 Self::send_ex(self.sock.clone(), self.addr, v.as_slice()).await?;
                             }
                         }
@@ -1196,7 +1199,7 @@ impl UdpSender for DefUdpSender
                     };
                     match self.warp(v,ext,tag, sub_head,rid).await{
                         Ok(v) => {
-                            if self.data_current_limiter.can_send(v.len()).await
+                            //if self.data_current_limiter.can_send(v.len()).await
                             {
                                 self.send(v.as_slice()).await?;
                             }
