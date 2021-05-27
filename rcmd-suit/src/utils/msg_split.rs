@@ -301,7 +301,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             logic_id:0,
             max_unit_size,
             min_unit_size,
-            unit_size:max_unit_size,
+            unit_size:(max_unit_size+min_unit_size)/2,
             wait_split_queue:VecDeque::new(),
             curr_idx: None,
             cache_size: 3,
