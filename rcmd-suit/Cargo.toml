@@ -29,7 +29,6 @@ async-trait = "0.1.42"
 ahash = "0.6.3"
 uuid = { version = "0.8", features = [ "v4"] }
 num_enum = "0.5.1"
-chrono = "0.4.19"
 
 
 [target.'cfg(target_os = "windows")'.dependencies]

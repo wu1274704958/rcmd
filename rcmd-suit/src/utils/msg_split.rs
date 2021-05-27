@@ -4,8 +4,6 @@ use std::mem::size_of;
 use crate::tools::{TOKEN_SUBPACKAGE, TOKEN_SUBPACKAGE_END, TOKEN_SUBPACKAGE_BEGIN, TOKEN_NORMAL};
 use crate::ext_code::*;
 use std::time::SystemTime;
-use chrono::prelude::*;
-use chrono::Local;
 use crate::utils::stream_parser::{Stream,StreamParse};
 use std::process::abort;
 
@@ -198,13 +196,14 @@ impl MsgSplit for DefMsgSplit
 }
 
 pub enum MsgSlicesInfo {
-    Complete(u32),
+    Complete,
     Part(Vec<u8>),
 }
 
 pub struct DefUdpMsgSplit
 {
-    msg_cache:HashMap<u32,(Vec<u8>,u32,i64)>,
+    msg_cache:HashMap<u32,(Vec<u8>,u32,u128)>,
+    last_pop_logic_id:Option<u32>,
     logic_id:u32,
     max_unit_size:usize,
     min_unit_size:usize,
@@ -212,7 +211,8 @@ pub struct DefUdpMsgSplit
     curr_idx:Option<usize>,
     wait_split_queue:VecDeque<(Vec<u8>,usize,u32)>,
     recovery_info : VecDeque<(u32,u32,u32)>,
-    cache_size:usize
+    cache_size:usize,
+    next_idx:Option<usize>
 }
 
 impl DefUdpMsgSplit{
@@ -261,6 +261,35 @@ impl DefUdpMsgSplit{
             self.curr_idx = None;
         }
     }
+
+    fn greater_than(a:u32,b:u32)->bool{
+        const R:u32 = 1000;
+        if (a > u32::max_value() - R && a <= u32::max_value()) && (b >= 0 && b < 1000) ||
+            (b > u32::max_value() - R && b <= u32::max_value()) && (a >= 0 && a < 1000)
+        {
+            return a < b;
+        }
+        a > b
+    }
+}
+
+#[test]
+fn test_greater_than()
+{
+    assert_eq!(DefUdpMsgSplit::greater_than(0,2),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(3,5),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(6,288),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(0,1000000),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(1000000,0),true);
+    assert_eq!(DefUdpMsgSplit::greater_than(u32::max_value() - 89,2),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(u32::max_value(),2),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(u32::max_value() - 89,0),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(0 ,u32::max_value() - 999),true);
+    assert_eq!(DefUdpMsgSplit::greater_than(999 ,u32::max_value() - 999),true);
+    assert_eq!(DefUdpMsgSplit::greater_than(999 ,u32::max_value()),true);
+    assert_eq!(DefUdpMsgSplit::greater_than(u32::max_value() - 999,0 ),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(u32::max_value() - 999,999 ),false);
+    assert_eq!(DefUdpMsgSplit::greater_than(u32::max_value(),999 ),false);
 }
 
 impl UdpMsgSplit for DefUdpMsgSplit {
@@ -274,7 +303,9 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             wait_split_queue:VecDeque::new(),
             curr_idx: None,
             cache_size: 3,
-            recovery_info : VecDeque::new()
+            recovery_info : VecDeque::new(),
+            next_idx :None,
+            last_pop_logic_id : None
         }
     }
 
@@ -319,9 +350,12 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     }
 
     fn merge<'a>(&mut self, msg:&[u8],ext:u32,tag:u8,sub_head:&[u8]) -> Option<Vec<u8>> {
+        if let Some(last_lid) = self.last_pop_logic_id{
+            if last_lid == ext || Self::greater_than(last_lid,ext){  return None;  }
+        }
         //dbg!(sub_head);
         let mut stream = Stream::new(sub_head);
-        let ticks = i64::stream_parse(&mut stream).unwrap();
+        let ticks = u128::stream_parse(&mut stream).unwrap();
         let begin_pos = u32::stream_parse(&mut stream).unwrap() as usize;
         let msg_len = u32::stream_parse(&mut stream).unwrap() as usize;
         if msg_len == 0 { return None; }
@@ -332,7 +366,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                 {
                     if let Some(d) = self.msg_cache.get_mut(&ext){
                         if (*d).0.len() != msg_len { return None; }
-                        //if ticks >= (*d).2
+                        if ticks > (*d).2
                         {
                             (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
                             (*d).1 = (begin_pos + msg.len()) as u32;
@@ -349,7 +383,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             TOKEN_SUBPACKAGE => {
                 if let Some(d) = self.msg_cache.get_mut(&ext){
                     if (*d).0.len() != msg_len { return None; }
-                    //if ticks >= (*d).2
+                    if ticks > (*d).2
                     {
                         (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
                         (*d).1 = (begin_pos + msg.len()) as u32;
@@ -362,7 +396,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                 let mut pop = false;
                 if let Some(d) = self.msg_cache.get_mut(&ext){
                     if (*d).0.len() != msg_len {return None;}
-                    //if ticks >= (*d).2
+                    if ticks > (*d).2
                     {
                         (&mut (*d).0[begin_pos..(begin_pos + msg.len())]).copy_from_slice(msg);
                         (*d).1 = (begin_pos + msg.len()) as u32;
@@ -373,6 +407,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                 if pop {
                     if let Some(d) = self.msg_cache.remove(&ext)
                     {
+                        self.last_pop_logic_id = Some(ext);
                         return Some(d.0);
                     }
                 }
@@ -420,21 +455,31 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         let mut recovery_info = None;
         let mut move_next = false;
         let wait_split_queue_len = self.wait_split_queue.len();
-        //(data begin_pos id )
+        ///(data begin_pos id )
         let res = if let Some(v) = self.wait_split_queue.get_mut(curr_idx)
         {
-            let end = (*v).0.len() - (*v).1 <= self.unit_size;
-            let e = if end { (*v).0.len()  } else{ (*v).1 + self.unit_size};
-            let sli =  &(*v).0[(*v).1..e] ;
+            let mut end = (*v).0.len() - (*v).1 <= self.unit_size;
+            let mut e = if end { (*v).0.len()  } else{ (*v).1 + self.unit_size};
+            let mut sli =  &(*v).0[(*v).1..e] ;
             let begin = (*v).1 == 0;
+
+            if (begin && end) && sli.len() > self.min_unit_size {
+                end = false;
+            }
+
             if begin && end {
                 move_next = true;
-                recovery_info = Some(((*v).2,0,curr_idx as u32));
-                Some((sli,0,TOKEN_NORMAL,MsgSlicesInfo::Complete((*v).2)))
+                recovery_info = None;//Some(((*v).2,0,curr_idx as u32));
+                if (*v).1 == 0{
+                    (*v).1 = e;
+                    Some((sli,0,TOKEN_NORMAL,MsgSlicesInfo::Complete))
+                }else{
+                    None
+                }
             }else {
-                let ticks = Local::now().timestamp_nanos();
+                let ticks = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
 
-                let mut sub_head = Vec::with_capacity(size_of::<i64>() + size_of::<u32>() * 2);
+                let mut sub_head = Vec::with_capacity(size_of::<u128>() + size_of::<u32>() * 2);
                 sub_head.extend_from_slice(&ticks.to_be_bytes());
                 sub_head.extend_from_slice(&((*v).1 as u32).to_be_bytes()); //Begin pos
                 sub_head.extend_from_slice(&((*v).0.len() as u32).to_be_bytes());//Message length
@@ -460,7 +505,10 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         }
         if move_next {
             let mut v = self.curr_idx.unwrap();
-            if v + 1 < wait_split_queue_len
+            if self.next_idx.is_some(){
+                self.curr_idx = self.next_idx;
+                self.next_idx = None;
+            }else if v + 1 < wait_split_queue_len
             {
                 self.curr_idx = Some(v + 1);
             }else{
@@ -471,6 +519,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     }
 
     fn recovery(&mut self, id: u32) -> bool {
+        ///(id begin_pos idx)
         if let Some(v) = self.recovery_info.back(){
             if (*v).0 != id {
                 return false;
@@ -481,6 +530,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         let info = self.recovery_info.pop_back().unwrap();
         //println!("reco {:?}",info);
         self.curr_idx = Some(info.2 as usize);
+        ///(data begin_pos id)
         if let Some(msg) = self.wait_split_queue.get_mut(info.2 as usize)
         {
             (*msg).1 = info.1 as usize;

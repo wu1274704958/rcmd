@@ -263,7 +263,7 @@ impl DefUdpSender
 
     fn warp_ex(v:&[u8],ext:u32,tag:u8,mid:usize,sid:u128,sub_head:Option<&[u8]>)->Vec<u8>
     {
-        assert!(!v.is_empty());
+        //assert!(!v.is_empty());
         let len = v.len() + Self::package_len() + if let Some(sub) = sub_head{ sub.len() }else { 0 };
         let mut res = Vec::with_capacity(len);
         res.push(Self::magic_num_0());
@@ -1049,8 +1049,10 @@ impl UdpSender for DefUdpSender
 
     fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
         let max_cache_size = 1;
-        let max_len = 65500 - (Self::package_len() + 16);
-        let min_len = 1472 - (Self::package_len() + 16);
+        ///消息分割器 的子协议头所占的字节数
+        const sub_head_size:usize = size_of::<u128>() + size_of::<u32>() * 2;
+        let max_len = 65500 - (Self::package_len() + sub_head_size);
+        let min_len = 1472 - (Self::package_len() + sub_head_size);
         DefUdpSender{
             addr,
             sock,
@@ -1197,7 +1199,7 @@ impl UdpSender for DefUdpSender
                 //println!("pop msg");
                 if let Some((v,ext,tag,msg_slices_info)) = msg_split.pop_msg(){
                     let (sub_head,rid) = match msg_slices_info{
-                        MsgSlicesInfo::Complete(rid) => {  (None,Some(rid))  }
+                        MsgSlicesInfo::Complete => {  (None,None)  }
                         MsgSlicesInfo::Part(ref v) => { (Some(v.as_slice()),Some(ext)) }
                     };
                     match self.warp(v,ext,tag, sub_head,rid).await{

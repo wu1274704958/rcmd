@@ -1563,7 +1563,6 @@ dependencies = [
  "args",
  "async-std",
  "async-trait",
- "chrono",
  "encoding_rs",
  "flate2",
  "futures",
