@@ -261,7 +261,7 @@ fn on_save_file(name:&str,len:usize,ext:u32)
             println!("recv file {} {} bytes!",name,len);
         }
         EXT_SAVE_FILE_ELF => {
-            println!("recv file {} complete!",name);
+            println!("recv file {} complete size {} bytes!",name,len);
         }
         _=>{}
     }
@@ -288,6 +288,7 @@ fn handle_sub_cmd(lid:usize,mut s:String,msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,
                     let mut buf = Vec::with_capacity(SEND_BUF_SIZE);
                     buf.resize(SEND_BUF_SIZE,0);
                     let mut is_first = true;
+                    let mut bytes = 0;
                     loop {
                         let mut d = head_v.clone();
                         match f.read(&mut buf[..]){
@@ -296,10 +297,12 @@ fn handle_sub_cmd(lid:usize,mut s:String,msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,
                                 if n <= 0
                                 {
                                     send(&msg_queue,d,EXT_SEND_FILE_ELF);
+                                    println!("file size {}",bytes);
                                     break;
                                 }else{
                                     d.reserve(n);
-                                    for i in 0..n { d.push(buf[i]);  }
+                                    d.extend_from_slice(&buf[0..n]);
+                                    bytes += n;
                                     send(&msg_queue,d,if is_first {EXT_SEND_FILE_CREATE}else{EXT_SEND_FILE});
                                     is_first = false;
                                 }

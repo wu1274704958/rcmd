@@ -10,7 +10,7 @@ use rcmd_suit::client_handler::SubHandle;
 
 pub struct SaveFile
 {
-    file_map:Arc<Mutex<HashMap<String,File>>>,
+    file_map:Arc<Mutex<HashMap<String,(File,usize)>>>,
     observer:Option<Box<fn(&str,usize,u32)>>
 }
 
@@ -111,7 +111,7 @@ impl SubHandle for SaveFile
                     b.iter().for_each(|it|{rd.push(*it)});
                     if let Ok(mut fm) = self.file_map.lock()
                     {
-                        fm.insert(name.clone(), f);
+                        fm.insert(name.clone(), (f,l));
                         self.observe(name.as_str(),l,ext);
                         return Some((ret(&id_buf,rd), EXT_SAVE_FILE_CREATE));
                     }
@@ -129,11 +129,12 @@ impl SubHandle for SaveFile
 
             if let Ok(mut fm) = self.file_map.lock()
             {
-                if let Some(f) = fm.get_mut(&name)
+                if let Some((f,byte_size)) = fm.get_mut(&name)
                 {
                     let file_data = &data[(name_e.clone()+1)..];
                     if let Ok(l) = f.write(file_data)
                     {
+                        *byte_size += l;
                         let b = (l as u32).to_be_bytes();
                         b.iter().for_each(|it|{rd.push(*it)});
                         self.observe(name.as_str(),l,ext);
@@ -154,15 +155,15 @@ impl SubHandle for SaveFile
         }else if ext == EXT_SAVE_FILE_ELF{
             if let Ok(mut fm) = self.file_map.lock()
             {
-                if let Some(f) = fm.get_mut(&name)
+                if let Some((f,byte_size)) = fm.get_mut(&name)
                 {
+                    self.observe(name.as_str(),*byte_size,ext);
                     f.sync_all().unwrap();
                 }else{
                     let mut ve = ret_ext(&id_buf,EXT_ERR_FILE_NAME_NOT_EXITS);
                     ve.append(&mut rd);
                     return Some((ve, EXT_ERR_SAVE_FILE_RET_EXT));
                 }
-                self.observe(name.as_str(),0,ext);
                 if let Some(k) = fm.remove(&name)
                 {
                     return Some((ret(&id_buf,rd),EXT_SAVE_FILE_ELF));
