@@ -209,8 +209,10 @@ pub struct DefUdpMsgSplit
     min_unit_size:usize,
     unit_size:usize,
     curr_idx:Option<usize>,
-    wait_split_queue:VecDeque<(Vec<u8>,usize,u32)>,
-    recovery_info : VecDeque<(u32,u32,u32)>,
+    ///data begin_pos lid sub_msg_idx
+    wait_split_queue:VecDeque<(Vec<u8>,usize,u32,u32)>,
+    ///lid begin_pos idx sub_msg_idx
+    recovery_info : VecDeque<(u32,u32,u32,u32)>,
     cache_size:usize,
     next_idx:Option<usize>
 }
@@ -358,8 +360,9 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         let ticks = u128::stream_parse(&mut stream).unwrap();
         let begin_pos = u32::stream_parse(&mut stream).unwrap() as usize;
         let msg_len = u32::stream_parse(&mut stream).unwrap() as usize;
+        let sub_idx = u32::stream_parse(&mut stream).unwrap();
         if msg_len == 0 { return None; }
-        //println!("b {:?} tick {:?} data len {:?} ",begin_pos,ticks,msg_len);
+        //println!("{:?} b {:?} tick {:?} data len {:?} ",sub_idx,begin_pos,ticks,msg_len);
         match tag {
             TOKEN_SUBPACKAGE_BEGIN => {
                 if self.msg_cache.contains_key(&ext)
@@ -438,7 +441,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     {
         self.check_wait_split_queue();
         let id = self.get_id();
-        self.wait_split_queue.push_back((v,0,id));
+        self.wait_split_queue.push_back((v,0,id,0));
         if let None = self.curr_idx
         {
             self.curr_idx = Some(self.wait_split_queue.len() - 1);
@@ -455,7 +458,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         let mut recovery_info = None;
         let mut move_next = false;
         let wait_split_queue_len = self.wait_split_queue.len();
-        ///(data begin_pos id )
+        ///data begin_pos lid sub_msg_idx
         let res = if let Some(v) = self.wait_split_queue.get_mut(curr_idx)
         {
             let mut end = (*v).0.len() - (*v).1 <= self.unit_size;
@@ -483,13 +486,14 @@ impl UdpMsgSplit for DefUdpMsgSplit {
                 sub_head.extend_from_slice(&ticks.to_be_bytes());
                 sub_head.extend_from_slice(&((*v).1 as u32).to_be_bytes()); //Begin pos
                 sub_head.extend_from_slice(&((*v).0.len() as u32).to_be_bytes());//Message length
+                sub_head.extend_from_slice(&(*v).3.to_be_bytes());//sub_msg_idx
 
                 let ext = (*v).2;
-
-                recovery_info = Some(((*v).2, (*v).1 as u32, curr_idx as u32));
+                //lid begin_pos idx sub_msg_idx
+                recovery_info = Some(((*v).2, (*v).1 as u32, curr_idx as u32,(*v).3));
 
                 (*v).1 = e;
-
+                (*v).3 += 1;
                 let tag = if begin {
                     TOKEN_SUBPACKAGE_BEGIN
                 } else if end {
@@ -519,10 +523,16 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     }
 
     fn recovery(&mut self, id: u32) -> bool {
-        ///(id begin_pos idx)
+        ///lid begin_pos idx sub_msg_idx
         if let Some(v) = self.recovery_info.back(){
             if (*v).0 != id {
                 return false;
+            }
+            if let Some(idx) = self.curr_idx{
+                if (*v).2 as usize > idx
+                {
+                    return false;
+                }
             }
         }else{
             return false;
@@ -530,10 +540,11 @@ impl UdpMsgSplit for DefUdpMsgSplit {
         let info = self.recovery_info.pop_back().unwrap();
         //println!("reco {:?}",info);
         self.curr_idx = Some(info.2 as usize);
-        ///(data begin_pos id)
+        ///data begin_pos lid sub_msg_idx
         if let Some(msg) = self.wait_split_queue.get_mut(info.2 as usize)
         {
             (*msg).1 = info.1 as usize;
+            (*msg).3 = info.3;
         }else{
             println!("Not find recovery message!");
             abort();
