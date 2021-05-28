@@ -15,3 +15,4 @@ pub mod db;
 pub mod tools;
 #[macro_use]
 pub mod servers;
+pub mod client_plug;

@@ -35,7 +35,7 @@ async fn main() -> io::Result<()>
             return Ok(());
         }
     };
-    let mut ip = IpAddr::from_str("0.0.0.0").unwrap();
+    let ip = IpAddr::from_str("0.0.0.0").unwrap();
 
     let msg_queue = Arc::new(Mutex::new(VecDeque::<(Vec<u8>, u32)>::new()));
     if args.acc.is_some(){
@@ -64,13 +64,13 @@ async fn main() -> io::Result<()>
 
     {
         let msg_queue = msg_queue.clone();
-        let client = UdpClient::with_msg_queue_runing(
+        let client = Arc::new( UdpClient::with_msg_queue_runing(
             (ip, args.bind_port),
             Arc::new(handler),
             DefParser::new(),
             msg_queue.clone(),
             is_runing
-        );
+        ));
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
         let run = client.run::<DefUdpSender>(args.ip,args.port,msg_split_ignore,msg_split_ignore);
