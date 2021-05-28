@@ -1,4 +1,4 @@
-use tokio::{io};
+use tokio::{io,sync::Mutex};
 use tokio::prelude::*;
 mod extc;
 mod model;
@@ -8,7 +8,7 @@ extern crate lazy_static;
 extern crate get_if_addrs;
 mod comm;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::str::FromStr;
 
 
@@ -41,7 +41,7 @@ async fn main() -> io::Result<()>
     if args.acc.is_some(){
         let user = model::user::MinUser{ acc: args.acc.unwrap(),pwd:args.pwd.unwrap()};
         let s = serde_json::to_string(&user).unwrap();
-        send(&msg_queue,s.into_bytes(),EXT_LOGIN);
+        send(&msg_queue,s.into_bytes(),EXT_LOGIN).await;
     }
     let is_runing = Arc::new(Mutex::new(true));
     let mut handler = DefHandler::new();
@@ -83,13 +83,9 @@ async fn main() -> io::Result<()>
 async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc<Mutex<bool>>) -> io::Result<()>
 {
     loop {
-        if let Ok(v) = is_runing.lock()
         {
-            if !*v {
-                break;
-            }
-        } else {
-            break;
+            let is_runing = is_runing.lock().await;
+            if !*is_runing { break; }
         }
         let mut cmd = String::new();
         let mut vec = vec![];
@@ -109,13 +105,13 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
 
         match cmds[0] {
             "-" => {
-                let mut v = is_runing.lock().unwrap();
+                let mut v = is_runing.lock().await;
                 *v = false;
                 return Ok(());
             }
             "0" => {
                 if cmds.len() < 2 {continue;}
-                send(&msg_queue,cmds[1].into(),0);
+                send(&msg_queue,cmds[1].into(),0).await;
             },
             "1" => {
                 if cmds.len() < 3 {continue;}
@@ -137,12 +133,12 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                                     //println!("==== {} ====",n);
                                     if n <= 0
                                     {
-                                        send(&msg_queue,d,EXT_UPLOAD_FILE_ELF);
+                                        send(&msg_queue,d,EXT_UPLOAD_FILE_ELF).await;
                                         break;
                                     }else{
                                         d.reserve(n);
                                         for i in 0..n { d.push(buf[i]);  }
-                                        send(&msg_queue,d,if is_first {EXT_UPLOAD_FILE_CREATE}else{EXT_UPLOAD_FILE});
+                                        send(&msg_queue,d,if is_first {EXT_UPLOAD_FILE_CREATE}else{EXT_UPLOAD_FILE}).await;
                                         is_first = false;
                                     }
                                 }
@@ -163,10 +159,10 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                 let pwd = cmds[2].trim().to_string();
                 let user = model::user::MinUser{acc,pwd};
                 let s = serde_json::to_string(&user).unwrap();
-                send(&msg_queue,s.into_bytes(),EXT_LOGIN);
+                send(&msg_queue,s.into_bytes(),EXT_LOGIN).await;
             }
             "3" => {
-                send(&msg_queue,vec![],EXT_LOGOUT);
+                send(&msg_queue,vec![],EXT_LOGOUT).await;
             }
             "4" => {
                 if cmds.len() < 4 {continue;}
@@ -175,10 +171,10 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                 let name = cmds[3].trim().to_string();
                 let user = model::user::RegUser{acc,pwd,name};
                 let s = serde_json::to_string(&user).unwrap();
-                send(&msg_queue,s.into_bytes(),EXT_REGISTER);
+                send(&msg_queue,s.into_bytes(),EXT_REGISTER).await;
             }
             "5" => {
-                send(&msg_queue,vec![],EXT_GET_USERS);
+                send(&msg_queue,vec![],EXT_GET_USERS).await;
             }
             "6" => {
                 if cmds.len() < 3 {continue;}
@@ -188,12 +184,12 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                 };
                 let msg = cmds[2].trim().to_string();
                 let su = model::SendMsg{lid,msg};
-                send(&msg_queue,serde_json::to_string(&su).unwrap().into_bytes(),EXT_SEND_MSG);
+                send(&msg_queue,serde_json::to_string(&su).unwrap().into_bytes(),EXT_SEND_MSG).await;
             }
             "7" => {
                 if cmds.len() < 2 {continue;}
                 let msg = cmds[1].trim().to_string();
-                send(&msg_queue,msg.into_bytes(),EXT_SEND_BROADCAST);
+                send(&msg_queue,msg.into_bytes(),EXT_SEND_BROADCAST).await;
             }
             "8" => {
                 if cmds.len() < 2 {continue;}
@@ -214,7 +210,7 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                     let s = String::from_utf8_lossy(vec.as_slice()).trim().to_string();
                     if s.as_bytes()[0] == b'#'
                     {
-                        handle_sub_cmd(lid,s,msg_queue.clone());
+                        handle_sub_cmd(lid,s,msg_queue.clone()).await;
                         continue;
                     }
                     match s.trim(){
@@ -223,7 +219,7 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                         }
                         _=>{
                             let su = model::SendMsg { lid, msg: s.trim().to_string() };
-                            send(&msg_queue, serde_json::to_string(&su).unwrap().into_bytes(), EXT_RUN_CMD);
+                            send(&msg_queue, serde_json::to_string(&su).unwrap().into_bytes(), EXT_RUN_CMD).await;
                         }
                     }
                 }
@@ -246,8 +242,8 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
     Ok(())
 }
 
-fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
-    let mut a = queue.lock().unwrap();
+async fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
+    let mut a = queue.lock().await;
     {
         a.push_back((data,ext));
     }
@@ -269,7 +265,7 @@ fn on_save_file(name:&str,len:usize,ext:u32)
 
 }
 
-fn handle_sub_cmd(lid:usize,mut s:String,msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)
+async fn handle_sub_cmd(lid:usize,mut s:String,msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)
 {
     s.remove(0);
     let cmds:Vec<&str> = s.split(" ").collect();
@@ -296,14 +292,14 @@ fn handle_sub_cmd(lid:usize,mut s:String,msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,
                                 //println!("==== {} ====",n);
                                 if n <= 0
                                 {
-                                    send(&msg_queue,d,EXT_SEND_FILE_ELF);
+                                    send(&msg_queue,d,EXT_SEND_FILE_ELF).await;
                                     println!("file size {}",bytes);
                                     break;
                                 }else{
                                     d.reserve(n);
                                     d.extend_from_slice(&buf[0..n]);
                                     bytes += n;
-                                    send(&msg_queue,d,if is_first {EXT_SEND_FILE_CREATE}else{EXT_SEND_FILE});
+                                    send(&msg_queue,d,if is_first {EXT_SEND_FILE_CREATE}else{EXT_SEND_FILE}).await;
                                     is_first = false;
                                 }
                             }
@@ -330,7 +326,7 @@ fn handle_sub_cmd(lid:usize,mut s:String,msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,
             };
             let s = serde_json::to_string(&pull_msg).unwrap();
             head_v.extend_from_slice(s.as_bytes());
-            send(&msg_queue,head_v,EXT_PULL_FILE_S);
+            send(&msg_queue,head_v,EXT_PULL_FILE_S).await;
         }
         _ => {}
     }

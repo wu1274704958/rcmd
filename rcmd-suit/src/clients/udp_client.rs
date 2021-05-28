@@ -1,8 +1,8 @@
 
-use std::{collections::VecDeque, io, net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs}, sync::{Arc,Mutex}, time::{Duration, SystemTime}};
+use std::{collections::VecDeque, io, net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs}, sync::{Arc}, time::{Duration, SystemTime}};
 use std::vec::Vec;
 use tokio::{io::AsyncWriteExt, net::{UdpSocket}, time::sleep};
-
+use tokio::sync::Mutex;
 use crate::{agreement::{Agreement, Message}, asy_cry::{DefAsyCry,AsyCry,EncryptRes,NoAsyCry},  subpackage::{DefSubpackage,Subpackage}, utils::msg_split::{DefMsgSplit,MsgSplit}};
 use crate::utils::udp_sender::{DefUdpSender,UdpSender,USErr};
 use crate::tools::platform_handle;
@@ -21,7 +21,8 @@ pub struct UdpClient<T,A>
     pub nomsg_rest_dur:Duration,
     bind_addr:SocketAddr,
     pub buf_size:usize,
-    parser:A
+    parser:A,
+    local_addr:Arc<Mutex<Option<SocketAddr>>>
 }
 
 fn socket_addr_conv<T:ToSocketAddrs>(t:T) -> io::Result<SocketAddr>{
@@ -38,11 +39,12 @@ impl <'a,T,A> UdpClient<T,A>
             msg_queue : Arc::new(Mutex::new(VecDeque::new())),
             runing:Arc::new(Mutex::new(true)),
             handler,
-            heartbeat_dur:Duration::from_secs(10),
+            heartbeat_dur:Duration::from_secs(5),
             nomsg_rest_dur:Duration::from_millis(1),
             parser,
             bind_addr : socket_addr_conv(bind_addr).unwrap(),
-            buf_size:1024 * 1024 * 10
+            buf_size:1024 * 1024 * 10,
+            local_addr: Arc::new(Mutex::new(None))
         }
     }
 
@@ -58,7 +60,8 @@ impl <'a,T,A> UdpClient<T,A>
             nomsg_rest_dur,
             parser,
             bind_addr:socket_addr_conv(bind_addr).unwrap(),
-            buf_size:1024 * 1024 * 10
+            buf_size:1024 * 1024 * 10,
+            local_addr: Arc::new(Mutex::new(None))
         }
     }
 
@@ -69,11 +72,12 @@ impl <'a,T,A> UdpClient<T,A>
             msg_queue,
             runing:Arc::new(Mutex::new(true)),
             handler,
-            heartbeat_dur:Duration::from_secs(10),
+            heartbeat_dur:Duration::from_secs(5),
             nomsg_rest_dur:Duration::from_millis(1),
             parser,
             bind_addr: socket_addr_conv(bind_addr).unwrap(),
-            buf_size:1024 * 1024 * 10
+            buf_size:1024 * 1024 * 10,
+            local_addr: Arc::new(Mutex::new(None))
         }
     }
 
@@ -85,36 +89,42 @@ impl <'a,T,A> UdpClient<T,A>
             msg_queue,
             runing,
             handler,
-            heartbeat_dur:Duration::from_secs(10),
+            heartbeat_dur:Duration::from_secs(5),
             nomsg_rest_dur:Duration::from_millis(1),
             parser,
             bind_addr: socket_addr_conv(bind_addr).unwrap(),
-            buf_size:1024 * 1024 * 10
+            buf_size:1024 * 1024 * 10,
+            local_addr: Arc::new(Mutex::new(None))
         }
     }
 
-    pub fn send(&self,data: Vec<u8>,ext:u32) {
-        let mut a = self.msg_queue.lock().unwrap();
+    pub async fn get_local_addr(&self,data: Vec<u8>,ext:u32) -> Option<SocketAddr> {
+        let mut addr = self.local_addr.lock().await;
+        *addr
+    }
+
+    pub async fn send(&self,data: Vec<u8>,ext:u32) {
+        let mut a = self.msg_queue.lock().await;
         {
             a.push_back((data,ext));
         }
     }
 
-    pub fn stop(&self)
+    pub async fn stop(&self)
     {
-        let mut b = self.runing.lock().unwrap();
+        let mut b = self.runing.lock().await;
         *b = false;
     }
 
-    pub fn still_runing(&self)->bool
+    pub async fn still_runing(&self)->bool
     {
-        let b = self.runing.lock().unwrap();
+        let b = self.runing.lock().await;
         *b
     }
 
-    fn pop_msg(&self)->Option<(Vec<u8>,u32)>
+    async fn pop_msg(&self)->Option<(Vec<u8>,u32)>
     {
-        let mut queue = self.msg_queue.lock().unwrap();
+        let mut queue = self.msg_queue.lock().await;
         queue.pop_front()
     }
 
@@ -126,7 +136,7 @@ impl <'a,T,A> UdpClient<T,A>
         {
             Ok(_) => { Ok(()) }
             Err(e) => {
-                self.stop();
+                self.stop().await;
                 Err(e)
             }
         }
@@ -142,6 +152,11 @@ impl <'a,T,A> UdpClient<T,A>
         platform_handle(sock.as_ref());
         let addr = SocketAddr::new(IpAddr::V4(ip), port);
         sock.connect(addr).await?;
+
+        if let Ok(addr) = sock.local_addr(){
+            let mut local_addr = self.local_addr.lock().await;
+            *local_addr = Some(addr);
+        }
 
         let mut buf = Vec::with_capacity(self.buf_size);
         buf.resize(self.buf_size,0);
@@ -172,7 +187,7 @@ impl <'a,T,A> UdpClient<T,A>
 
        let recv_worker = runtime.spawn(async move {
             let r = {
-                let r = run_cp.lock().unwrap();
+                let r = run_cp.lock().await;
                 *r
             };
             'Out: while r {
@@ -183,9 +198,9 @@ impl <'a,T,A> UdpClient<T,A>
                             {
                                 Err(USErr::EmptyMsg)=>{}
                                 Err(e)=>{
-                                    let mut err = err_cp.lock().unwrap();
+                                    let mut err = err_cp.lock().await;
                                     *err = Some(e.into());
-                                    let mut run = run_cp.lock().unwrap();
+                                    let mut run = run_cp.lock().await;
                                     *run = false;
                                     break;
                                 }
@@ -195,9 +210,9 @@ impl <'a,T,A> UdpClient<T,A>
                                 match sender_cp.check_recv(&[]).await{
                                     Err(USErr::EmptyMsg)=>{}
                                     Err(e)=>{
-                                        let mut err = err_cp.lock().unwrap();
+                                        let mut err = err_cp.lock().await;
                                         *err = Some(e.into());
-                                        let mut run = run_cp.lock().unwrap();
+                                        let mut run = run_cp.lock().await;
                                         *run = false;
                                         break 'Out;
                                     }
@@ -208,9 +223,9 @@ impl <'a,T,A> UdpClient<T,A>
                     }
                     Err(e) => {
                         eprintln!("recv from {:?}",e);
-                        let mut err = err_cp.lock().unwrap();
+                        let mut err = err_cp.lock().await;
                         *err = Some(e.into());
-                        let mut run = run_cp.lock().unwrap();
+                        let mut run = run_cp.lock().await;
                         *run = false;
                         break;
                     }
@@ -232,9 +247,9 @@ impl <'a,T,A> UdpClient<T,A>
             // read request
             //println!("read the request....");
             {
-                let err = err.lock().unwrap();
+                let err = err.lock().await;
                 if let Some(e) = (*err).clone(){
-                    self.stop();
+                    self.stop().await;
                     recv_worker.await;
                     return Err(e);
                 }
@@ -245,7 +260,7 @@ impl <'a,T,A> UdpClient<T,A>
                 }
                 Err(USErr::EmptyMsg) => {}
                 Err(e) => {
-                    self.stop();
+                    self.stop().await;
                     recv_worker.await;
                     return Err(e);
                 }
@@ -307,14 +322,14 @@ impl <'a,T,A> UdpClient<T,A>
                     }
                     if let Some((d,e)) = self.handler.handle_ex(m)
                     {
-                        self.send(d,e);
+                        self.send(d,e).await;
                     }
                 }
                 package = None;
             }
             if let Err(e) = sender.check_send().await{
                 eprintln!("send msg error: {:?}",e);
-                self.stop();
+                self.stop().await;
                 runtime.shutdown_background();
                 return Err(e);
             }
@@ -333,7 +348,7 @@ impl <'a,T,A> UdpClient<T,A>
             }
 
             if asy.can_encrypt() {
-                let mut _data = self.pop_msg();
+                let mut _data = self.pop_msg().await;
                 if let Some(mut v) = _data {
                     if spliter.need_split(v.0.len(),v.1)
                     {
@@ -351,7 +366,7 @@ impl <'a,T,A> UdpClient<T,A>
                             {
                                 Ok(_) => { }
                                 Err(e) => {
-                                    self.stop();
+                                    self.stop().await;
                                     runtime.shutdown_background();
                                     return Err(e);
                                 }
@@ -376,14 +391,14 @@ impl <'a,T,A> UdpClient<T,A>
                 }
             }
 
-            if !self.still_runing()
+            if !self.still_runing().await
             {
                 break;
             }
 
         }
         sender.close_session().await;
-        self.stop();
+        self.stop().await;
         println!("waiting for recv worker!");
         runtime.shutdown_background();
         println!("recv worker end!");
