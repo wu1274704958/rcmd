@@ -19,6 +19,7 @@ pub trait ClientPlug:Send + Sync {
     async fn on_init(&self);
     async fn on_create_socket(&self,sock:Arc<Self::SockTy>);
     async fn on_get_err(&self,err:Self::ErrTy) where Self::ErrTy :Clone;
+    async fn on_begin(&self);
     async fn on_stop(&self);
 }
 
@@ -71,6 +72,14 @@ impl<T> ClientPluCollect<T>  where T:ClientPlug {
         {
             let plug = self.get_plug(i);
             plug.on_get_err(err.clone()).await;
+        }
+    }
+    pub async fn on_begin(&self)
+    {
+        for i in 0..self.plug_count()
+        {
+            let plug = self.get_plug(i);
+            plug.on_begin().await;
         }
     }
     pub async fn on_stop(&self)

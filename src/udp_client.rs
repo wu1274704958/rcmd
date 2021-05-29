@@ -3,6 +3,7 @@ use tokio::prelude::*;
 mod extc;
 mod model;
 mod client_handlers;
+mod client_plugs;
 #[macro_use]
 extern crate lazy_static;
 extern crate get_if_addrs;
@@ -22,7 +23,10 @@ use std::net::{SocketAddr, Ipv4Addr, SocketAddrV4, IpAddr};
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::client_handler::{DefHandler, Handle};
 use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE};
-use rcmd_suit::utils::udp_sender::DefUdpSender;
+use rcmd_suit::utils::udp_sender::{DefUdpSender, USErr};
+use rcmd_suit::client_plug::client_plug::ClientPluCollect;
+use crate::client_plugs::p2p_plugs::P2PPlug;
+use tokio::net::UdpSocket;
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -57,6 +61,8 @@ async fn main() -> io::Result<()>
         handler.add_handler(Arc::new(client_handlers::pull_file_ret::PullFileRet::new()));
     }
 
+    let mut plugs = ClientPluCollect::<P2PPlug>::new();
+
     let console = {
         let msg_queue = msg_queue.clone();
         console(msg_queue,is_runing.clone())
@@ -73,7 +79,10 @@ async fn main() -> io::Result<()>
         ));
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
-        let run = client.run::<DefUdpSender>(args.ip,args.port,msg_split_ignore,msg_split_ignore);
+        let run = client.run::<DefUdpSender,P2PPlug>(
+            args.ip,args.port,
+            msg_split_ignore,msg_split_ignore,
+        plugs);
         futures::join!(console,run);
     }
 

@@ -10,6 +10,8 @@ use async_std::io::Error;
 use async_std::future::Future;
 use crate::client_handler::Handle;
 use std::thread::Thread;
+use crate::client_plug::client_plug::{ClientPlug,ClientPluCollect};
+use std::io::Write;
 
 pub struct UdpClient<T,A>
     where T:Handle
@@ -27,6 +29,17 @@ pub struct UdpClient<T,A>
 
 fn socket_addr_conv<T:ToSocketAddrs>(t:T) -> io::Result<SocketAddr>{
     t.to_socket_addrs()?.next().ok_or(io::Error::from(io::ErrorKind::InvalidInput))
+}
+
+
+macro_rules! Stop {
+    ($S:ident,$RecvWorker:ident,$Plug:ident,$E:ident) => {
+        $Plug.on_get_err($E.clone()).await;
+        $S.stop().await;
+        $RecvWorker.shutdown_background();
+        $Plug.on_stop().await;
+        return Err($E);
+    };
 }
 
 impl <'a,T,A> UdpClient<T,A>
@@ -143,15 +156,23 @@ impl <'a,T,A> UdpClient<T,A>
     }
 
     #[allow(unused_must_use)]
-    pub async fn run<SE>(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
-                     msg_split_ignore:Option<&Vec<u32>>) -> Result<(),USErr>
+    pub async fn run<SE,CP>(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
+                     msg_split_ignore:Option<&Vec<u32>>,
+                    plug_collect:ClientPluCollect<CP>) -> Result<(),USErr>
 
-    where SE : UdpSender + Send + std::marker::Sync + 'static
+    where
+        SE : UdpSender + Send + std::marker::Sync + 'static,
+        CP : ClientPlug<SockTy = UdpSocket,ErrTy = USErr> + Send + std::marker::Sync + 'static,
+        <CP as ClientPlug>::SockTy: std::marker::Send + std::marker::Sync
     {
+        plug_collect.on_init().await;
+
         let sock = Arc::new( UdpSocket::bind(self.bind_addr).await? );
         platform_handle(sock.as_ref());
         let addr = SocketAddr::new(IpAddr::V4(ip), port);
         sock.connect(addr).await?;
+
+        plug_collect.on_create_socket(sock.clone()).await;
 
         if let Ok(addr) = sock.local_addr(){
             let mut local_addr = self.local_addr.lock().await;
@@ -184,6 +205,7 @@ impl <'a,T,A> UdpClient<T,A>
             .worker_threads(1)
             .build()
             .unwrap();
+        plug_collect.on_begin().await;
 
        let recv_worker = runtime.spawn(async move {
             let r = {
@@ -236,8 +258,7 @@ impl <'a,T,A> UdpClient<T,A>
 
         if let Ok(pub_key_data) = asy.build_pub_key().await{
             if let Err(e) =  self.write_msg(&sender, pub_key_data, 10).await{
-                runtime.shutdown_background();
-                return Err(e);
+                Stop!(self,runtime,plug_collect,e);
             }
         }
 
@@ -249,9 +270,7 @@ impl <'a,T,A> UdpClient<T,A>
             {
                 let err = err.lock().await;
                 if let Some(e) = (*err).clone(){
-                    self.stop().await;
-                    recv_worker.await;
-                    return Err(e);
+                    Stop!(self,runtime,plug_collect,e);
                 }
             };
             match sender.pop_recv_msg().await{
@@ -260,9 +279,7 @@ impl <'a,T,A> UdpClient<T,A>
                 }
                 Err(USErr::EmptyMsg) => {}
                 Err(e) => {
-                    self.stop().await;
-                    recv_worker.await;
-                    return Err(e);
+                    Stop!(self,runtime,plug_collect,e);
                 }
             }
 
@@ -298,8 +315,7 @@ impl <'a,T,A> UdpClient<T,A>
                     if let Some(v) = immediate_send
                     {
                         if let Err(e) = self.write_msg(&sender, v, m.ext).await{
-                            runtime.shutdown_background();
-                            return Err(e);
+                            Stop!(self,runtime,plug_collect,e);
                         }
                         continue;
                     }
@@ -328,10 +344,7 @@ impl <'a,T,A> UdpClient<T,A>
                 package = None;
             }
             if let Err(e) = sender.check_send().await{
-                eprintln!("send msg error: {:?}",e);
-                self.stop().await;
-                runtime.shutdown_background();
-                return Err(e);
+                Stop!(self,runtime,plug_collect,e);
             }
 
             if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
@@ -340,9 +353,7 @@ impl <'a,T,A> UdpClient<T,A>
                 {
                     heartbeat_t = SystemTime::now();
                     if let Err(e) = self.write_msg(& sender, vec![9], 9).await{
-                        eprintln!("send msg error: {:?}",e);
-                        runtime.shutdown_background();
-                        return Err(e);
+                        Stop!(self,runtime,plug_collect,e);
                     }
                 }
             }
@@ -366,9 +377,7 @@ impl <'a,T,A> UdpClient<T,A>
                             {
                                 Ok(_) => { }
                                 Err(e) => {
-                                    self.stop().await;
-                                    runtime.shutdown_background();
-                                    return Err(e);
+                                    Stop!(self,runtime,plug_collect,e);
                                 }
                             }
                         }
@@ -381,9 +390,7 @@ impl <'a,T,A> UdpClient<T,A>
                             _ => {}
                         };
                         if let Err(e) = self.write_msg(&sender, v.0, v.1).await{
-                            eprintln!("send msg error: {:?}",e);
-                            runtime.shutdown_background();
-                            return Err(e);
+                            Stop!(self,runtime,plug_collect,e);
                         }
                     }
                 }else{
@@ -399,10 +406,10 @@ impl <'a,T,A> UdpClient<T,A>
         }
         sender.close_session().await;
         self.stop().await;
+        plug_collect.on_stop().await;
         println!("waiting for recv worker!");
         runtime.shutdown_background();
         println!("recv worker end!");
         Ok(())
     }
-
 }
