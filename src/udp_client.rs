@@ -62,6 +62,7 @@ async fn main() -> io::Result<()>
     }
 
     let mut plugs = ClientPluCollect::<P2PPlug>::new();
+    plugs.add_plug(Arc::new(P2PPlug{}));
 
     let console = {
         let msg_queue = msg_queue.clone();
@@ -82,7 +83,7 @@ async fn main() -> io::Result<()>
         let run = client.run::<DefUdpSender,P2PPlug>(
             args.ip,args.port,
             msg_split_ignore,msg_split_ignore,
-        plugs);
+        Arc::new(plugs));
         futures::join!(console,run);
     }
 

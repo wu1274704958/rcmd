@@ -158,7 +158,7 @@ impl <'a,T,A> UdpClient<T,A>
     #[allow(unused_must_use)]
     pub async fn run<SE,CP>(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
                      msg_split_ignore:Option<&Vec<u32>>,
-                    plug_collect:ClientPluCollect<CP>) -> Result<(),USErr>
+                    plug_collect:Arc<ClientPluCollect<CP>>) -> Result<(),USErr>
 
     where
         SE : UdpSender + Send + std::marker::Sync + 'static,
@@ -200,6 +200,7 @@ impl <'a,T,A> UdpClient<T,A>
         let sock_cp = sock.clone();
         let err_cp = err.clone();
         let addr_cp = addr;
+        let plugs_cp = plug_collect.clone();
 
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -241,6 +242,8 @@ impl <'a,T,A> UdpClient<T,A>
                                     _=>{}
                                 }
                             }
+                        }else{
+                            plugs_cp.on_recv_oth_msg(addr,&buf[0..len]).await;
                         }
                     }
                     Err(e) => {

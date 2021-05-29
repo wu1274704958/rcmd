@@ -11,6 +11,7 @@ use std::ops::{DerefMut, Deref};
 use std::time::SystemTime;
 use tokio::sync::Mutex;
 use async_trait::async_trait;
+use std::net::SocketAddr;
 
 #[async_trait]
 pub trait ClientPlug:Send + Sync {
@@ -21,6 +22,7 @@ pub trait ClientPlug:Send + Sync {
     async fn on_get_err(&self,err:Self::ErrTy) where Self::ErrTy :Clone;
     async fn on_begin(&self);
     async fn on_stop(&self);
+    async fn on_recv_oth_msg(&self,addr:SocketAddr,data:&[u8]);
 }
 
 pub struct ClientPluCollect<T> where T:ClientPlug {
@@ -35,15 +37,15 @@ impl<T> ClientPluCollect<T>  where T:ClientPlug {
         }
     }
 
-    fn add_plug(&mut self,p:Arc<dyn ClientPlug<SockTy = <T as ClientPlug>::SockTy, ErrTy = <T as ClientPlug>::ErrTy>>)
+    pub fn add_plug(&mut self,p:Arc<dyn ClientPlug<SockTy = <T as ClientPlug>::SockTy, ErrTy = <T as ClientPlug>::ErrTy>>)
     {
         self.plugs.push(p);
     }
-    fn plug_count(&self)->usize
+    pub fn plug_count(&self)->usize
     {
         self.plugs.len()
     }
-    fn get_plug(&self,i:usize)->&dyn ClientPlug<SockTy = <T as ClientPlug>::SockTy, ErrTy = <T as ClientPlug>::ErrTy>
+    pub fn get_plug(&self,i:usize)->&dyn ClientPlug<SockTy = <T as ClientPlug>::SockTy, ErrTy = <T as ClientPlug>::ErrTy>
     {
         self.plugs[i].as_ref()
     }
@@ -88,6 +90,15 @@ impl<T> ClientPluCollect<T>  where T:ClientPlug {
         {
             let plug = self.get_plug(i);
             plug.on_stop().await;
+        }
+    }
+
+    pub async fn on_recv_oth_msg(&self,addr:SocketAddr,data:&[u8])
+    {
+        for i in 0..self.plug_count()
+        {
+            let plug = self.get_plug(i);
+            plug.on_recv_oth_msg(addr,data).await;
         }
     }
 }
