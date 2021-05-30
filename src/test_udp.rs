@@ -2,6 +2,7 @@
 mod handlers;
 mod extc;
 mod model;
+mod db;
 #[macro_use]
 extern crate rcmd_suit;
 #[macro_use]
@@ -37,7 +38,7 @@ use rcmd_suit::handler::{DefHandler, TestHandler, Handle};
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::plug::{DefPlugMgr, PlugMgr};
 use rcmd_suit::plugs::heart_beat::HeartBeat;
-use rcmd_suit::db::db_mgr::DBMgr;
+use crate::db::db_mgr::DBMgr;
 use rcmd_suit::utils::temp_permission::TempPermission;
 use rcmd_suit::servers::udp_server::UdpServer;
 use rcmd_suit::tools::platform_handle;

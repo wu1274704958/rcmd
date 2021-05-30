@@ -8,7 +8,7 @@ use std::collections::hash_map::RandomState;
 use crate::extc::*;
 use crate::model::user::{RegUser, User};
 use regex::Regex;
-use rcmd_suit::db::db_mgr::DBMgr;
+use crate::db::db_mgr::DBMgr;
 use mysql::{Error, PooledConn};
 use mysql::prelude::Queryable;
 use async_trait::async_trait;

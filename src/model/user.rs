@@ -48,12 +48,12 @@ impl Default for User
     }
 }
 
-#[cfg(feature = "mysql2")]
+#[cfg(feature = "mysql")]
 use mysql::prelude::FromRow;
-#[cfg(feature = "mysql2")]
+#[cfg(feature = "mysql")]
 use mysql::{Row, Value, FromRowError};
 
-#[cfg(feature = "mysql2")]
+#[cfg(feature = "mysql")]
 impl FromRow for User
 {
     fn from_row(row: Row) -> Self where

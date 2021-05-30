@@ -51,7 +51,7 @@ impl DBMgr{
         if !has_table {
             println!("has_table = {}, exec table user", has_table);
             conn.exec_drop("\
-            create table User(id BIGINT NOT NULL primary key auto_increment,\
+            create table user(id BIGINT NOT NULL primary key auto_increment,\
                 name varchar(255) not null,\
                 acc varchar(255) not null,\
                 pwd varchar(255) not null,\

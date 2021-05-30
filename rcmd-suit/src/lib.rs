@@ -11,7 +11,6 @@ pub mod client_handler;
 pub mod data_transform;
 pub mod ext_code;
 pub mod subpackage;
-pub mod db;
 pub mod tools;
 #[macro_use]
 pub mod servers;

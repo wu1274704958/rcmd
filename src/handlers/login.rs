@@ -4,7 +4,7 @@ use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 use crate::extc::{EXT_LOGIN, EXT_LOGOUT, EXT_ERR_PARSE_ARGS, EXT_ERR_ALREADY_LOGIN, EXT_ERR_NOT_KNOW, EXT_ERR_WRONG_PASSWORD, EXT_ERR_NOT_FOUND_ACC, EXT_ERR_NOT_LOGIN};
-use rcmd_suit::db::db_mgr::DBMgr;
+use crate::db::db_mgr::DBMgr;
 use crate::model::user::{User, MinUser};
 use mysql::prelude::Queryable;
 use rcmd_suit::plug::Plug;
