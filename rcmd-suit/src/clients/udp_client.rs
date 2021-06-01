@@ -352,7 +352,7 @@ impl <'a,T,A> UdpClient<T,A>
 
             if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
             {
-                if n > self.heartbeat_dur
+                if n >= self.heartbeat_dur
                 {
                     heartbeat_t = SystemTime::now();
                     if let Err(e) = self.write_msg(& sender, vec![9], 9).await{

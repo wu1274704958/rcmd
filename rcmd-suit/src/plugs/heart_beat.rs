@@ -21,6 +21,7 @@ impl Plug for HeartBeat
 
     async fn run(&self, id: Self::Id, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>, RandomState>>>, config: Arc<Self::Config>) where Self::Id: Copy {
         let time;
+        let now = SystemTime::now();
         {
             let a = clients.lock().await;
             if let Some(c) = a.get(&id)
@@ -30,7 +31,6 @@ impl Plug for HeartBeat
                 return;
             }
         }
-        let now = SystemTime::now();
         if let Ok(n) = now.duration_since(time)
         {
             if n > config.heartbeat_dur {
