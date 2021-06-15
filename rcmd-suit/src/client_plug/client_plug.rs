@@ -19,10 +19,12 @@ pub trait ClientPlug:Send + Sync {
     type ErrTy;
     async fn on_init(&self);
     async fn on_create_socket(&self,sock:Arc<Self::SockTy>);
+    async fn on_get_local_addr(&self,addr:SocketAddr);
     async fn on_get_err(&self,err:Self::ErrTy) where Self::ErrTy :Clone;
-    async fn on_begin(&self);
+    async fn on_lauch_recv_worker(&self);
     async fn on_stop(&self);
     async fn on_recv_oth_msg(&self,addr:SocketAddr,data:&[u8]);
+    async fn on_lauch_loop(&self);
 }
 
 pub struct ClientPluCollect<T> where T:ClientPlug {
@@ -67,6 +69,16 @@ impl<T> ClientPluCollect<T>  where T:ClientPlug {
             plug.on_create_socket(sock.clone()).await;
         }
     }
+
+    pub async fn on_get_local_addr(&self,addr:SocketAddr)
+    {
+        for i in 0..self.plug_count()
+        {
+            let plug = self.get_plug(i);
+            plug.on_get_local_addr(addr).await;
+        }
+    }
+
     pub async fn on_get_err(&self,err:<T as ClientPlug>::ErrTy)
         where <T as ClientPlug>::ErrTy: Clone + Send + Sync
     {
@@ -76,12 +88,12 @@ impl<T> ClientPluCollect<T>  where T:ClientPlug {
             plug.on_get_err(err.clone()).await;
         }
     }
-    pub async fn on_begin(&self)
+    pub async fn on_lauch_recv_worker(&self)
     {
         for i in 0..self.plug_count()
         {
             let plug = self.get_plug(i);
-            plug.on_begin().await;
+            plug.on_lauch_recv_worker().await;
         }
     }
     pub async fn on_stop(&self)
@@ -99,6 +111,15 @@ impl<T> ClientPluCollect<T>  where T:ClientPlug {
         {
             let plug = self.get_plug(i);
             plug.on_recv_oth_msg(addr,data).await;
+        }
+    }
+
+    pub async fn on_lauch_loop(&self)
+    {
+        for i in 0..self.plug_count()
+        {
+            let plug = self.get_plug(i);
+            plug.on_lauch_loop().await;
         }
     }
 }

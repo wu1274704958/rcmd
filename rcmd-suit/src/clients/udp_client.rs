@@ -40,6 +40,12 @@ macro_rules! Stop {
         $Plug.on_stop().await;
         return Err($E);
     };
+    ($S:ident,$Plug:ident,$E:ident) => {
+        $Plug.on_get_err($E.clone()).await;
+        $S.stop().await;
+        $Plug.on_stop().await;
+        return Err($E);
+    };
 }
 
 impl <'a,T,A> UdpClient<T,A>
@@ -170,14 +176,11 @@ impl <'a,T,A> UdpClient<T,A>
         let sock = Arc::new( UdpSocket::bind(self.bind_addr).await? );
         platform_handle(sock.as_ref());
         let addr = SocketAddr::new(IpAddr::V4(ip), port);
-        sock.connect(addr).await?;
 
-        plug_collect.on_create_socket(sock.clone()).await;
 
-        if let Ok(addr) = sock.local_addr(){
-            let mut local_addr = self.local_addr.lock().await;
-            *local_addr = Some(addr);
-        }
+        plug_collect.on_create_socket(sock.clone());
+
+        //sock.connect(addr).await?;
 
         let mut buf = Vec::with_capacity(self.buf_size);
         buf.resize(self.buf_size,0);
@@ -206,8 +209,8 @@ impl <'a,T,A> UdpClient<T,A>
             .worker_threads(1)
             .build()
             .unwrap();
-        plug_collect.on_begin().await;
 
+        plug_collect.on_lauch_recv_worker().await;
        let recv_worker = runtime.spawn(async move {
             let r = {
                 let r = run_cp.lock().await;
@@ -266,6 +269,8 @@ impl <'a,T,A> UdpClient<T,A>
         }
 
         let mut subpackager = DefSubpackage::new();
+
+        plug_collect.on_lauch_loop().await;
 
         loop {
             // read request
