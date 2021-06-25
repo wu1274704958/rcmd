@@ -39,7 +39,13 @@ async fn main() -> io::Result<()>
             return Ok(());
         }
     };
-    let ip = IpAddr::from_str("0.0.0.0").unwrap();
+    let mut ip = IpAddr::from_str("0.0.0.0").unwrap();
+    for iface in get_if_addrs::get_if_addrs().unwrap() {
+        if !iface.addr.is_loopback() && iface.addr.ip().is_ipv4() {
+            ip = iface.ip();
+            println!("{:#?}", iface);
+        }
+    }
 
     let msg_queue = Arc::new(Mutex::new(VecDeque::<(Vec<u8>, u32)>::new()));
     if args.acc.is_some(){

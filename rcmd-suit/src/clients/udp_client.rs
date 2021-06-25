@@ -178,7 +178,13 @@ impl <'a,T,A> UdpClient<T,A>
         let addr = SocketAddr::new(IpAddr::V4(ip), port);
 
 
-        plug_collect.on_create_socket(sock.clone());
+        plug_collect.on_create_socket(sock.clone()).await;
+
+        if let Ok(addr) = sock.local_addr() {
+            plug_collect.on_get_local_addr(addr).await;
+            let mut local_addr = self.local_addr.lock().await;
+            *local_addr = Some(addr);
+        }
 
         //sock.connect(addr).await?;
 

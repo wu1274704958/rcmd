@@ -249,7 +249,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
           PL : Plug<ABClient=ABC,Id=LID,Config=Config>,
           PLM: PlugMgr<PL> + Send + std::marker::Sync,
           P : Agreement + Send + std::marker::Sync,
-          LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
+          LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send + std::marker::Sync,
           ABC: ABClient<LID = LID> + Send
 {
     let local_addr = socket.local_addr().unwrap();
@@ -445,25 +445,39 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
         plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
     }
 }
-#[macro_export]
-macro_rules! server_run {
-    ($ser:ident,$asy_cry_ignore:ident,$msg_split_ignore:ident) => {
-        let listener = TcpListener::bind($ser.config.addr).await?;
-        loop {
-            let clients = $ser.clients.clone();
-            let lid = $ser.logic_id.clone();
-            let conf = $ser.config.clone();
-            let handler_cp = $ser.handler.clone();
-            let parser_cp = $ser.parser.clone();
-            let plugs_cp = $ser.plug_mgr.clone();
-            let dead_plugs_cp:Arc<_> = $ser.dead_plug_mgr.clone();
-            let (mut socket, _) = listener.accept().await?;
-            let buf_len = $ser.buf_len;
 
-            $ser.runtime.spawn(run_in(
-                clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,socket,buf_len,
-                $asy_cry_ignore,$msg_split_ignore
-            ));
-        }
-    };
+pub async fn run_server<LID,ABC,P,SH,H,PL,PLM>(
+    ser:TcpServer<LID,ABC,P,SH,H,PL,PLM>,
+    asy_cry_ignore:Option<&'static Vec<u32>>,
+    msg_split_ignore:Option<&'static Vec<u32>>
+) ->  Result<(), Box<dyn std::error::Error>>
+    where SH : SubHandle<ABClient=ABC,Id=LID> + 'static,
+          H : Handle<SH> + Send + std::marker::Sync + 'static,
+          PL : Plug<ABClient=ABC,Id=LID,Config=Config> + 'static,
+          PLM: PlugMgr<PL> + Send + std::marker::Sync + 'static,
+          P : Agreement + Send + std::marker::Sync + 'static,
+          LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send + std::marker::Sync + 'static,
+          ABC: ABClient<LID = LID> + Send + 'static
+{
+    let listener = TcpListener::bind(ser.config.addr).await?;
+    loop {
+        let clients = ser.clients.clone();
+        let lid = ser.logic_id.clone();
+        let conf = ser.config.clone();
+        let handler_cp = ser.handler.clone();
+        let parser_cp = ser.parser.clone();
+        let plugs_cp = ser.plug_mgr.clone();
+        let dead_plugs_cp: Arc<_> = ser.dead_plug_mgr.clone();
+        let (mut socket, _) = listener.accept().await?;
+        let buf_len = ser.buf_len;
+
+        ser.runtime.spawn(run_in(
+            clients, lid, conf, handler_cp, parser_cp, plugs_cp, dead_plugs_cp, socket, buf_len,
+            asy_cry_ignore, msg_split_ignore
+        ));
+
+    }
+
+    Ok(())
 }
+

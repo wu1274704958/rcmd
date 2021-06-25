@@ -3,6 +3,7 @@ mod handlers;
 mod extc;
 mod model;
 mod comm;
+mod db;
 #[macro_use]
 extern crate rcmd_suit;
 #[macro_use]
@@ -29,10 +30,10 @@ use rcmd_suit::handler::{DefHandler, TestHandler, Handle};
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::plug::{DefPlugMgr, PlugMgr};
 use rcmd_suit::plugs::heart_beat::HeartBeat;
-use rcmd_suit::db::db_mgr::DBMgr;
+use crate::db::db_mgr::DBMgr;
 use rcmd_suit::utils::temp_permission::TempPermission;
 
-use rcmd_suit::servers::tcp_server::{TcpServer,run_in};
+use rcmd_suit::servers::tcp_server::{TcpServer,run_server};
 use tokio::sync::Mutex;
 
 //fn main(){}
@@ -87,6 +88,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     lazy_static::initialize(&comm::IGNORE_EXT);
     let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
 
-    server_run!(ser,msg_split_ignore,msg_split_ignore);
+    run_server(ser,msg_split_ignore,msg_split_ignore).await?;
     Ok(())
 }
