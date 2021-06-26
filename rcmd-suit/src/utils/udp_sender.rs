@@ -628,7 +628,7 @@ impl DefUdpSender
         };
         let v = Self::warp_ex(&[199],SpecialExt::send_recv.into(),TOKEN_NORMAL,id,sid,None);
         let len = self.send(v.as_slice()).await?;
-        let send_recv_data = self.send_recv_data.lock().await;
+        let mut send_recv_data = self.send_recv_data.lock().await;
         *send_recv_data = Some((v,1));
         Ok(len)
     }
