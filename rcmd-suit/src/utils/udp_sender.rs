@@ -100,6 +100,8 @@ pub struct DefUdpSender{
     msg_cache_on_no_sid: Arc<Mutex<VecDeque<Vec<u8>>>>,
     adjust_cache_size_time:Arc<Mutex<SystemTime>>,
     avg_retry_times: Arc<Mutex<(u32,f32)>>,
+    send_recv_data: Arc<Mutex<Option<(Vec<u8>,u16)>>>,
+    send_recv_times: u16
     //data_current_limiter:Arc<DataCurrentLimiter>
 }
 
@@ -294,7 +296,7 @@ impl DefUdpSender
     async fn push_cache(&self, id:usize, v:Vec<u8>,rid:Option<u32>) -> Result<(), USErr>
     {
         let mut queue = self.queue.lock().await;
-        if queue.len() == self.get_cache_size().await as usize  {
+        if queue.len() >= self.get_cache_size().await as usize  {
             let mut msg_cache_queue = self.msg_cache_queue.lock().await;
             msg_cache_queue.push_back((id,v,rid));
             return Err(USErr::MsgCacheOverflow);
@@ -625,8 +627,10 @@ impl DefUdpSender
             }
         };
         let v = Self::warp_ex(&[199],SpecialExt::send_recv.into(),TOKEN_NORMAL,id,sid,None);
-        self.send(v.as_slice()).await?;
-        self.send(v.as_slice()).await
+        let len = self.send(v.as_slice()).await?;
+        let send_recv_data = self.send_recv_data.lock().await;
+        *send_recv_data = Some((v,1));
+        Ok(len)
     }
 
     async fn send(&self,d:&[u8]) -> Result<usize,USErr>
@@ -1077,6 +1081,8 @@ impl UdpSender for DefUdpSender
             msg_cache_on_no_sid: Arc::new(Mutex::new(VecDeque::new())),
             adjust_cache_size_time: Arc::new(Mutex::new(SystemTime::now())),
             avg_retry_times: Arc::new(Mutex::new((0,0f32))),
+            send_recv_data: Arc::new(Mutex::new(None)),
+            send_recv_times : 10
             // data_current_limiter: Arc::new(DataCurrentLimiter::new(
             //     Duration::from_millis(20),
             //     (1024*1024*4) / (1000/20) ,10,10
@@ -1127,6 +1133,16 @@ impl UdpSender for DefUdpSender
     async fn check_send(&self) -> Result<(),USErr> {
         self.check_err().await?;
         let now = SystemTime::now();
+        {
+            let mut send_recv_data = self.send_recv_data.lock().await;
+            let mut is_max = false;
+            if let Some(ref mut d) = *send_recv_data{
+                self.send(d.0.as_slice()).await?;
+                d.1 += 1;
+                is_max = d.1 >= self.send_recv_times;
+            }
+            if is_max { *send_recv_data = None; }
+        }
         {
             let mut sid = self.sid.lock().await;
 
