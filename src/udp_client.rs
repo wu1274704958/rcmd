@@ -225,6 +225,7 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                         }
                     }
                     let s = String::from_utf8_lossy(vec.as_slice()).trim().to_string();
+                    if s.len() == 0 {continue;}
                     if s.as_bytes()[0] == b'#'
                     {
                         handle_sub_cmd(lid,s,msg_queue.clone()).await;
