@@ -93,15 +93,11 @@ pub struct DefUdpSender{
     timeout: Duration,
     msg_split: Arc<Mutex<DefUdpMsgSplit>>,
     max_retry_times: u16,
-    msg_cache_queue: Arc<Mutex<VecDeque<(usize,Vec<u8>,Option<u32>)>>>,
     recv_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
     error: Arc<Mutex<Option<USErr>>>,
     sid: Arc<Mutex<SessionState>>,
-    msg_cache_on_no_sid: Arc<Mutex<VecDeque<Vec<u8>>>>,
     adjust_cache_size_time:Arc<Mutex<SystemTime>>,
     avg_retry_times: Arc<Mutex<(u32,f32)>>,
-    send_recv_data: Arc<Mutex<Option<(Vec<u8>,u16)>>>,
-    send_recv_times: u16
     //data_current_limiter:Arc<DataCurrentLimiter>
 }
 
@@ -297,8 +293,6 @@ impl DefUdpSender
     {
         let mut queue = self.queue.lock().await;
         if queue.len() >= self.get_cache_size().await as usize  {
-            let mut msg_cache_queue = self.msg_cache_queue.lock().await;
-            msg_cache_queue.push_back((id,v,rid));
             return Err(USErr::MsgCacheOverflow);
             //self.drop_one_cache();
         }
@@ -429,12 +423,12 @@ impl DefUdpSender
             match sp_ext {
                 SpecialExt::send_recv => {
                     //println!("op recv msg {}",id);
-                    //self.remove_cache(id).await;
-                    if let Some((_,t,times)) = self.remove_cache(id).await
-                    {
-                        //println!("op recv msg id = {} times = {}",id,times);
-                        self.check_msg_cache_queue().await;
-                    }
+                    self.remove_cache(id).await;
+                    // if let Some((_,t,times)) = self.remove_cache(id).await
+                    // {
+                    //     //println!("op recv msg id = {} times = {}",id,times);
+                    //     self.check_msg_cache_queue().await;
+                    // }
                     Ok(true)
                 }
                 SpecialExt::skip_message => {
@@ -481,7 +475,6 @@ impl DefUdpSender
                                 *sid_ = SessionState::Has(sid);
                                 drop(sid_);
                                 self.send_sid_response(sid, SpecialExt::response_cp_send_sid).await?;
-                                self.send_cache_no_sid().await?;
                             }
                         }
                         SessionState::WaitResponseCp(v, _, _) => {
@@ -513,7 +506,6 @@ impl DefUdpSender
                             } else {
                                 *sid_ = SessionState::Has(sid);
                                 drop(sid_);
-                                self.send_cache_no_sid().await?;
                             }
                         }
                         SessionState::Has(v) => {
@@ -627,10 +619,8 @@ impl DefUdpSender
             }
         };
         let v = Self::warp_ex(&[199],SpecialExt::send_recv.into(),TOKEN_NORMAL,id,sid,None);
-        let len = self.send(v.as_slice()).await?;
-        let mut send_recv_data = self.send_recv_data.lock().await;
-        *send_recv_data = Some((v,1));
-        Ok(len)
+        self.send(v.as_slice()).await?;
+        self.send(v.as_slice()).await
     }
 
     async fn send(&self,d:&[u8]) -> Result<usize,USErr>
@@ -786,30 +776,6 @@ impl DefUdpSender
         msg_map.len()
     }
 
-    async fn check_msg_cache_queue(&self)
-    {
-        let mut queue = self.queue.lock().await;
-        loop {
-            if queue.len() < self.get_cache_size().await as usize
-            {
-                if let Some((id, v,ext)) = {
-                    let mut msg_cache_queue = self.msg_cache_queue.lock().await;
-                    msg_cache_queue.pop_front()
-                }{
-                    //println!("pop cache {}",id);
-                    let sock = self.sock.clone();
-                    let addr = self.addr;
-
-                    queue.push_back((id,ext));
-                    let mut msg_map = self.msg_map.lock().await;
-                    Self::send_ex(sock, addr, v.as_slice()).await;
-                    msg_map.insert(id,(v,SystemTime::now(),1));
-
-                }else { break; }
-            }else{break;}
-        }
-    }
-
     async fn need_split(&self,len:usize)->bool
     {
         let mut msg_split = self.msg_split.lock().await;
@@ -886,24 +852,6 @@ impl DefUdpSender
         Ok(())
     }
 
-    async fn push_cache_no_sid(&self,v:Vec<u8>)
-    {
-        //assert!(!self.has_sid().await);
-        let mut queue = self.msg_cache_on_no_sid.lock().await;
-        queue.push_back(v);
-    }
-
-    async fn send_cache_no_sid(&self) -> Result<(),USErr>
-    {
-        //assert!(self.has_sid().await);
-        let mut queue = self.msg_cache_on_no_sid.lock().await;
-        while !queue.is_empty() {
-            let v = queue.pop_front().unwrap();
-            self.send_msg(v).await?;
-        }
-        Ok(())
-    }
-
     async fn get_cache_size(&self) -> u16
     {
         let v = self.cache_size.lock().await;
@@ -945,8 +893,7 @@ impl DefUdpSender
     async fn send_cache_empty(&self) ->bool
     {
         let queue = self.queue.lock().await;
-        let msg_cache_queue = self.msg_cache_queue.lock().await;
-        queue.len() < self.get_cache_size().await as usize && msg_cache_queue.is_empty()
+        queue.len() < self.get_cache_size().await as usize
     }
 
     fn send_cache_empty_ex(
@@ -976,18 +923,19 @@ impl DefUdpSender
 impl UdpSender for DefUdpSender
 {
     async fn send_msg(&self, v: Vec<u8>) -> Result<(),USErr> {
+        let mut msg_split = self.msg_split.lock().await;
         {
             let sid = self.sid.lock().await;
             match *sid {
                 SessionState::Null => {
                     drop(sid);
-                    self.push_cache_no_sid(v).await;
+                    msg_split.push_msg(v);
                     self.send_session().await?;
                     return Ok(());
                 }
                 SessionState::WaitResponse(_, _, _) => {
                     drop(sid);
-                    self.push_cache_no_sid(v).await;
+                    msg_split.push_msg(v);
                     return Ok(());
                 }
                 SessionState::WaitResponseCp(_, _, _) => {}
@@ -997,23 +945,9 @@ impl UdpSender for DefUdpSender
                 Has(_) => {}
             }
         }
-        if !self.has_sid().await{
+        msg_split.push_msg(v);
 
-            return Ok(());
-        }
-        //if self.need_split(v.len()).await
-        {
-            let mut msg_split = self.msg_split.lock().await;
-            msg_split.push_msg(v);
-            Ok(())
-        }/*else{
-            match self.warp(v.as_slice(),0,TOKEN_NORMAL,None).await{
-                Ok(v) => {self.send(v.as_slice()).await?;}
-                Err(USErr::MsgCacheOverflow) => {}
-                Err(e) => { return Err(e);}
-            }
-            Ok(())
-        }*/
+        Ok(())
     }
 
     async fn check_recv(&self, data: &[u8]) -> Result<(),USErr> {
@@ -1074,15 +1008,11 @@ impl UdpSender for DefUdpSender
             timeout: Duration::from_millis(400),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
             max_retry_times: 32,
-            msg_cache_queue: Arc::new(Mutex::new(VecDeque::new())),
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
             sid: Arc::new(Mutex::new(SessionState::Null)),
-            msg_cache_on_no_sid: Arc::new(Mutex::new(VecDeque::new())),
             adjust_cache_size_time: Arc::new(Mutex::new(SystemTime::now())),
             avg_retry_times: Arc::new(Mutex::new((0,0f32))),
-            send_recv_data: Arc::new(Mutex::new(None)),
-            send_recv_times : 10
             // data_current_limiter: Arc::new(DataCurrentLimiter::new(
             //     Duration::from_millis(20),
             //     (1024*1024*4) / (1000/20) ,10,10
@@ -1133,16 +1063,6 @@ impl UdpSender for DefUdpSender
     async fn check_send(&self) -> Result<(),USErr> {
         self.check_err().await?;
         let now = SystemTime::now();
-        {
-            let mut send_recv_data = self.send_recv_data.lock().await;
-            let mut is_max = false;
-            if let Some(ref mut d) = *send_recv_data{
-                self.send(d.0.as_slice()).await?;
-                d.1 += 1;
-                is_max = d.1 >= self.send_recv_times;
-            }
-            if is_max { *send_recv_data = None; }
-        }
         {
             let mut sid = self.sid.lock().await;
 
@@ -1209,7 +1129,7 @@ impl UdpSender for DefUdpSender
             }
             if l > 0 { avg_times = sum as f32 / l as f32; }
         }
-        {
+        if self.has_sid().await {
             let mut msg_split = self.msg_split.lock().await;
             while self.send_cache_empty().await && msg_split.need_send() {
                 //println!("pop msg");
