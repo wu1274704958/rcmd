@@ -1007,7 +1007,7 @@ impl UdpSender for DefUdpSender
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
             timeout: Duration::from_millis(400),
             msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 32,
+            max_retry_times: 6,
             recv_queue: Arc::new(Mutex::new(VecDeque::new())),
             error :Arc::new(Mutex::new(None)),
             sid: Arc::new(Mutex::new(SessionState::Null)),
@@ -1113,13 +1113,13 @@ impl UdpSender for DefUdpSender
                     }
                     if let Ok(dur) = now.duration_since(*t)
                     {
-                        if dur > self.timeout
+                        if dur > self.timeout * *times as u32
                         {
                             //if self.data_current_limiter.can_send(v.len()).await
                             {
                                 *t = SystemTime::now();
                                 *times += 1;
-                                //println!("send {} {} {}",*id,times,v.len());
+                                println!("send {} times {} len {}",*id,times,v.len());
                                 Self::send_ex(self.sock.clone(), self.addr, v.as_slice()).await?;
                             }
                         }
