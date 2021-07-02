@@ -69,7 +69,7 @@ async fn main() -> io::Result<()>
     }
 
     let mut plugs = ClientPluCollect::<P2PPlug>::new();
-    plugs.add_plug(Arc::new(P2PPlug{}));
+    plugs.add_plug(Arc::new(P2PPlug::new()));
 
     let console = {
         let msg_queue = msg_queue.clone();

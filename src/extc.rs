@@ -29,6 +29,10 @@ pub const EXT_SAVE_FILE_CREATE_RET:u32 = 60;
 pub const EXT_PULL_FILE_S:u32 = 61;
 pub const EXT_PULL_FILE_C:u32 = 62;
 
+//P2P 相关
+pub const EXT_REQ_LINK_P2P_CS:u32 = 70;
+pub const EXT_REQ_LINK_P2P_SC:u32 = 71;
+
 
 pub const EXT_DEFAULT_ERR_CODE:u32 = 50000;
 pub const EXT_ERR_CREATE_FILE_FAILED:u32 = 50001;

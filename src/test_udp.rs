@@ -8,6 +8,7 @@ extern crate rcmd_suit;
 #[macro_use]
 extern crate lazy_static;
 mod comm;
+mod p2p_handler;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
