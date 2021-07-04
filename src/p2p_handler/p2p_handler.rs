@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use rcmd_suit::ab_client::AbClient;
 use std::net::SocketAddr;
 use std::time::SystemTime;
+use rcmd_suit::tools;
 
 enum LinkState{
     WaitResponse,
@@ -20,7 +21,8 @@ struct LinkData{
     a:usize,
     b:usize,
     state:LinkState,
-    key:String
+    key:String,
+    verify_code:String
 }
 
 pub struct P2PLinkData
@@ -47,11 +49,26 @@ impl SubHandle for P2PHandlerSer{
 }
 
 impl LinkData {
-    pub fn new(a:usize,b:usize,) -> LinkData
+    pub fn gen_key(a:usize,b:usize) -> String
     {
-        let key Self::gen_key()
+        return if a > b {
+            format!("{}{}", a, b)
+        } else {
+            format!("{}{}", b, a)
+        }
+    }
+    pub fn gen_verify_code(key:&String) -> String
+    {
+         format!("{}@{}", tools::uuid(),*key)
+    }
+    pub fn new(a:usize,b:usize,key:String) -> LinkData
+    {
+        let verify_code = Self::gen_verify_code(&key);
         LinkData{
             a,b,
+            state:LinkState::WaitResponse,
+            key,
+            verify_code
         }
     }
 }
