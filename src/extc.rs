@@ -30,8 +30,11 @@ pub const EXT_PULL_FILE_S:u32 = 61;
 pub const EXT_PULL_FILE_C:u32 = 62;
 
 //P2P 相关
-pub const EXT_REQ_LINK_P2P_CS:u32 = 70;
-pub const EXT_REQ_LINK_P2P_SC:u32 = 71;
+pub const EXT_REQ_HELP_LINK_P2P_CS:u32 = 63;
+pub const EXT_REQ_HELP_LINK_P2P_SC:u32 = 64;
+pub const EXT_REQ_LINK_P2P_SC:u32 = 65;
+pub const EXT_REQ_LINK_P2P_CS:u32 = 66;
+pub const EXT_REQ_LINK_P2P_REJECTED_SC:u32 = 67;
 
 
 pub const EXT_DEFAULT_ERR_CODE:u32 = 50000;
@@ -63,3 +66,8 @@ pub const EXT_ERR_SAVE_FILE_RET_EXT:u32 = 50025;
 pub const EXT_ERR_PULL_FILE_RET_EXT:u32 = 50026;
 pub const EXT_ERR_BAD_FILE_PATH:u32 = 50027;
 pub const EXT_ERR_OPEN_FILE:u32 = 50028;
+
+//p2p 相关错误码
+pub const EXT_ERR_LINK_DATA_ALREADY_EXIST:u32 = 50029;
+pub const EXT_ERR_NOT_FOUND_LINK_DATA:u32 = 50030;
+pub const EXT_ERR_ALREADY_ACCEPT:u32 = 50031;
