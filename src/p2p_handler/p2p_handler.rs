@@ -11,9 +11,10 @@ use crate::extc::*;
 use rcmd_suit::utils::stream_parser::{Stream,StreamParse};
 use std::mem::size_of;
 use crate::p2p_handler::p2p_handler::LinkState::Failed;
+use std::ptr::eq;
 
 #[derive(Copy, Clone)]
-enum LinkState{
+pub enum LinkState{
     WaitResponse,
     Agreed,
     TryConnectBToA(u8,SocketAddr,SystemTime,u8),
@@ -26,7 +27,7 @@ pub struct LinkData{
     a:usize,
     b:usize,
     state:LinkState,
-    key:String,
+    key:u128,
     verify_code:String,
     local_addr: HashMap<usize,Vec<SocketAddr>>,
     timeout:Duration
@@ -34,7 +35,8 @@ pub struct LinkData{
 
 pub struct P2PLinkData
 {
-    pub map: Mutex<HashMap<String,LinkData>>,
+    map: Mutex<HashMap<u128,LinkData>>,
+    key_map: Mutex<HashMap<usize,u128>>
 }
 
 pub struct P2PHandlerSer{
@@ -97,12 +99,6 @@ impl SubHandle for P2PHandlerSer{
                     return Some((EXT_ERR_NOT_FOUND_LID.to_be_bytes().to_vec(),EXT_REQ_HELP_LINK_P2P_SC));
                 };
 
-                let key = LinkData::gen_key(id.clone(),cp_lid);
-                let mut map = self.data.map.lock().await;
-                if map.contains_key(&key)
-                {
-                    return Some((EXT_ERR_LINK_DATA_ALREADY_EXIST.to_be_bytes().to_vec(),EXT_REQ_HELP_LINK_P2P_SC));
-                }
                 let addrs = if let Some(v) = self.parse_addr(&mut stream)
                 {
                     v
@@ -110,14 +106,10 @@ impl SubHandle for P2PHandlerSer{
                     return Some((EXT_AGREEMENT_ERR_CODE.to_be_bytes().to_vec(), EXT_REQ_HELP_LINK_P2P_SC));
                 };
 
-                let mut local_addr_map = HashMap::new();
-                local_addr_map.insert(id.clone(),addrs);
-
-                let data = LinkData::new(id.clone(),cp_lid,key.clone(),local_addr_map);
-
-                map.insert(key,data);
-
-                drop(map);
+                if self.data.insert(id.clone(),cp_lid,addrs).await.is_none()
+                {
+                    return Some((EXT_ERR_LINK_DATA_ALREADY_EXIST.to_be_bytes().to_vec(),EXT_REQ_HELP_LINK_P2P_SC));
+                }
 
                 cp.push_msg(id.to_be_bytes().to_vec(),EXT_REQ_LINK_P2P_SC);
 
@@ -156,7 +148,8 @@ impl SubHandle for P2PHandlerSer{
                         link_data.set_local_addr(id.clone(),addrs);
                     }
                     else{
-                        map.remove(&key);
+                        drop(map);
+                        self.data.remove(&key).await;
                         //通知被拒绝
                         let mut cls = clients.lock().await;
                         if let Some(v) = cls.get_mut(&cp_lid) {
@@ -174,25 +167,42 @@ impl SubHandle for P2PHandlerSer{
         }
     }
     fn interested(&self,ext:u32)->bool{
-        ext == EXT_REQ_HELP_LINK_P2P_CS
+        ext == EXT_REQ_HELP_LINK_P2P_CS ||
+            ext == EXT_REQ_LINK_P2P_CS
     }
 
 }
 
 impl LinkData {
-    pub fn gen_key(a:usize,b:usize) -> String
+    pub fn gen_key(a:usize,b:usize) -> u128
     {
         return if a > b {
-            format!("{}{}", a, b)
+            let mut r = a as u128;
+            (r << Self::get_digits(b)) | b as u128
         } else {
-            format!("{}{}", b, a)
+            let mut r = b as u128;
+            (r << Self::get_digits(a)) | a as u128
         }
     }
-    pub fn gen_verify_code(key:&String) -> String
+    fn get_digits(mut n:usize) -> usize
     {
-         format!("{}@{}", tools::uuid(),*key)
+        let k = 1usize << (size_of::<usize>() - 1);
+        let mut d = size_of::<usize>();
+        loop{
+            if d == 0 { break; }
+            if (n & k) != 0{
+                return d;
+            }
+            n <<= 1;
+            d -= 1;
+        }
+        d
     }
-    pub fn new(a:usize,b:usize,key:String,local_addr_map:HashMap<usize,Vec<SocketAddr>>) -> LinkData
+    pub fn gen_verify_code(key:&u128) -> String
+    {
+         format!("{}@{}", tools::uuid(),key.to_string())
+    }
+    pub fn new(a:usize,b:usize,key:u128,local_addr_map:HashMap<usize,Vec<SocketAddr>>) -> LinkData
     {
         let verify_code = Self::gen_verify_code(&key);
         LinkData{
@@ -211,11 +221,11 @@ impl LinkData {
     pub fn b(&self) -> usize {
         self.b
     }
-    pub fn state(&self) -> &LinkState {
-        &self.state
+    pub fn state(&self) -> LinkState {
+        self.state
     }
-    pub fn key(&self) -> &String {
-        &self.key
+    pub fn key(&self) -> u128 {
+        self.key
     }
     pub fn verify_code(&self) -> &String {
         &self.verify_code
@@ -289,4 +299,82 @@ impl LinkData {
         }
         None
     }
+}
+
+impl  P2PLinkData{
+    pub fn new()-> P2PLinkData
+    {
+        P2PLinkData{
+            map: Mutex::new(HashMap::new()),
+            key_map: Mutex::new(HashMap::new())
+        }
+    }
+
+    pub async fn contains_key(&self,key:&u128) -> bool
+    {
+        let map = self.map.lock().await;
+        map.contains_key(key)
+    }
+
+    pub async fn insert(&self,a:usize,b:usize,addr_of_a:Vec<SocketAddr>) -> Option<u128>
+    {
+        let key = LinkData::gen_key(a,b);
+        let mut map = self.map.lock().await;
+        if map.contains_key(&key)
+        {
+            return None;
+        }
+
+        let mut local_addr_map = HashMap::new();
+        local_addr_map.insert(a,addr_of_a);
+
+        let data = LinkData::new(a,b,key,local_addr_map);
+
+        map.insert(key,data);
+        drop(map);
+
+        let mut key_map = self.key_map.lock().await;
+
+        key_map.insert(a,key);
+        key_map.insert(b,key);
+
+        Some(key)
+    }
+
+    pub async fn remove(&self,key:&u128) -> Option<LinkData>
+    {
+        let mut map = self.map.lock().await;
+        let mut key_map = self.key_map.lock().await;
+        return if let Some(d) = map.remove(&key){
+            key_map.remove(&d.a);
+            key_map.remove(&d.b);
+            Some(d)
+        }else{
+            None
+        }
+    }
+
+    pub async fn find_key(&self,a:usize) -> Option<u128>
+    {
+        let key_map = self.key_map.lock().await;
+        if let Some(k) = key_map.get(&a)
+        {
+            Some(*k)
+        }else{
+            None
+        }
+    }
+
+
+    pub fn map(&self) -> &Mutex<HashMap<u128, LinkData>> {
+        &self.map
+    }
+}
+
+#[test]
+fn test_gen_key()
+{
+    assert_eq!(LinkData::gen_key(3,7),31);
+    assert_eq!(LinkData::gen_key(7,3),31);
+    assert_eq!(LinkData::gen_key(63,99),6399);
 }

@@ -442,7 +442,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM>
             async_std::task::sleep(conf.min_sleep_dur).await;
         }
         set_client_st_ex(&clients,logic_id.clone(),State::Ready).await;
-        plugs_cp.run(logic_id.clone(),&clients,conf.clone()).await;
+        plugs_cp.run_with_dur(logic_id.clone(),&clients,conf.clone()).await;
     }
 }
 

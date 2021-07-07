@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut handler = DefHandler::<TestHandler>::new();
     let mut parser = DefParser::new();
-    let mut plugs = DefPlugMgr::<HeartBeat>::new();
+    let mut plugs = DefPlugMgr::<HeartBeat>::with_time();
     let mut dead_plugs = DefPlugMgr::<HeartBeat>::new();
 
     let dbmgr = Arc::new(DBMgr::new().unwrap());
