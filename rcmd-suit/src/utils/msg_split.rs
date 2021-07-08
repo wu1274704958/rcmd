@@ -228,27 +228,36 @@ impl DefUdpMsgSplit{
         self.logic_id
     }
 
+    fn remove_front(&mut self) -> bool
+    {
+        if let Some(d) = self.wait_split_queue.pop_front()
+        {
+            loop{
+                if let Some(r) = self.recovery_info.front()
+                {
+                    if (*r).0 != d.2{ break; }
+                }else { break; }
+                self.recovery_info.pop_front();
+            }
+            return true;
+        }else{
+            return false;
+        }
+    }
+
     fn check_wait_split_queue(&mut self)
     {
-        while self.wait_split_queue.len() > self.cache_size {
-            let using = if let Some(v) = self.curr_idx{
-                v == 0
-            }else{
-                false
-            };
-            if !using {
-                let v = self.wait_split_queue.pop_front().unwrap();
-                while let Some(info) = self.recovery_info.front() {
-                    if (*info).0 == v.2{
-                        drop(info);
-                        self.recovery_info.pop_front();
-                    }else { break; }
-                }
-                if let Some(v) = self.curr_idx{
-                    self.curr_idx = Some(v - 1);
-                }
-            }else{
-                break;
+        if let Some(curr) = self.curr_idx{
+            let offset = -(self.cache_size as isize);
+            let top = curr as isize + offset;
+            if top < 0{ return; }
+            let new_top = top as usize;
+            for _i in 0..new_top{
+                self.remove_front();
+            }
+            self.curr_idx = Some(curr - new_top);
+            for r in self.recovery_info.iter_mut(){
+                (*r).2 -= new_top as u32;
             }
         }
     }
@@ -304,7 +313,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
             unit_size:(max_unit_size+min_unit_size)/2,
             wait_split_queue:VecDeque::new(),
             curr_idx: None,
-            cache_size: 3,
+            cache_size: 10,
             recovery_info : VecDeque::new(),
             next_idx :None,
             last_pop_logic_id : None
@@ -525,16 +534,19 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     fn recovery(&mut self, id: u32) -> bool {
         ///lid begin_pos idx sub_msg_idx
         if let Some(v) = self.recovery_info.back(){
+            //dbg!(v);
             if (*v).0 != id {
                 return false;
             }
             if let Some(idx) = self.curr_idx{
                 if (*v).2 as usize > idx
                 {
+                    //println!("(*v).2 as usize > idx !!!!!!!!{} {}",(*v).2,idx);
                     return false;
                 }
             }
         }else{
+            //println!("recovery_info no Back");
             return false;
         }
         let info = self.recovery_info.pop_back().unwrap();

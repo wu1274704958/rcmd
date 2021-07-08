@@ -989,7 +989,7 @@ impl UdpSender for DefUdpSender
         let max_cache_size = 1;
         ///消息分割器 的子协议头所占的字节数
         const sub_head_size:usize = size_of::<u128>() + size_of::<u32>() * 3;
-        let max_len = 52992 - (Self::package_len() + sub_head_size);
+        let max_len = 65500 - (Self::package_len() + sub_head_size);
         let min_len = 1472 - (Self::package_len() + sub_head_size);
         DefUdpSender{
             addr,
