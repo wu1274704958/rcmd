@@ -1540,17 +1540,22 @@ name = "rcmd"
 version = "0.1.0"
 dependencies = [
  "ahash 0.6.3",
+ "args",
  "async-trait",
+ "encoding_rs",
  "flate2",
  "futures",
  "get_if_addrs",
  "getopts",
  "lazy_static",
  "mysql",
+ "rand 0.7.3",
  "rcmd-suit",
  "regex",
+ "rsa",
  "serde",
  "serde_json",
+ "subprocess",
  "terminal",
  "tokio",
 ]

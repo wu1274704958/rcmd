@@ -1,14 +1,8 @@
-
-use std::process::exit;
 use args::{Args,ArgsError};
-use args::validations::{Order,OrderValidation};
 use getopts::Occur;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
-use async_std::net::AddrParseError;
 
-const PROGRAM_DESC: &'static str = "Run this program";
-const PROGRAM_NAME: &'static str = "program";
 
 #[derive(Debug)]
 pub struct ClientArgs{
@@ -77,14 +71,14 @@ fn parse_c_args() -> Result<ClientArgs, ArgsError> {
                 match Ipv4Addr::from_str(v.as_str())
                 {
                     Ok(i) => { ip = i;}
-                    Err(e) => { }
+                    Err(_e) => { }
                 }
             }
             "port" => {
                 match u16::from_str(v.as_str())
                 {
                     Ok(i) => { port = i;}
-                    Err(e) => { }
+                    Err(_e) => { }
                 }
             }
             "Account" => {
