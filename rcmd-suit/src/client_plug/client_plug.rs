@@ -25,6 +25,7 @@ pub trait ClientPlug:Send + Sync {
     async fn on_stop(&self);
     async fn on_recv_oth_msg(&self,addr:SocketAddr,data:&[u8]);
     async fn on_lauch_loop(&self);
+    fn capture(&self,ext:u32) -> bool{false}
 }
 
 pub struct ClientPluCollect<T> where T:ClientPlug {

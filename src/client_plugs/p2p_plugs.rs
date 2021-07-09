@@ -1,22 +1,36 @@
 use rcmd_suit::client_plug::client_plug::ClientPlug;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc};
 use tokio::net::UdpSocket;
 use rcmd_suit::utils::udp_sender::USErr;
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use std::cell::Cell;
 use tokio::sync::Mutex;
-use std::env::consts::ARCH;
+
+
+struct PlugData{
+    socket:Option<Arc<UdpSocket>>,
+    port: u16
+}
+
+impl PlugData {
+    pub fn new() -> PlugData
+    {
+        PlugData{
+            socket : None,
+            port : 0
+        }
+    }
+}
 
 pub struct P2PPlug{
-    socket: Mutex<Option<Arc<UdpSocket>>>,
+    data : Arc<Mutex<PlugData>>
 }
 
 impl P2PPlug {
     pub fn new()-> P2PPlug
     {
         P2PPlug{
-            socket : Mutex::new(None),
+            data : Arc::new(Mutex::new(PlugData::new())),
         }
     }
 }
@@ -31,12 +45,14 @@ impl ClientPlug for P2PPlug {
     }
 
     async fn on_create_socket(&self, sock: Arc<Self::SockTy>) {
-        let mut socket = self.socket.lock().await;
-        *socket = Some(sock.clone());
+        let mut d = self.data.lock().await;
+        d.socket = Some(sock.clone());
     }
 
     async fn on_get_local_addr(&self, addr: SocketAddr) {
         dbg!(addr);
+        let mut d = self.data.lock().await;
+        d.port = addr.port();
     }
 
     async fn on_get_err(&self, err: Self::ErrTy) where Self::ErrTy: Clone {
@@ -57,5 +73,9 @@ impl ClientPlug for P2PPlug {
 
     async fn on_lauch_loop(&self) {
 
+    }
+
+    fn capture(&self, ext:u32) -> bool {
+        false
     }
 }
