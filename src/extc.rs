@@ -1,4 +1,4 @@
-
+#![allow(dead_code)]
 // ext 9        heartbeat
 // ext 0        default
 // ext 10 .. 20  asymmetric cryptographic
@@ -36,6 +36,10 @@ pub const EXT_REQ_LINK_P2P_SC:u32 = 65;
 pub const EXT_REQ_LINK_P2P_CS:u32 = 66;
 pub const EXT_REQ_LINK_P2P_REJECTED_SC:u32 = 67;
 pub const EXT_P2P_TRY_CONNECT_SC:u32 = 68;
+pub const EXT_P2P_CONNECT_SUCCESS_STAGE1_CS:u32 = 69;
+pub const EXT_P2P_CONNECT_SUCCESS_CS:u32 = 70;
+pub const EXT_P2P_WAIT_CONNECT_SC:u32 = 71;
+pub const EXT_P2P_SYNC_VERIFY_CODE_SC:u32 = 72;
 
 
 pub const EXT_DEFAULT_ERR_CODE:u32 = 50000;

@@ -18,15 +18,11 @@ impl Plug for P2POnDeadPlug {
     type Id = usize;
     type Config = Config;
 
-    fn exec_duration(&self) -> Option<Duration> {
-        Some(Duration::from_secs_f32(1f32))
-    }
-
-
     async fn run(&self, id: Self::Id, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>>>>, config: Arc<Self::Config>) where Self::Id: Copy {
         if let Some(k) = self.data.find_key(id).await
         {
             if let Some(d) = self.data.remove(&k).await{
+                println!("Remove LinkData {:?}",&d);
                 if let LinkState::Failed = d.state() {
                     let cp = if d.a() == id { d.b() } else { d.a() };
                     let mut cls = clients.lock().await;
@@ -65,19 +61,79 @@ impl Plug for P2PPlug {
         {
             let m = self.data.map();
             let mut map = m.lock().await;
+            let mut need_rm = false;
             if let Some(d) = map.get_mut(&k)
             {
-                match d.state() {
-                    LinkState::TryConnectBToA(addr_id,addr,time , times) => {
-
+                let a = d.a();
+                let b = d.b();
+                let mut cls = clients.lock().await;
+                let both_alive = cls.contains_key(&a) && cls.contains_key(&b);
+                need_rm = !both_alive;
+                
+                if !both_alive {
+                    if let Some(c) = cls.get_mut(&a)
+                    {
+                        c.push_msg(b.to_be_bytes().to_vec(), EXT_ERR_P2P_CP_OFFLINE);
                     }
-                    LinkState::TryConnectAToB(addr_id,addr,time , times) => {
-
+                    if let Some(c) = cls.get_mut(&b)
+                    {
+                        c.push_msg(a.to_be_bytes().to_vec(), EXT_ERR_P2P_CP_OFFLINE);
                     }
-                    _ => {}
+                }else{
+                    if let LinkState::Agreed = d.state() 
+                    {
+                        let verify_code = d.verify_code().as_bytes().to_vec();
+                        if let Some(c) = cls.get_mut(&a)
+                        {
+                            c.push_msg(verify_code.clone(), EXT_P2P_SYNC_VERIFY_CODE_SC);
+                        }
+                        if let Some(c) = cls.get_mut(&b)
+                        {
+                            c.push_msg(verify_code, EXT_P2P_SYNC_VERIFY_CODE_SC);
+                        }
+                    }
+                    match d.next_state(clients).await {
+
+                        Some(LinkState::TryConnectBToA(addr_id,addr,time , times)) => {
+                            
+                            if let Some(c) = cls.get_mut(&b)
+                            {
+                                let mut data = Vec::<u8>::new();
+                                if let std::net::IpAddr::V4(ip) = addr.ip(){
+                                    data.extend_from_slice(ip.octets().as_ref());
+                                }
+                                data.extend_from_slice(addr.port().to_be_bytes().as_ref());
+                                c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
+                            }
+                        }
+                        Some(LinkState::TryConnectAToB(addr_id,addr,time , times)) => {
+                            if let Some(c) = cls.get_mut(&a)
+                            {
+                                let mut data = Vec::<u8>::new();
+                                if let std::net::IpAddr::V4(ip) = addr.ip(){
+                                    data.extend_from_slice(ip.octets().as_ref());
+                                }
+                                data.extend_from_slice(addr.port().to_be_bytes().as_ref());
+                                c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
+                            }
+                        }
+                        Some(LinkState::Failed)=>{
+                            need_rm = true;
+                        }
+                        _ => {}
+                    }
                 }
             }
+            drop(map);
+            if need_rm{
+                println!("Remove LinkData {}",&k);
+                self.data.remove(&k).await;
+            }
         }
+    }
+
+    fn exec_duration(&self) -> Option<Duration> {
+        Some(Duration::from_secs_f32(1f32))
     }
 }
 

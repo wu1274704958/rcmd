@@ -1,7 +1,3 @@
-use async_std::task;
-use std::time::SystemTime;
-use tokio::time::{Duration, sleep};
-use std::ops::Sub;
 use futures::executor::block_on;
 
 
@@ -32,5 +28,5 @@ async fn dance() { println!("dance"); }
 
 
 fn main() {
-    let song = block_on(async_main());
+    let _song = block_on(async_main());
 }
