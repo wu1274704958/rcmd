@@ -12,6 +12,16 @@ use std::time::{SystemTime, Duration};
 pub struct P2POnDeadPlug{
     data: Arc<P2PLinkData>
 }
+
+impl P2POnDeadPlug{
+    pub fn new(data:Arc<P2PLinkData>)-> P2POnDeadPlug
+    {
+        P2POnDeadPlug{
+            data
+        }
+    }
+}
+
 #[async_trait]
 impl Plug for P2POnDeadPlug {
     type ABClient = AbClient;
@@ -66,6 +76,8 @@ impl Plug for P2PPlug {
             {
                 let a = d.a();
                 let b = d.b();
+                let a_ = a.to_be_bytes();
+                let b_ = b.to_be_bytes();
                 let mut cls = clients.lock().await;
                 let both_alive = cls.contains_key(&a) && cls.contains_key(&b);
                 need_rm = !both_alive;
@@ -73,11 +85,11 @@ impl Plug for P2PPlug {
                 if !both_alive {
                     if let Some(c) = cls.get_mut(&a)
                     {
-                        c.push_msg(b.to_be_bytes().to_vec(), EXT_ERR_P2P_CP_OFFLINE);
+                        c.push_msg(b_.to_vec(), EXT_ERR_P2P_CP_OFFLINE);
                     }
                     if let Some(c) = cls.get_mut(&b)
                     {
-                        c.push_msg(a.to_be_bytes().to_vec(), EXT_ERR_P2P_CP_OFFLINE);
+                        c.push_msg(a_.to_vec(), EXT_ERR_P2P_CP_OFFLINE);
                     }
                 }else{
                     if let LinkState::Agreed = d.state() 
@@ -119,6 +131,14 @@ impl Plug for P2PPlug {
                         }
                         Some(LinkState::Failed)=>{
                             need_rm = true;
+                            if let Some(c) = cls.get_mut(&a)
+                            {
+                                c.push_msg(b_.to_vec(), EXT_ERR_P2P_LINK_FAILED);
+                            }
+                            if let Some(c) = cls.get_mut(&b)
+                            {
+                                c.push_msg(a_.to_vec(), EXT_ERR_P2P_LINK_FAILED);
+                            }
                         }
                         _ => {}
                     }

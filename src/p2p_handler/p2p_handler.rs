@@ -94,33 +94,39 @@ impl SubHandle for P2PHandlerSer{
         match ext {
             EXT_REQ_HELP_LINK_P2P_CS => {
                 let mut stream = Stream::new(data);
+                let mut respo = data[0..size_of::<usize>()].to_vec();
                 let cp_lid = match usize::stream_parse(&mut stream)
                 {
                     Some(v) =>{ v }
-                    None => { return Some((EXT_AGREEMENT_ERR_CODE.to_be_bytes().to_vec(),EXT_REQ_HELP_LINK_P2P_SC)); }
+                    None => { 
+                        respo.extend_from_slice(EXT_AGREEMENT_ERR_CODE.to_be_bytes().as_ref());
+                        return Some((respo,EXT_REQ_HELP_LINK_P2P_SC)); 
+                    }
                 };
                 let mut cls = clients.lock().await;
                 let self_addr = cls.get(&id).unwrap().addr;
                 let cp = if let Some(v) = cls.get_mut(&cp_lid) {v}else{
-                    return Some((EXT_ERR_NOT_FOUND_LID.to_be_bytes().to_vec(),EXT_REQ_HELP_LINK_P2P_SC));
+                    respo.extend_from_slice(EXT_ERR_P2P_CP_OFFLINE.to_be_bytes().as_ref());
+                    return Some((respo,EXT_REQ_HELP_LINK_P2P_SC));
                 };
-            
 
                 let addrs = if let Some(v) = self.parse_addr(&mut stream)
                 {
                     v
                 }else {
-                    return Some((EXT_AGREEMENT_ERR_CODE.to_be_bytes().to_vec(), EXT_REQ_HELP_LINK_P2P_SC));
+                    respo.extend_from_slice(EXT_AGREEMENT_ERR_CODE.to_be_bytes().as_ref());
+                    return Some((respo, EXT_REQ_HELP_LINK_P2P_SC));
                 };
 
                 if self.data.insert(id.clone(),cp_lid,addrs,self_addr,cp.addr).await.is_none()
                 {
-                    return Some((EXT_ERR_LINK_DATA_ALREADY_EXIST.to_be_bytes().to_vec(),EXT_REQ_HELP_LINK_P2P_SC));
+                    respo.extend_from_slice(EXT_ERR_LINK_DATA_ALREADY_EXIST.to_be_bytes().as_ref());
+                    return Some((respo,EXT_REQ_HELP_LINK_P2P_SC));
                 }
 
                 cp.push_msg(id.to_be_bytes().to_vec(),EXT_REQ_LINK_P2P_SC);
-
-                Some((0u32.to_be_bytes().to_vec(),EXT_REQ_HELP_LINK_P2P_SC))
+                respo.extend_from_slice(0u32.to_be_bytes().as_ref());
+                Some((respo,EXT_REQ_HELP_LINK_P2P_SC))
             }
             EXT_REQ_LINK_P2P_CS => {
                 let mut stream = Stream::new(data);
@@ -173,12 +179,82 @@ impl SubHandle for P2PHandlerSer{
                     return Some((respo,EXT_REQ_LINK_P2P_SC));
                 }
             }
+            EXT_P2P_CONNECT_SUCCESS_STAGE1_CS => {
+                let mut stream = Stream::new(data);
+                let mut respo = data[0..size_of::<usize>()].to_vec();
+                let cp_lid = match usize::stream_parse(&mut stream)
+                {
+                    Some(v) =>{ v }
+                    None => { return Some((EXT_AGREEMENT_ERR_CODE.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_STAGE1_SC)); }
+                };
+                let cls = clients.lock().await;
+                if !cls.contains_key(&cp_lid) {
+                    return Some((respo, EXT_ERR_P2P_CP_OFFLINE));
+                }
+                let key = LinkData::gen_key(id.clone(),cp_lid);
+                let mut map = self.data.map.lock().await;
+                let link_data = if let Some(v) = map.get_mut(&key) {v}
+                else{
+                    respo.extend_from_slice(EXT_ERR_NOT_FOUND_LINK_DATA.to_be_bytes().as_ref());
+                    return Some((respo,EXT_P2P_CONNECT_SUCCESS_STAGE1_SC));
+                };
+
+                match link_data.state() {
+                    LinkState::TryConnectBToA(addr_id, _, _, _) |
+                    LinkState::TryConnectAToB(addr_id, _, _, _) => {
+                        link_data.state = LinkState::Step1Success(cp_lid,addr_id,SystemTime::now());
+                    }
+                    _ => {
+                        respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
+                        return Some((respo,EXT_P2P_CONNECT_SUCCESS_STAGE1_SC));
+                    }
+                }
+
+                respo.extend_from_slice(0u32.to_be_bytes().as_ref());
+                Some((respo,EXT_P2P_CONNECT_SUCCESS_STAGE1_SC))
+            }
+            EXT_P2P_CONNECT_SUCCESS_CS => {
+                let mut stream = Stream::new(data);
+                let mut respo = data[0..size_of::<usize>()].to_vec();
+                let cp_lid = match usize::stream_parse(&mut stream)
+                {
+                    Some(v) =>{ v }
+                    None => { return Some((EXT_AGREEMENT_ERR_CODE.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_SC)); }
+                };
+                let cls = clients.lock().await;
+                if !cls.contains_key(&cp_lid) {
+                    return Some((respo, EXT_P2P_CONNECT_SUCCESS_SC));
+                }
+
+                let key = LinkData::gen_key(id.clone(),cp_lid);
+                let mut map = self.data.map.lock().await;
+                let link_data = if let Some(v) = map.get_mut(&key) {v}
+                else{
+                    respo.extend_from_slice(EXT_ERR_NOT_FOUND_LINK_DATA.to_be_bytes().as_ref());
+                    return Some((respo,EXT_P2P_CONNECT_SUCCESS_SC));
+                };
+
+                match link_data.state() {
+                    LinkState::Step1Success(lid, addr_id, _) => {
+                        link_data.state = LinkState::Step2Success(lid,addr_id);
+                    }
+                    _ => {
+                        respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
+                        return Some((respo,EXT_P2P_CONNECT_SUCCESS_SC));
+                    }
+                }
+
+                respo.extend_from_slice(0u32.to_be_bytes().as_ref());
+                Some((respo,EXT_P2P_CONNECT_SUCCESS_SC))
+            }
             _ => {None}
         }
     }
     fn interested(&self,ext:u32)->bool{
         ext == EXT_REQ_HELP_LINK_P2P_CS ||
-            ext == EXT_REQ_LINK_P2P_CS
+        ext == EXT_REQ_LINK_P2P_CS ||
+        ext == EXT_P2P_CONNECT_SUCCESS_STAGE1_CS || 
+        ext == EXT_P2P_CONNECT_SUCCESS_CS
     }
 
 }

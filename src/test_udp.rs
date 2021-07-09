@@ -10,6 +10,8 @@ extern crate lazy_static;
 mod comm;
 mod p2p_handler;
 
+use p2p_handler::p2p_handler::{P2PLinkData,P2PHandlerSer};
+use p2p_handler::p2p_plugs;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 use std::sync::{Arc};
@@ -56,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     let config = tools::parse_args(config);
 
     let mut handler = DefHandler::<TestHandler>::new();
-    let mut parser = DefParser::new();
+    let parser = DefParser::new();
     let mut plugs = DefPlugMgr::<HeartBeat>::with_time();
     let mut dead_plugs = DefPlugMgr::<HeartBeat>::new();
 
@@ -64,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     let user_map = Arc::new(Mutex::new(HashMap::<usize,model::user::User>::new()));
     let login_map = Arc::new(Mutex::new(HashMap::<String,usize>::new()));
     let temp_permission = TempPermission::new();
+    let p2p_data = Arc::new(P2PLinkData::new());
 
     {
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
@@ -77,14 +80,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         handler.add_handler(Arc::new(handlers::exec_cmd::ExecCmd::new(user_map.clone())));
         handler.add_handler(Arc::new(handlers::send_file::SendFile::new(user_map.clone(),temp_permission.clone())));
         handler.add_handler(Arc::new(handlers::pull_file::PullFile::new(user_map.clone(),temp_permission.clone())));
+        handler.add_handler(Arc::new(P2PHandlerSer::new(p2p_data.clone())));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
+        plugs.add_plug(Arc::new(p2p_plugs::P2PPlug::new(p2p_data.clone())));
 
         dead_plugs.add_plug(Arc::new(handlers::login::OnDeadPlug::new(
             dbmgr.clone(),
             user_map.clone(),
             login_map.clone(),
             temp_permission.clone())));
+        dead_plugs.add_plug(Arc::new(p2p_plugs::P2POnDeadPlug::new(p2p_data.clone())));
     }
 
     let server = UdpServer::new(
