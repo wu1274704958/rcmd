@@ -19,14 +19,13 @@ use std::io::*;
 use extc::*;
 use rcmd_suit::tools;
 use rcmd_suit::clients::udp_client::UdpClient;
-use std::net::{SocketAddr, Ipv4Addr, SocketAddrV4, IpAddr};
+use std::net::{ IpAddr};
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::client_handler::{DefHandler, Handle};
 use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE};
 use rcmd_suit::utils::udp_sender::{DefUdpSender, USErr};
 use rcmd_suit::client_plug::client_plug::ClientPluCollect;
 use crate::client_plugs::p2p_plugs::P2PPlug;
-use tokio::net::UdpSocket;
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -69,7 +68,9 @@ async fn main() -> io::Result<()>
     }
 
     let mut plugs = ClientPluCollect::<P2PPlug>::new();
-    plugs.add_plug(Arc::new(P2PPlug::new()));
+    plugs.add_plug(Arc::new(P2PPlug::new(msg_queue.clone())));
+
+    let client_plug_ptr = Arc::new(plugs);
 
     let console = {
         let msg_queue = msg_queue.clone();
@@ -90,7 +91,7 @@ async fn main() -> io::Result<()>
         let run = client.run::<DefUdpSender,P2PPlug>(
             args.ip,args.port,
             msg_split_ignore,msg_split_ignore,
-        Arc::new(plugs));
+            client_plug_ptr);
         futures::join!(console,run);
     }
 

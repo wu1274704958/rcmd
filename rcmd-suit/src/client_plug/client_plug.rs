@@ -1,18 +1,8 @@
 use std::sync::Arc;
-use std::collections::HashMap;
-use crate::ab_client::AbClient;
-use std::collections::hash_map::RandomState;
-use crate::agreement::Message;
-use std::future::Future;
-use async_std::task::Context;
-use tokio::macros::support::{Pin, Poll};
-use std::marker::PhantomData;
-use std::ops::{DerefMut, Deref};
-use std::time::SystemTime;
-use tokio::sync::Mutex;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 
+use crate::{agreement::Message};
 #[async_trait]
 pub trait ClientPlug:Send + Sync {
     type SockTy;
@@ -25,7 +15,7 @@ pub trait ClientPlug:Send + Sync {
     async fn on_stop(&self);
     async fn on_recv_oth_msg(&self,addr:SocketAddr,data:&[u8]);
     async fn on_lauch_loop(&self);
-    fn capture(&self,ext:u32) -> bool{false}
+    async fn handle(&self,_msg:Message<'_>) {}
 }
 
 pub struct ClientPluCollect<T> where T:ClientPlug {
@@ -123,4 +113,13 @@ impl<T> ClientPluCollect<T>  where T:ClientPlug {
             plug.on_lauch_loop().await;
         }
     }
+
+    pub async fn handle(&self,_msg:Message<'_>) {
+        for i in 0..self.plug_count()
+        {
+            let plug = self.get_plug(i);
+            plug.handle(_msg).await;
+        }
+    }
+
 }

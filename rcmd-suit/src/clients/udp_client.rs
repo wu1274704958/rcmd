@@ -350,6 +350,7 @@ impl <'a,T,A> UdpClient<T,A>
                             continue;
                         }
                     }
+                    plug_collect.handle(m).await;
                     if let Some((d,e)) = self.handler.handle_ex(m)
                     {
                         self.send(d,e).await;

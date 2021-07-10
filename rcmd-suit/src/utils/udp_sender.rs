@@ -195,6 +195,7 @@ impl Debug for USErr
 #[repr(u32)]
 #[derive(TryFromPrimitive)]
 #[derive(Copy, Clone)]
+#[allow(non_camel_case_types)]
 enum SpecialExt {
     send_recv = u32::max_value(),
     miss_cache = u32::max_value() - 1,

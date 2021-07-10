@@ -85,7 +85,7 @@ impl Into<usize> for SkipRt{
 }
 
 impl StreamParse for SkipRt {
-    fn stream_parse(stream: &mut Stream) -> Option<Self> {
+    fn stream_parse(_stream: &mut Stream) -> Option<Self> {
         None
     }
 

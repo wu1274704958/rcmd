@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem::size_of, sync::Arc};
 use crate::p2p_handler::p2p_handler::{P2PLinkData,LinkState};
 use rcmd_suit::plug::Plug;
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ impl Plug for P2POnDeadPlug {
     type Id = usize;
     type Config = Config;
 
-    async fn run(&self, id: Self::Id, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>>>>, config: Arc<Self::Config>) where Self::Id: Copy {
+    async fn run(&self, id: Self::Id, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>>>>, _config: Arc<Self::Config>) where Self::Id: Copy {
         if let Some(k) = self.data.find_key(id).await
         {
             if let Some(d) = self.data.remove(&k).await{
@@ -65,7 +65,7 @@ impl Plug for P2PPlug {
     type Id = usize;
     type Config = Config;
 
-    async fn run(&self, id: Self::Id, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>>>>, config: Arc<Self::Config>) where Self::Id: Copy {
+    async fn run(&self, id: Self::Id, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>>>>, _config: Arc<Self::Config>) where Self::Id: Copy {
 
         if let Some(k) = self.data.find_key(id).await
         {
@@ -94,19 +94,21 @@ impl Plug for P2PPlug {
                 }else{
                     if let LinkState::Agreed = d.state() 
                     {
-                        let verify_code = d.verify_code().as_bytes().to_vec();
+                        let mut verify_code = b.to_be_bytes().to_vec();
+                        verify_code.extend_from_slice(d.verify_code().as_bytes());
                         if let Some(c) = cls.get_mut(&a)
                         {
                             c.push_msg(verify_code.clone(), EXT_P2P_SYNC_VERIFY_CODE_SC);
                         }
                         if let Some(c) = cls.get_mut(&b)
                         {
+                            (&mut verify_code[0..size_of::<usize>()]).extend_from_slice(a.to_be_bytes().as_ref());
                             c.push_msg(verify_code, EXT_P2P_SYNC_VERIFY_CODE_SC);
                         }
                     }
                     match d.next_state(clients).await {
 
-                        Some(LinkState::TryConnectBToA(addr_id,addr,time , times)) => {
+                        Some(LinkState::TryConnectBToA(_addr_id,addr,_time , _times)) => {
                             
                             if let Some(c) = cls.get_mut(&b)
                             {
@@ -118,7 +120,7 @@ impl Plug for P2PPlug {
                                 c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
                             }
                         }
-                        Some(LinkState::TryConnectAToB(addr_id,addr,time , times)) => {
+                        Some(LinkState::TryConnectAToB(_addr_id,addr,_time , _times)) => {
                             if let Some(c) = cls.get_mut(&a)
                             {
                                 let mut data = Vec::<u8>::new();
