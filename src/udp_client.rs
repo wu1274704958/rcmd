@@ -68,13 +68,14 @@ async fn main() -> io::Result<()>
     }
 
     let mut plugs = ClientPluCollect::<P2PPlug>::new();
-    plugs.add_plug(Arc::new(P2PPlug::new(msg_queue.clone())));
+    let p2p_plug = Arc::new(P2PPlug::new(msg_queue.clone()));
+    plugs.add_plug(p2p_plug.clone());
 
     let client_plug_ptr = Arc::new(plugs);
 
     let console = {
         let msg_queue = msg_queue.clone();
-        console(msg_queue,is_runing.clone())
+        console(msg_queue,is_runing.clone(),p2p_plug.clone())
     };
 
     {
@@ -98,7 +99,11 @@ async fn main() -> io::Result<()>
     Ok(())
 }
 #[allow(unused_assignments)]
-async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc<Mutex<bool>>) -> io::Result<()>
+async fn console(
+    msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+    is_runing: Arc<Mutex<bool>>,
+    p2p_plug: Arc<P2PPlug>
+) -> io::Result<()>
 {
     loop {
         {
@@ -242,6 +247,14 @@ async fn console(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, is_runing: Arc
                         }
                     }
                 }
+            }
+            "9" => {
+                if cmds.len() < 2 {continue;}
+                let lid = match usize::from_str(cmds[1].trim()){
+                    Ok(v) => {v}
+                    Err(e) => { dbg!(e); continue;}
+                };
+                p2p_plug.req_link(lid).await;
             }
             _ => {
                 let help = r"

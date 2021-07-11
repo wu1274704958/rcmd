@@ -73,7 +73,7 @@ impl P2PHandlerSer{
             for _x in 0..4{
                if let Some(v) = stream.next()
                {
-                    arr[i as usize] = v;
+                    arr[_x as usize] = v;
                }else{
                    return None;
                }
@@ -371,8 +371,8 @@ impl LinkData {
 
     fn try_connect_local_times() -> u8 { 3u8 }
     fn try_connect_times() -> u8 { 6u8 } //必须偶数
-    fn try_wait_time() -> Duration { Duration::from_secs(3) }
-    fn wait_step2_time() -> Duration { Duration::from_secs(18) }
+    fn try_wait_time() -> Duration { Duration::from_secs(20) }
+    fn wait_step2_time() -> Duration { Duration::from_secs(20) }
     //优先取_1的地址
     fn get_local_addr_next_translation(&self,_1:usize,_2:usize,addr_id:u8) -> Option<(SocketAddr,u8,bool)>
     {

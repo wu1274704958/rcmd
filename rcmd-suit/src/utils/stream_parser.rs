@@ -2,6 +2,7 @@ use std::mem::size_of;
 use pm_gen::gen_stream_parse;
 use pm_gen::StreamParse;
 
+#[derive(Debug)]
 pub struct Stream<'a>{
     data:&'a [u8],
     ptr: usize
@@ -39,6 +40,13 @@ impl<'a> Stream<'a>{
         if e >= self.data.len() { return false;}
         self.ptr += n;
         true
+    }
+
+    pub fn get_rest(&mut self) -> &'a[u8]
+    {
+        let res = &self.data[self.ptr..];
+        self.ptr += res.len();
+        res
     }
 
 }
@@ -173,7 +181,14 @@ fn test_gen_stream_parse() {
     assert_eq!(x,data2.0);
     assert_eq!(y,data2.1);
     assert_eq!(z,data2.3);
-
+    {
+        let a = [0,1,2,3,4];
+        let mut stream = Stream::new(a.as_ref());
+        stream.next();
+        stream.next();
+        assert_eq!( &[2,3,4],stream.get_rest());
+        assert_eq!( &[] as &[u8],stream.get_rest());
+    }
 }
 
 #[derive(StreamParse)]

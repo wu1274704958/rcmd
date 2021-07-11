@@ -3,10 +3,32 @@ use std::{collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}};
 use tokio::net::UdpSocket;
 use rcmd_suit::utils::udp_sender::USErr;
 use async_trait::async_trait;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr};
 use tokio::sync::Mutex;
+use num_enum::TryFromPrimitive;
 
 use crate::extc::*;
+use std::mem::size_of;
+use std::convert::TryFrom;
+use std::process::abort;
+
+#[repr(u16)]
+#[derive(TryFromPrimitive)]
+#[derive(Copy, Clone)]
+#[allow(non_camel_case_types)]
+enum Ext {
+    Hello1 = 1,
+    Hello2 = 2,
+    Hello3 = 3,
+    Hello4 = 4
+}
+
+impl Into<u16> for Ext{
+    fn into(self) -> u16
+    {
+        self as u16
+    }
+}
 
 pub enum P2PErr {
     LinkExist,
@@ -15,6 +37,7 @@ pub enum P2PErr {
     BadState
 }
 
+#[derive(Eq, PartialEq,Debug)]
 enum LinkState{
     WaitAccept,
     Accepted,
@@ -24,6 +47,11 @@ enum LinkState{
     Stage2Success(bool),
     Disconnected,
     ConnectFailed,
+    WaitingHello1,
+    WaitingHello2,
+    WaitingHello3,
+    WaitingHello4,
+    PrepareRealLink
 }
 
 struct LinkData
@@ -70,7 +98,7 @@ impl P2PPlug
         }
     }
 
-    fn get_local_ip() -> Vec<Ipv4Addr>
+    pub fn get_local_ip() -> Vec<Ipv4Addr>
     {
         let mut res = Vec::new();
         for iface in get_if_addrs::get_if_addrs().unwrap() {
@@ -223,6 +251,19 @@ impl P2PPlug
         }
     }
 
+    async fn get_verify_code_cpid(&self,id:usize) -> Option<Arc<String>>
+    {
+        let d = self.data.lock().await;
+        if let Some(d) = d.link_map.get(&id)
+        {
+            if let Some(ref c) = d.verify_code
+            {
+                return c.upgrade();
+            }
+        }
+        None
+    }
+
     async fn set_state(&self,cpid:usize,st:LinkState) -> bool
     {
         let mut d = self.data.lock().await;
@@ -235,6 +276,114 @@ impl P2PPlug
         }
     }
 
+
+    fn need_parse_cpid(ext:u32) -> bool
+    {
+        ext == EXT_REQ_LINK_P2P_SC ||
+        ext == EXT_ERR_P2P_LINK_FAILED||
+        ext == EXT_ERR_P2P_CP_OFFLINE ||
+        ext == EXT_REQ_LINK_P2P_REJECTED_SC ||
+        ext == EXT_P2P_SYNC_VERIFY_CODE_SC ||
+        ext == EXT_P2P_WAIT_CONNECT_SC ||
+        ext == EXT_P2P_TRY_CONNECT_SC
+    }
+
+    fn parse_addr(s:&mut Stream) -> Option<SocketAddr>
+    {
+        let ip = if let Some(r) = s.next_range(4)
+        {
+            Ipv4Addr::new(r[0],r[1],r[2],r[3])
+        }else{
+            return None;
+        };
+        let port = if let Some(port) = u16::stream_parse(s)
+        {
+            port
+        }else{return None;};
+        Some(SocketAddr::new(IpAddr::V4(ip),port))
+    }
+
+    async fn send_udp_msg(&self,addr:SocketAddr,msg:&[u8],times:u8) -> Result<(),P2PErr>
+    {
+        let d = self.data.lock().await;
+        if let Some(ref s) = d.socket
+        {
+            for _ in 0..times{
+                s.send_to(msg,addr).await;
+            }
+        }else{
+            return Err(P2PErr::NotReady);
+        }
+        Ok(())
+    }
+
+    fn wrap(d:&[u8],ext:u16) -> Vec<u8>
+    {
+        let mut res = Vec::new();
+        res.push(19);
+        let l = (d.len() + Self::wrap_len()) as u32;
+        res.extend_from_slice( l.to_be_bytes().as_ref() );
+        res.extend_from_slice(ext.to_be_bytes().as_ref());
+        res.extend_from_slice(d);
+        res.push(20);
+        res
+    }
+
+    const fn wrap_len() -> usize { size_of::<u8>() + size_of::<u8>() + size_of::<u32>() + size_of::<u16>() }
+
+    fn get_waiting_st(ext:Ext,addr:SocketAddr) -> LinkState
+    {
+        match ext {
+            Ext::Hello1 => LinkState::WaitingHello1,
+            Ext::Hello2 => LinkState::TryConnect(addr),
+            Ext::Hello3 => LinkState::WaitingHello3,
+            Ext::Hello4 => LinkState::Stage1Success(false),
+            _ => {
+                abort()
+            }
+        }
+    }
+
+    fn get_next_st(ext:Ext) -> LinkState
+    {
+        match ext {
+            Ext::Hello1 => LinkState::WaitingHello3,
+            Ext::Hello2 => LinkState::Stage1Success(false),
+            Ext::Hello3 => LinkState::Stage1Success(true),
+            Ext::Hello4 => LinkState::PrepareRealLink,
+            _ => {
+                abort()
+            }
+        }
+    }
+
+    fn unwrap(d:&[u8]) -> Option<(&[u8],u16)>
+    {
+        let l = d.len();
+        if l > 1 && d[0] == 19 && d[l - 1] == 20
+        {
+            let mut s = Stream::new(d);
+            s.next();
+            if let Some(len) = u32::stream_parse(&mut s)
+            {
+                if len == l as u32
+                {
+                    if let Some(ext) = u16::stream_parse(&mut s)
+                    {
+                        return if let Some(v) = s.next_range(l - Self::wrap_len())
+                        {
+                            Some((v,ext))
+                        }else{
+                            None
+                        };
+                    }else{
+                        return None;
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 
 #[async_trait]
@@ -271,7 +420,59 @@ impl ClientPlug for P2PPlug
     }
 
     async fn on_recv_oth_msg(&self, addr: SocketAddr, data: &[u8]) {
-        println!("recv other msg from {:?}\n{:?}",&addr,data);
+        //println!("recv other msg from {:?}\n{:?}",&addr,data);
+        if let Some((msg,ext)) = Self::unwrap(data)
+        {
+            let e =  Ext::try_from(ext).unwrap();
+            match e {
+                Ext::Hello1 |
+                Ext::Hello2 |
+                Ext::Hello3 |
+                Ext::Hello4
+                => {
+                    let code = String::from_utf8_lossy(msg).to_string();
+                    if let Some(cpid) = self.get_cpid_verify_code(code).await{
+                        let mut send_hi = false;
+                        let mut d = self.data.lock().await;
+                        if let Some(link) = d.link_map.get_mut(&cpid)
+                        {
+                            if link.state == Self::get_waiting_st(e,addr){
+                                send_hi = if ext == 4 { false } else{ true };
+                                link.state = Self::get_next_st(e);
+
+                                match e {
+                                    Ext::Hello2 => {
+                                        link.connected_addr = Some(addr);
+                                    }
+                                    Ext::Hello3 => {
+                                        link.connected_addr = Some(addr);
+                                        //准备p2p服务器
+                                        println!("准备p2p服务器");
+                                    }
+                                    Ext::Hello4 => {
+                                        self.send_data(link.cp.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_STAGE1_CS).await;
+                                        //准备p2p client
+                                        println!("准备p2p client");
+                                    }
+                                    _ => {}
+                                }
+                            }else{
+                                println!("not eq {:?} {:?}",link.state,Self::get_waiting_st(e,addr));
+                            }
+                        }
+                        drop(d);
+                        if send_hi{
+                            let d = Self::wrap(msg,ext + 1);
+                            self.send_udp_msg(addr,d.as_slice(),1);
+                        }
+                    }
+                }
+
+                _ => {}
+            }
+        }else{
+
+        }
     }
 
     async fn on_lauch_loop(&self) {
@@ -279,24 +480,58 @@ impl ClientPlug for P2PPlug
     }
     #[allow(non_snake_case)]
     async fn handle(&self, _msg:rcmd_suit::agreement::Message<'_>) {
+        let mut stream = Stream::new(_msg.msg);
+        let mut cpid = None;
+        if Self::need_parse_cpid(_msg.ext){
+            if let Some(id) = usize::stream_parse(&mut stream)
+            {
+                cpid = Some(id);
+            }else{
+                println!("需要cpid 但是解析失败 {}",_msg.ext);
+                return;
+            }
+        }
+
         match _msg.ext{
             EXT_REQ_LINK_P2P_SC => {
-                let mut stream = Stream::new(_msg.msg);
-                if let Some(cpid) = usize::stream_parse(&mut stream)
-                {
-                    self.add_link(LinkState::WaitAccept, cpid).await;
-                    //先自动同意
-                    self.accept_p2p(cpid, true).await;
-                }
+                let cpid = cpid.unwrap();
+                println!("收到请求p2p连接 cp {}",cpid);
+                self.add_link(LinkState::WaitAccept, cpid).await;
+                //先自动同意
+                self.accept_p2p(cpid, true).await;
             }
+            EXT_ERR_P2P_LINK_FAILED|
+            EXT_ERR_P2P_CP_OFFLINE |
             EXT_REQ_LINK_P2P_REJECTED_SC => {
-                let mut stream = Stream::new(_msg.msg);
-                if let Some(cpid) = usize::stream_parse(&mut stream)
+                let cpid = cpid.unwrap();
+                println!("客户端删除link cp {}",cpid);
+                self.rm_link(cpid).await;
+            }
+            EXT_P2P_SYNC_VERIFY_CODE_SC => {
+                let cpid = cpid.unwrap();
+                let str = String::from_utf8_lossy(stream.get_rest()).to_string();
+                println!("同步验证码 cp {} code {}",cpid,str);
+
+                self.set_verify_code(cpid,str).await;
+            }
+            EXT_P2P_WAIT_CONNECT_SC => {
+                let cpid = cpid.unwrap();
+                println!("wait connect");
+                self.set_state(cpid,LinkState::WaitingHello1).await;
+            }
+            EXT_P2P_TRY_CONNECT_SC => {
+                let cpid = cpid.unwrap();
+                if let Some(addr) = Self::parse_addr(&mut stream)
                 {
-                    self.rm_link(cpid).await;
+                    if let Some(c) = self.get_verify_code_cpid(cpid).await
+                    {
+                        println!("try connect {:?}",addr);
+                        self.set_state(cpid,LinkState::TryConnect(addr)).await;
+                        let data = Self::wrap(c.as_bytes(),Ext::Hello1.into());
+                        self.send_udp_msg(addr,data.as_slice(),1).await;
+                    }
                 }
             }
-            
             _=>{}
         }
     }

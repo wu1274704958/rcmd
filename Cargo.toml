@@ -27,6 +27,7 @@ encoding_rs = "0.8.26"
 subprocess = "0.2.6"
 rsa = "0.3.0"
 rand = { version = "0.7.0", default-features = false }
+num_enum = "0.5"
 
 [dependencies.rcmd-suit]
 path = "rcmd-suit"

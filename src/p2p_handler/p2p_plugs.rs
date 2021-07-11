@@ -102,17 +102,20 @@ impl Plug for P2PPlug {
                         }
                         if let Some(c) = cls.get_mut(&b)
                         {
-                            (&mut verify_code[0..size_of::<usize>()]).extend_from_slice(a.to_be_bytes().as_ref());
+                            (&mut verify_code[0..size_of::<usize>()]).copy_from_slice(a.to_be_bytes().as_ref());
                             c.push_msg(verify_code, EXT_P2P_SYNC_VERIFY_CODE_SC);
                         }
                     }
                     match d.next_state(clients).await {
 
                         Some(LinkState::TryConnectBToA(_addr_id,addr,_time , _times)) => {
-                            
+                            if let Some(c) = cls.get_mut(&a)
+                            {
+                                c.push_msg(b_.to_vec(), EXT_P2P_WAIT_CONNECT_SC);
+                            }
                             if let Some(c) = cls.get_mut(&b)
                             {
-                                let mut data = Vec::<u8>::new();
+                                let mut data = a_.to_vec();
                                 if let std::net::IpAddr::V4(ip) = addr.ip(){
                                     data.extend_from_slice(ip.octets().as_ref());
                                 }
@@ -121,9 +124,13 @@ impl Plug for P2PPlug {
                             }
                         }
                         Some(LinkState::TryConnectAToB(_addr_id,addr,_time , _times)) => {
+                            if let Some(c) = cls.get_mut(&b)
+                            {
+                                c.push_msg(a_.to_vec(), EXT_P2P_WAIT_CONNECT_SC);
+                            }
                             if let Some(c) = cls.get_mut(&a)
                             {
-                                let mut data = Vec::<u8>::new();
+                                let mut data = b_.to_vec();
                                 if let std::net::IpAddr::V4(ip) = addr.ip(){
                                     data.extend_from_slice(ip.octets().as_ref());
                                 }
