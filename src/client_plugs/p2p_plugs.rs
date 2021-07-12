@@ -1,5 +1,5 @@
 use rcmd_suit::{client_plug::client_plug::ClientPlug, utils::stream_parser::{Stream,StreamParse}};
-use std::{collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}};
+use std::{collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}, usize};
 use tokio::net::UdpSocket;
 use rcmd_suit::utils::udp_sender::USErr;
 use async_trait::async_trait;
@@ -29,12 +29,25 @@ impl Into<u16> for Ext{
         self as u16
     }
 }
-
+#[derive(Debug)]
 pub enum P2PErr {
     LinkExist,
     NotFindAnyLocalAddr,
     NotReady,
-    BadState
+    BadState,
+    Wrap((i32,String))
+}
+
+impl From<std::io::Error> for P2PErr
+{
+    fn from(e: std::io::Error) -> Self {
+        let code = match e.raw_os_error() {
+            None => {-3}
+            Some(v) => {v}
+        };
+        let str = format!("{}",e);
+        P2PErr::Wrap((code,str))
+    }
 }
 
 #[derive(Eq, PartialEq,Debug)]
@@ -309,7 +322,10 @@ impl P2PPlug
         if let Some(ref s) = d.socket
         {
             for _ in 0..times{
-                s.send_to(msg,addr).await;
+                if let Err(e) = s.send_to(msg,addr).await
+                {
+                    return Err(P2PErr::from(e));
+                }
             }
         }else{
             return Err(P2PErr::NotReady);
@@ -420,7 +436,7 @@ impl ClientPlug for P2PPlug
     }
 
     async fn on_recv_oth_msg(&self, addr: SocketAddr, data: &[u8]) {
-        //println!("recv other msg from {:?}\n{:?}",&addr,data);
+        println!("recv other msg from {:?}\n{:?}",&addr,data);
         if let Some((msg,ext)) = Self::unwrap(data)
         {
             
@@ -465,7 +481,10 @@ impl ClientPlug for P2PPlug
                         drop(d);
                         if send_hi{
                             let d = Self::wrap(msg,ext + 1);
-                            self.send_udp_msg(addr,d.as_slice(),18).await;
+                            if let Err(e) = self.send_udp_msg(addr,d.as_slice(),18).await
+                            {
+                                println!("send udp msg {} failed {:?}",ext + 1,e);
+                            }
                         }
                     }
                 }
@@ -545,7 +564,10 @@ impl ClientPlug for P2PPlug
                         println!("try connect {:?}",addr);
                         self.set_state(cpid,LinkState::TryConnect(addr)).await;
                         let data = Self::wrap(c.as_bytes(),Ext::Hello1.into());
-                        self.send_udp_msg(addr,data.as_slice(),18).await;
+                        if let Err(e) = self.send_udp_msg(addr,data.as_slice(),18).await
+                        {
+                            println!("send udp msg {:?} failed {:?}",Ext::Hello1,e);
+                        }
                     }
                 }
             }
