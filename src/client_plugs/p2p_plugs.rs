@@ -423,7 +423,7 @@ impl ClientPlug for P2PPlug
         //println!("recv other msg from {:?}\n{:?}",&addr,data);
         if let Some((msg,ext)) = Self::unwrap(data)
         {
-            println!("get ext {:?} from {}",ext,addr);
+            
             let e =  Ext::try_from(ext).unwrap();
             match e {
                 Ext::Hello1 |
@@ -438,6 +438,7 @@ impl ClientPlug for P2PPlug
                         if let Some(link) = d.link_map.get_mut(&cpid)
                         {
                             if link.state == Self::get_waiting_st(e,addr){
+                                println!("get ext {:?} from {}",ext,addr);
                                 send_hi = if ext == 4 { false } else{ true };
                                 link.state = Self::get_next_st(e);
 
@@ -464,7 +465,7 @@ impl ClientPlug for P2PPlug
                         drop(d);
                         if send_hi{
                             let d = Self::wrap(msg,ext + 1);
-                            self.send_udp_msg(addr,d.as_slice(),3).await;
+                            self.send_udp_msg(addr,d.as_slice(),18).await;
                         }
                     }
                 }
@@ -544,7 +545,7 @@ impl ClientPlug for P2PPlug
                         println!("try connect {:?}",addr);
                         self.set_state(cpid,LinkState::TryConnect(addr)).await;
                         let data = Self::wrap(c.as_bytes(),Ext::Hello1.into());
-                        self.send_udp_msg(addr,data.as_slice(),3).await;
+                        self.send_udp_msg(addr,data.as_slice(),18).await;
                     }
                 }
             }
