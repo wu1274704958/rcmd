@@ -423,6 +423,7 @@ impl ClientPlug for P2PPlug
         //println!("recv other msg from {:?}\n{:?}",&addr,data);
         if let Some((msg,ext)) = Self::unwrap(data)
         {
+            //println!("msg {:?} ext {}",msg,ext);
             let e =  Ext::try_from(ext).unwrap();
             match e {
                 Ext::Hello1 |
@@ -457,13 +458,13 @@ impl ClientPlug for P2PPlug
                                     _ => {}
                                 }
                             }else{
-                                println!("not eq {:?} {:?}",link.state,Self::get_waiting_st(e,addr));
+                                //println!("not eq {:?} {:?}",link.state,Self::get_waiting_st(e,addr));
                             }
                         }
                         drop(d);
                         if send_hi{
                             let d = Self::wrap(msg,ext + 1);
-                            self.send_udp_msg(addr,d.as_slice(),1);
+                            self.send_udp_msg(addr,d.as_slice(),3).await;
                         }
                     }
                 }
@@ -480,6 +481,19 @@ impl ClientPlug for P2PPlug
     }
     #[allow(non_snake_case)]
     async fn handle(&self, _msg:rcmd_suit::agreement::Message<'_>) {
+        if match _msg.ext {
+            EXT_REQ_LINK_P2P_SC|
+            EXT_ERR_P2P_LINK_FAILED|
+            EXT_ERR_P2P_CP_OFFLINE |
+            EXT_REQ_LINK_P2P_REJECTED_SC|
+            EXT_P2P_SYNC_VERIFY_CODE_SC|
+            EXT_P2P_WAIT_CONNECT_SC |
+            EXT_P2P_TRY_CONNECT_SC => {
+                false
+            }
+            _ => {true}
+        }{ return; }
+
         let mut stream = Stream::new(_msg.msg);
         let mut cpid = None;
         if Self::need_parse_cpid(_msg.ext){
@@ -518,6 +532,8 @@ impl ClientPlug for P2PPlug
                 let cpid = cpid.unwrap();
                 println!("wait connect");
                 self.set_state(cpid,LinkState::WaitingHello1).await;
+
+                self.send_data(cpid.to_be_bytes().to_vec(), EXT_P2P_WAITING_CONNECT_CS).await;
             }
             EXT_P2P_TRY_CONNECT_SC => {
                 let cpid = cpid.unwrap();
@@ -528,7 +544,7 @@ impl ClientPlug for P2PPlug
                         println!("try connect {:?}",addr);
                         self.set_state(cpid,LinkState::TryConnect(addr)).await;
                         let data = Self::wrap(c.as_bytes(),Ext::Hello1.into());
-                        self.send_udp_msg(addr,data.as_slice(),1).await;
+                        self.send_udp_msg(addr,data.as_slice(),3).await;
                     }
                 }
             }

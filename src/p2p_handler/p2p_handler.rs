@@ -1,7 +1,8 @@
 use rcmd_suit::handler::SubHandle;
+use std::process::abort;
 use std::sync::Arc;
 use std::collections::HashMap;
-use std::{u8, usize};
+use std::{u32, u8, usize};
 use tokio::sync::Mutex;
 use async_trait::async_trait;
 use rcmd_suit::ab_client::AbClient;
@@ -18,8 +19,8 @@ use std::ptr::eq;
 pub enum LinkState{
     WaitResponse,
     Agreed,
-    TryConnectBToA(u8,SocketAddr,SystemTime,u8),
-    TryConnectAToB(u8,SocketAddr,SystemTime,u8),
+    TryConnectBToA(u8,SocketAddr,SystemTime,u8,u8),
+    TryConnectAToB(u8,SocketAddr,SystemTime,u8,u8),
     Failed,
     Step1Success(usize,u8,SystemTime),
     Step2Success(usize,u8)
@@ -68,7 +69,7 @@ impl P2PHandlerSer{
             None => { return None; }
         };
         let mut vs = Vec::with_capacity(addr_len as usize);
-        for i in 0..addr_len{
+        for _i in 0..addr_len{
             let mut arr = [0u8;4];
             for _x in 0..4{
                if let Some(v) = stream.next()
@@ -83,6 +84,18 @@ impl P2PHandlerSer{
 
         Some(vs)
     }
+
+    fn get_respones_ext(e:u32) -> u32
+    {
+        match e {
+            EXT_REQ_HELP_LINK_P2P_CS => EXT_REQ_HELP_LINK_P2P_SC,
+            EXT_ACCEPT_LINK_P2P_CS =>   EXT_ACCEPT_LINK_P2P_SC,
+            EXT_P2P_CONNECT_SUCCESS_STAGE1_CS =>  EXT_P2P_CONNECT_SUCCESS_STAGE1_SC,
+            EXT_P2P_CONNECT_SUCCESS_CS =>   EXT_P2P_CONNECT_SUCCESS_SC,
+            EXT_P2P_WAITING_CONNECT_CS=> EXT_P2P_WAITING_CONNECT_SC,
+            _=>{abort()}
+        }
+    }
 }
 
 #[async_trait]
@@ -91,28 +104,30 @@ impl SubHandle for P2PHandlerSer{
     type Id = usize;
 
     async fn handle(&self, data: &[u8], _len: u32, ext: u32, clients: &Arc<Mutex<HashMap<Self::Id, Box<Self::ABClient>>>>, id: Self::Id) -> Option<(Vec<u8>, u32)> where Self::Id: Copy {
+        let mut stream = Stream::new(data);
+        let mut respo = data[0..size_of::<usize>()].to_vec();
+        let cp_lid = match usize::stream_parse(&mut stream)
+        {
+            Some(v) =>{ v }
+            None => { 
+                respo.extend_from_slice(EXT_AGREEMENT_ERR_CODE.to_be_bytes().as_ref());
+                return Some((respo,Self::get_respones_ext(ext))); 
+            }
+        };
+        if cp_lid == id{
+            respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
+            return Some((respo,Self::get_respones_ext(ext)));
+        }
+        let mut cls = clients.lock().await;
+        let self_addr = cls.get(&id).unwrap().addr;
+        let cp = if let Some(v) = cls.get_mut(&cp_lid) {v}else{
+            return Some((respo, EXT_ERR_P2P_CP_OFFLINE));
+        };
+        
+        
         match ext {
             EXT_REQ_HELP_LINK_P2P_CS => {
-                let mut stream = Stream::new(data);
-                let mut respo = data[0..size_of::<usize>()].to_vec();
-                let cp_lid = match usize::stream_parse(&mut stream)
-                {
-                    Some(v) =>{ v }
-                    None => { 
-                        respo.extend_from_slice(EXT_AGREEMENT_ERR_CODE.to_be_bytes().as_ref());
-                        return Some((respo,EXT_REQ_HELP_LINK_P2P_SC)); 
-                    }
-                };
-                if cp_lid == id{
-                    respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
-                    return Some((respo,EXT_REQ_HELP_LINK_P2P_SC));
-                }
-                let mut cls = clients.lock().await;
-                let self_addr = cls.get(&id).unwrap().addr;
-                let cp = if let Some(v) = cls.get_mut(&cp_lid) {v}else{
-                    return Some((respo, EXT_ERR_P2P_CP_OFFLINE));
-                };
-
+            
                 let addrs = if let Some(v) = self.parse_addr(&mut stream)
                 {
                     v
@@ -132,26 +147,7 @@ impl SubHandle for P2PHandlerSer{
                 Some((respo,EXT_REQ_HELP_LINK_P2P_SC))
             }
             EXT_ACCEPT_LINK_P2P_CS => {
-                let mut stream = Stream::new(data);
-                let mut respo = data[0..size_of::<usize>()].to_vec();
-                let cp_lid = match usize::stream_parse(&mut stream)
-                {
-                    Some(v) =>{ v }
-                    None => { 
-                        respo.extend_from_slice(EXT_AGREEMENT_ERR_CODE.to_be_bytes().as_ref());
-                        return Some((respo,EXT_ACCEPT_LINK_P2P_SC)); 
-                    }
-                };
-                if cp_lid == id{
-                    respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
-                    return Some((respo,EXT_ACCEPT_LINK_P2P_SC));
-                }
-                let mut cls = clients.lock().await;
-                let cp = if let Some(v) = cls.get_mut(&cp_lid) {
-                    v
-                }else{
-                    return Some((respo, EXT_ERR_P2P_CP_OFFLINE));
-                };
+                
                 let accept = if let Some(v) = stream.next(){v == 1}
                 else{
                     respo.extend_from_slice(EXT_AGREEMENT_ERR_CODE.to_be_bytes().as_ref());
@@ -191,17 +187,7 @@ impl SubHandle for P2PHandlerSer{
                 }
             }
             EXT_P2P_CONNECT_SUCCESS_STAGE1_CS => {
-                let mut stream = Stream::new(data);
-                let mut respo = data[0..size_of::<usize>()].to_vec();
-                let cp_lid = match usize::stream_parse(&mut stream)
-                {
-                    Some(v) =>{ v }
-                    None => { return Some((EXT_AGREEMENT_ERR_CODE.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_STAGE1_SC)); }
-                };
-                let cls = clients.lock().await;
-                if !cls.contains_key(&cp_lid) {
-                    return Some((respo, EXT_ERR_P2P_CP_OFFLINE));
-                }
+                
                 let key = LinkData::gen_key(id.clone(),cp_lid);
                 let mut map = self.data.map.lock().await;
                 let link_data = if let Some(v) = map.get_mut(&key) {v}
@@ -211,8 +197,8 @@ impl SubHandle for P2PHandlerSer{
                 };
 
                 match link_data.state() {
-                    LinkState::TryConnectBToA(addr_id, _, _, _) |
-                    LinkState::TryConnectAToB(addr_id, _, _, _) => {
+                    LinkState::TryConnectBToA(addr_id, _, _, _,_) |
+                    LinkState::TryConnectAToB(addr_id, _, _, _,_) => {
                         link_data.state = LinkState::Step1Success(cp_lid,addr_id,SystemTime::now());
                     }
                     _ => {
@@ -225,17 +211,6 @@ impl SubHandle for P2PHandlerSer{
                 Some((respo,EXT_P2P_CONNECT_SUCCESS_STAGE1_SC))
             }
             EXT_P2P_CONNECT_SUCCESS_CS => {
-                let mut stream = Stream::new(data);
-                let mut respo = data[0..size_of::<usize>()].to_vec();
-                let cp_lid = match usize::stream_parse(&mut stream)
-                {
-                    Some(v) =>{ v }
-                    None => { return Some((EXT_AGREEMENT_ERR_CODE.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_SC)); }
-                };
-                let cls = clients.lock().await;
-                if !cls.contains_key(&cp_lid) {
-                    return Some((respo, EXT_P2P_CONNECT_SUCCESS_SC));
-                }
 
                 let key = LinkData::gen_key(id.clone(),cp_lid);
                 let mut map = self.data.map.lock().await;
@@ -258,6 +233,52 @@ impl SubHandle for P2PHandlerSer{
                 respo.extend_from_slice(0u32.to_be_bytes().as_ref());
                 Some((respo,EXT_P2P_CONNECT_SUCCESS_SC))
             }
+            EXT_P2P_WAITING_CONNECT_CS => {
+                let key = LinkData::gen_key(id.clone(),cp_lid);
+                let mut map = self.data.map.lock().await;
+                let link_data = if let Some(v) = map.get_mut(&key) {v}
+                else{
+                    respo.extend_from_slice(EXT_ERR_NOT_FOUND_LINK_DATA.to_be_bytes().as_ref());
+                    return Some((respo,Self::get_respones_ext(ext)));
+                };
+
+                match link_data.state() {
+                    
+                    LinkState::TryConnectBToA(addr_id, addr,_, times, 0)  => {
+                        
+                        if let Some(c) = cls.get_mut(&link_data.b)
+                        {
+                            let mut data = link_data.a.to_be_bytes().to_vec();
+                            if let std::net::IpAddr::V4(ip) = addr.ip(){
+                                data.extend_from_slice(ip.octets().as_ref());
+                            }
+                            data.extend_from_slice(addr.port().to_be_bytes().as_ref());
+                            c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
+                        }
+                        link_data.state = LinkState::TryConnectBToA(addr_id,addr,SystemTime::now(),times,1);
+                    }
+                    LinkState::TryConnectAToB(addr_id, addr,_, times, 0) => {
+                        if let Some(c) = cls.get_mut(&link_data.a)
+                        {
+                            let mut data = link_data.b.to_be_bytes().to_vec();
+                            if let std::net::IpAddr::V4(ip) = addr.ip(){
+                                data.extend_from_slice(ip.octets().as_ref());
+                            }
+                            data.extend_from_slice(addr.port().to_be_bytes().as_ref());
+                            c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
+                        }
+                        link_data.state = LinkState::TryConnectAToB(addr_id,addr,SystemTime::now(),times,1);
+                    }
+                    
+                     _ => {
+                         respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
+                         return Some((respo,Self::get_respones_ext(ext)));
+                     }
+                }
+                respo.extend_from_slice(0u32.to_be_bytes().as_ref());
+                return Some((respo,Self::get_respones_ext(ext)));
+            }
+            
             _ => {None}
         }
     }
@@ -265,7 +286,8 @@ impl SubHandle for P2PHandlerSer{
         ext == EXT_REQ_HELP_LINK_P2P_CS ||
         ext == EXT_ACCEPT_LINK_P2P_CS ||
         ext == EXT_P2P_CONNECT_SUCCESS_STAGE1_CS || 
-        ext == EXT_P2P_CONNECT_SUCCESS_CS
+        ext == EXT_P2P_CONNECT_SUCCESS_CS ||
+        ext == EXT_P2P_WAITING_CONNECT_CS
     }
 
 }
@@ -274,10 +296,10 @@ impl LinkData {
     pub fn gen_key(a:usize,b:usize) -> u128
     {
         return if a > b {
-            let mut r = a as u128;
+            let r = a as u128;
             (r << Self::get_digits(b)) | b as u128
         } else {
-            let mut r = b as u128;
+            let r = b as u128;
             (r << Self::get_digits(a)) | a as u128
         }
     }
@@ -324,6 +346,7 @@ impl LinkData {
     pub fn state(&self) -> LinkState {
         self.state
     }
+    #[allow(dead_code)]
     pub fn key(&self) -> u128 {
         self.key
     }
@@ -410,23 +433,23 @@ impl LinkData {
         }
     }
 
-    pub async fn next_state(&mut self,clients: &Arc<Mutex<HashMap<usize, Box<AbClient>>>>) -> Option<LinkState>
+    pub async fn next_state(&mut self,_clients: &Arc<Mutex<HashMap<usize, Box<AbClient>>>>) -> Option<LinkState>
     {
         match self.state {
             LinkState::Agreed => {
                 if self.a_addr.ip().eq(&self.b_addr.ip())//外网地址一致 可能在同一局域网下
                 {
                     let addrs = self.get_local_addr(self.a).unwrap();
-                    self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),1);
+                    self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),1,0);
                 }else{
                     if self.eq_local_addr(self.b,self.b_addr.ip()){
                         self.swap_ab();
                     }
-                    self.state = LinkState::TryConnectBToA(100,self.a_addr,SystemTime::now(),1);
+                    self.state = LinkState::TryConnectBToA(100,self.a_addr,SystemTime::now(),1,0);
                 }
                 return Some(self.state);
             }
-            LinkState::TryConnectBToA(addr_id, _,time, mut times) => {
+            LinkState::TryConnectBToA(addr_id, _,time, mut times,_) => {
                 
                 let now = SystemTime::now();
                 if addr_id == 100
@@ -437,7 +460,7 @@ impl LinkData {
                             if times > Self::try_connect_times(){ 
                                 self.set_state(LinkState::Failed);
                             }else{
-                                self.set_state(LinkState::TryConnectAToB(100,self.b_addr,now,times));
+                                self.set_state(LinkState::TryConnectAToB(100,self.b_addr,now,times,0));
                             }
                             return Some(self.state);
                         }
@@ -451,14 +474,14 @@ impl LinkData {
                                     self.state = LinkState::Failed;
                                 }else{
                                     let addrs = self.get_local_addr(self.a).unwrap();
-                                    self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),times + 1);
+                                    self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),times + 1,0);
                                 }
                             }else{
                                 let (addr,aid,same) = next.unwrap();
                                 if same {
-                                    self.state = LinkState::TryConnectBToA(aid,addr,SystemTime::now(),times);
+                                    self.state = LinkState::TryConnectBToA(aid,addr,SystemTime::now(),times,0);
                                 }else{
-                                    self.state = LinkState::TryConnectAToB(aid,addr,SystemTime::now(),times);
+                                    self.state = LinkState::TryConnectAToB(aid,addr,SystemTime::now(),times,0);
                                 }
                             }
                             return Some(self.state);
@@ -466,14 +489,14 @@ impl LinkData {
                     }
                 }
             }
-            LinkState::TryConnectAToB(addr_id, _,time, mut times) => {
+            LinkState::TryConnectAToB(addr_id, _,time, mut times,_) => {
                 let now = SystemTime::now();
                 if addr_id == 100
                 {
                     if let Ok(d) = now.duration_since(time){
                         if d >= Self::try_wait_time(){
                             times += 1;
-                            self.set_state(LinkState::TryConnectBToA(100,self.a_addr,now,times));
+                            self.set_state(LinkState::TryConnectBToA(100,self.a_addr,now,times,0));
                             return Some(self.state);
                         }
                     }
@@ -486,14 +509,14 @@ impl LinkData {
                                     self.state = LinkState::Failed;
                                 }else{
                                     let addrs = self.get_local_addr(self.a).unwrap();
-                                    self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),times + 1);
+                                    self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),times + 1,0);
                                 }
                             }else{
                                 let (addr,aid,same) = next.unwrap();
                                 if same {
-                                    self.state = LinkState::TryConnectAToB(aid,addr,SystemTime::now(),times);
+                                    self.state = LinkState::TryConnectAToB(aid,addr,SystemTime::now(),times,0);
                                 }else{
-                                    self.state = LinkState::TryConnectBToA(aid,addr,SystemTime::now(),times);
+                                    self.state = LinkState::TryConnectBToA(aid,addr,SystemTime::now(),times,0);
                                 }
                             }
                             return Some(self.state);
@@ -517,7 +540,7 @@ impl LinkData {
         None
     }
 }
-
+#[allow(dead_code)]
 impl  P2PLinkData{
     pub fn new()-> P2PLinkData
     {

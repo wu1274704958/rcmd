@@ -108,34 +108,49 @@ impl Plug for P2PPlug {
                     }
                     match d.next_state(clients).await {
 
-                        Some(LinkState::TryConnectBToA(_addr_id,addr,_time , _times)) => {
-                            if let Some(c) = cls.get_mut(&a)
-                            {
-                                c.push_msg(b_.to_vec(), EXT_P2P_WAIT_CONNECT_SC);
-                            }
-                            if let Some(c) = cls.get_mut(&b)
-                            {
-                                let mut data = a_.to_vec();
-                                if let std::net::IpAddr::V4(ip) = addr.ip(){
-                                    data.extend_from_slice(ip.octets().as_ref());
+                        Some(LinkState::TryConnectBToA(_addr_id,addr,_time , _times,sub_st)) => {
+                            match sub_st {
+                                0 => {
+                                    if let Some(c) = cls.get_mut(&a)
+                                    {
+                                        c.push_msg(b_.to_vec(), EXT_P2P_WAIT_CONNECT_SC);
+                                    }
                                 }
-                                data.extend_from_slice(addr.port().to_be_bytes().as_ref());
-                                c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
+                                1 => {
+                                    if let Some(c) = cls.get_mut(&b)
+                                    {
+                                        let mut data = a_.to_vec();
+                                        if let std::net::IpAddr::V4(ip) = addr.ip(){
+                                            data.extend_from_slice(ip.octets().as_ref());
+                                        }
+                                        data.extend_from_slice(addr.port().to_be_bytes().as_ref());
+                                        c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
+                                    }
+                                }
+                                _=>{}
                             }
                         }
-                        Some(LinkState::TryConnectAToB(_addr_id,addr,_time , _times)) => {
-                            if let Some(c) = cls.get_mut(&b)
-                            {
-                                c.push_msg(a_.to_vec(), EXT_P2P_WAIT_CONNECT_SC);
-                            }
-                            if let Some(c) = cls.get_mut(&a)
-                            {
-                                let mut data = b_.to_vec();
-                                if let std::net::IpAddr::V4(ip) = addr.ip(){
-                                    data.extend_from_slice(ip.octets().as_ref());
+                        Some(LinkState::TryConnectAToB(_addr_id,addr,_time , _times,sub_st)) => {
+                           
+                            match sub_st {
+                                0 => {
+                                    if let Some(c) = cls.get_mut(&b)
+                                    {
+                                        c.push_msg(a_.to_vec(), EXT_P2P_WAIT_CONNECT_SC);
+                                    }
                                 }
-                                data.extend_from_slice(addr.port().to_be_bytes().as_ref());
-                                c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
+                                1 => {
+                                    if let Some(c) = cls.get_mut(&a)
+                                    {
+                                        let mut data = b_.to_vec();
+                                        if let std::net::IpAddr::V4(ip) = addr.ip(){
+                                            data.extend_from_slice(ip.octets().as_ref());
+                                        }
+                                        data.extend_from_slice(addr.port().to_be_bytes().as_ref());
+                                        c.push_msg(data, EXT_P2P_TRY_CONNECT_SC);
+                                    }
+                                }
+                                _=>{}
                             }
                         }
                         Some(LinkState::Failed)=>{
