@@ -14,7 +14,7 @@ use std::process::abort;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone,Debug)]
 #[allow(non_camel_case_types)]
 enum Ext {
     Hello1 = 1,
@@ -423,7 +423,7 @@ impl ClientPlug for P2PPlug
         //println!("recv other msg from {:?}\n{:?}",&addr,data);
         if let Some((msg,ext)) = Self::unwrap(data)
         {
-            //println!("msg {:?} ext {}",msg,ext);
+            println!("get ext {:?} from {}",ext,addr);
             let e =  Ext::try_from(ext).unwrap();
             match e {
                 Ext::Hello1 |
