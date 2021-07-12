@@ -33,7 +33,8 @@ impl Plug for P2POnDeadPlug {
         {
             if let Some(d) = self.data.remove(&k).await{
                 println!("Remove LinkData {:?}",&d);
-                if let LinkState::Failed = d.state() {
+                //if let LinkState::Failed = d.state() 
+                {
                     let cp = if d.a() == id { d.b() } else { d.a() };
                     let mut cls = clients.lock().await;
                     if let Some(c) = cls.get_mut(&cp)
