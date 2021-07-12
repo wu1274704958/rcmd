@@ -393,8 +393,8 @@ impl LinkData {
     }
 
     fn try_connect_local_times() -> u8 { 3u8 }
-    fn try_connect_times() -> u8 { 10u8 } //必须偶数
-    fn try_wait_time() -> Duration { Duration::from_secs(10) }
+    fn try_connect_times() -> u8 { 18u8 } //必须偶数
+    fn try_wait_time() -> Duration { Duration::from_secs(2) }
     fn wait_step2_time() -> Duration { Duration::from_secs(10) }
     //优先取_1的地址
     fn get_local_addr_next_translation(&self,_1:usize,_2:usize,addr_id:u8) -> Option<(SocketAddr,u8,bool)>
