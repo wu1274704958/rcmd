@@ -76,7 +76,7 @@ impl<LID,ABC,P,SH,H,PL,PLM> UdpServer<LID,ABC,P,SH,H,PL,PLM>
             runtime,
             logic_id,
             clients: Arc::new(Mutex::new(HashMap::new())),
-            buf_len: 1024*1024*10,
+            buf_len: 65536,
             channel_buf : 10000,
         }
     }
