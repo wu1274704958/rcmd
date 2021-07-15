@@ -15,6 +15,8 @@ use rcmd_suit::handler::Handle;
 use rcmd_suit::plug::PlugMgr;
 
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
+use ahash::RandomState;
+use std::panic::resume_unwind;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -160,6 +162,7 @@ pub struct P2PPlug
     runtime: Arc<Mutex<Option<runtime::Runtime>>>,
     ser_sender: Mutex<Option<Sender<(SocketAddr,Vec<u8>)>>>,
     ser_clients: Arc<Mutex<HashMap<usize,Box<AbClient>>>>,
+    hash_builder: RandomState,
 }
 
 impl P2PPlug
@@ -172,7 +175,8 @@ impl P2PPlug
             curr_sender,
             runtime: Arc::new(Mutex::new(None)),
             ser_sender :Mutex::new(None),
-            ser_clients : Arc::new(Mutex::new(HashMap::new()))
+            ser_clients : Arc::new(Mutex::new(HashMap::new())),
+            hash_builder: RandomState::new()
         }
     }
 
@@ -340,7 +344,7 @@ impl P2PPlug
     }
 
     async fn prepare_runtime<F>(&self,f:F)
-        where F:FnOnce()
+        where F:FnOnce(&Runtime)
     {
         let mut rt = self.runtime.lock().await;
         if let Some(ref r) = *rt
@@ -503,6 +507,16 @@ impl ClientPlug for P2PPlug
     }
 
     async fn on_stop(&self) {
+        {
+            let mut ser_sender = self.ser_sender.lock().await;
+            *ser_sender = None;
+        }
+        {
+            let mut runtime = self.runtime.lock().await;
+            if let Some(r) = runtime.take(){
+                r.shutdown_background();
+            }
+        }
 
     }
 
@@ -704,4 +718,14 @@ async fn lauch_p2p_ser(
     //udp_server_run!(server,msg_split_ignore,msg_split_ignore);
 
     run_udp_server_with_channel(rx,sock,server,msg_split_ignore,asy_cry_ignore).await;
+}
+
+async fn lauch_p2p_client(
+    rx:Receiver<Vec<u8>>,
+    sock: Arc<UdpSocket>,
+    msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
+
+)
+{
+
 }

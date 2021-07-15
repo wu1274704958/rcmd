@@ -12,6 +12,7 @@ use crate::client_handler::Handle;
 use std::thread::Thread;
 use crate::client_plug::client_plug::{ClientPlug,ClientPluCollect};
 use std::io::Write;
+use async_std::channel::{Receiver, RecvError};
 
 pub struct UdpClient<T,A>
     where T:Handle
@@ -33,17 +34,33 @@ fn socket_addr_conv<T:ToSocketAddrs>(t:T) -> io::Result<SocketAddr>{
 
 
 macro_rules! Stop {
-    ($S:ident,$RecvWorker:ident,$Plug:ident,$E:ident) => {
+    ($S:ident,$RecvWorker:ident,$Plug:ident,$E:ident,$RET:ident) => {
         $Plug.on_get_err($E.clone()).await;
         $S.stop().await;
         $RecvWorker.shutdown_background();
         $Plug.on_stop().await;
+        $RET.await;
         return Err($E);
     };
-    ($S:ident,$Plug:ident,$E:ident) => {
+    ($S:ident,$Plug:ident,$E:ident,$RET:ident) => {
         $Plug.on_get_err($E.clone()).await;
         $S.stop().await;
         $Plug.on_stop().await;
+        $RET.await;
+        return Err($E);
+    };
+}
+
+macro_rules! StopNoPlug {
+    ($S:ident,$RecvWorker:ident,$E:ident,$RET:ident) => {
+        $S.stop().await;
+        $RecvWorker.shutdown_background();
+        $RET.await;
+        return Err($E);
+    };
+    ($S:ident,$E:ident,$RET:ident) => {
+        $S.stop().await;
+        $RET.await;
         return Err($E);
     };
 }
@@ -162,14 +179,17 @@ impl <'a,T,A> UdpClient<T,A>
     }
 
     #[allow(unused_must_use)]
-    pub async fn run<SE,CP>(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
+    pub async fn run<SE,CP,F>(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
                      msg_split_ignore:Option<&Vec<u32>>,
-                    plug_collect:Arc<ClientPluCollect<CP>>) -> Result<(),USErr>
+                    plug_collect:Arc<ClientPluCollect<CP>>,
+                    on_ret: F
+    ) -> Result<(),USErr>
 
     where
         SE : UdpSender + Send + std::marker::Sync + 'static,
         CP : ClientPlug<SockTy = UdpSocket,ErrTy = USErr> + Send + std::marker::Sync + 'static,
-        <CP as ClientPlug>::SockTy: std::marker::Send + std::marker::Sync
+        <CP as ClientPlug>::SockTy: std::marker::Send + std::marker::Sync,
+        F: futures::Future<Output=()>
     {
         plug_collect.on_init().await;
 
@@ -270,7 +290,7 @@ impl <'a,T,A> UdpClient<T,A>
 
         if let Ok(pub_key_data) = asy.build_pub_key().await{
             if let Err(e) =  self.write_msg(&sender, pub_key_data, 10).await{
-                Stop!(self,runtime,plug_collect,e);
+                Stop!(self,runtime,plug_collect,e,on_ret);
             }
         }
 
@@ -284,7 +304,7 @@ impl <'a,T,A> UdpClient<T,A>
             {
                 let err = err.lock().await;
                 if let Some(e) = (*err).clone(){
-                    Stop!(self,runtime,plug_collect,e);
+                    Stop!(self,runtime,plug_collect,e,on_ret);
                 }
             };
             match sender.pop_recv_msg().await{
@@ -293,7 +313,7 @@ impl <'a,T,A> UdpClient<T,A>
                 }
                 Err(USErr::EmptyMsg) => {}
                 Err(e) => {
-                    Stop!(self,runtime,plug_collect,e);
+                    Stop!(self,runtime,plug_collect,e,on_ret);
                 }
             }
 
@@ -329,7 +349,7 @@ impl <'a,T,A> UdpClient<T,A>
                     if let Some(v) = immediate_send
                     {
                         if let Err(e) = self.write_msg(&sender, v, m.ext).await{
-                            Stop!(self,runtime,plug_collect,e);
+                            Stop!(self,runtime,plug_collect,e,on_ret);
                         }
                         continue;
                     }
@@ -359,7 +379,7 @@ impl <'a,T,A> UdpClient<T,A>
                 package = None;
             }
             if let Err(e) = sender.check_send().await{
-                Stop!(self,runtime,plug_collect,e);
+                Stop!(self,runtime,plug_collect,e,on_ret);
             }
 
             if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
@@ -368,7 +388,7 @@ impl <'a,T,A> UdpClient<T,A>
                 {
                     heartbeat_t = SystemTime::now();
                     if let Err(e) = self.write_msg(& sender, vec![9], 9).await{
-                        Stop!(self,runtime,plug_collect,e);
+                        Stop!(self,runtime,plug_collect,e,on_ret);
                     }
                 }
             }
@@ -392,7 +412,7 @@ impl <'a,T,A> UdpClient<T,A>
                             {
                                 Ok(_) => { }
                                 Err(e) => {
-                                    Stop!(self,runtime,plug_collect,e);
+                                    Stop!(self,runtime,plug_collect,e,on_ret);
                                 }
                             }
                         }
@@ -405,7 +425,7 @@ impl <'a,T,A> UdpClient<T,A>
                             _ => {}
                         };
                         if let Err(e) = self.write_msg(&sender, v.0, v.1).await{
-                            Stop!(self,runtime,plug_collect,e);
+                            Stop!(self,runtime,plug_collect,e,on_ret);
                         }
                     }
                 }else{
@@ -425,6 +445,256 @@ impl <'a,T,A> UdpClient<T,A>
         println!("waiting for recv worker!");
         runtime.shutdown_background();
         println!("recv worker end!");
+        on_ret.await;
+        Ok(())
+    }
+
+    #[allow(unused_must_use)]
+    pub async fn run_with_sender<SE,CP,F>(
+        &self,addr:SocketAddr,
+        rx:Receiver<Vec<u8>>,
+        sock: Arc<UdpSocket>,
+        asy_cry_ignore:Option<&Vec<u32>>,
+        msg_split_ignore:Option<&Vec<u32>>,
+        on_ret: F
+    ) -> Result<(),USErr>
+
+        where
+            SE : UdpSender + Send + std::marker::Sync + 'static,
+            F: futures::Future<Output=()>
+    {
+
+        if let Ok(addr) = sock.local_addr() {
+            let mut local_addr = self.local_addr.lock().await;
+            *local_addr = Some(addr);
+        }
+
+
+        // In a loop, read data from the socket and write the data back.
+        let mut heartbeat_t = SystemTime::now();
+        let mut asy = DefAsyCry::create();
+        if let Some(v) = asy_cry_ignore{
+            asy.extend_ignore(v.as_slice());
+        }
+        let mut spliter = DefMsgSplit::new();
+        if let Some(v) = msg_split_ignore{
+            spliter.extend_ignore(v.as_slice());
+        }
+        let mut package = None;
+
+        let sender = Arc::new(SE::create(sock.clone(),addr));
+        let err:Arc<Mutex<Option<USErr>>> = Arc::new(Mutex::new(None));
+        let sender_cp = sender.clone();
+        let run_cp = self.runing.clone();
+        let sock_cp = sock.clone();
+        let err_cp = err.clone();
+        let addr_cp = addr;
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .unwrap();
+
+        let recv_worker = runtime.spawn(async move {
+            let r = {
+                let r = run_cp.lock().await;
+                *r
+            };
+            'Out: while r {
+                match rx.recv().await{
+                    Ok(buf) => {
+                        match sender_cp.check_recv(&buf[..]).await
+                        {
+                            Err(USErr::EmptyMsg)=>{}
+                            Err(e)=>{
+                                let mut err = err_cp.lock().await;
+                                *err = Some(e.into());
+                                let mut run = run_cp.lock().await;
+                                *run = false;
+                                break;
+                            }
+                            _=>{}
+                        };
+                        while sender_cp.need_check().await {
+                            match sender_cp.check_recv(&[]).await{
+                                Err(USErr::EmptyMsg)=>{}
+                                Err(e)=>{
+                                    let mut err = err_cp.lock().await;
+                                    *err = Some(e.into());
+                                    let mut run = run_cp.lock().await;
+                                    *run = false;
+                                    break 'Out;
+                                }
+                                _=>{}
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("recv from {:?}",e);
+                        let mut run = run_cp.lock().await;
+                        *run = false;
+                        break;
+                    }
+                }
+            }
+        });
+
+
+        if let Ok(pub_key_data) = asy.build_pub_key().await{
+            if let Err(e) =  self.write_msg(&sender, pub_key_data, 10).await{
+                StopNoPlug!(self,runtime,e,on_ret);
+            }
+        }
+
+        let mut subpackager = DefSubpackage::new();
+
+
+        loop {
+            // read request
+            //println!("read the request....");
+            {
+                let err = err.lock().await;
+                if let Some(e) = (*err).clone(){
+                    StopNoPlug!(self,runtime,e,on_ret);
+                }
+            };
+            match sender.pop_recv_msg().await{
+                Ok(v) => {
+                    package = subpackager.subpackage(&v[..],v.len());
+                }
+                Err(USErr::EmptyMsg) => {}
+                Err(e) => {
+                    StopNoPlug!(self,runtime,e,on_ret);
+                }
+            }
+
+            if package.is_none() && subpackager.need_check(){
+                package = subpackager.subpackage(&[],0);
+            }
+
+            if let Some( mut d) = package {
+                package = None;
+                let mut _temp_data = None;
+                let msg = self.parser.parse_tf(&mut d);
+                //dbg!(&msg);
+                if let Some(mut m) = msg {
+                    //----------------------------------
+                    let mut immediate_send = None;
+                    let mut override_msg = None;
+                    match asy.try_decrypt(m.msg, m.ext).await
+                    {
+                        EncryptRes::EncryptSucc(d) => {
+                            override_msg = Some(d);
+                        }
+                        EncryptRes::RPubKey(d) => {
+                            immediate_send = Some(d.0);
+                            m.ext = d.1;
+                        }
+                        EncryptRes::ErrMsg(d) => {
+                            immediate_send = Some(d.0);
+                            m.ext = d.1;
+                        }
+                        EncryptRes::NotChange => {}
+                        EncryptRes::Break => { continue; }
+                    };
+                    if let Some(v) = immediate_send
+                    {
+                        if let Err(e) = self.write_msg(&sender, v, m.ext).await{
+                            StopNoPlug!(self,runtime,e,on_ret);
+                        }
+                        continue;
+                    }
+                    if let Some(ref v) = override_msg
+                    {
+                        m.msg = v.as_slice();
+                    }
+                    // if m.ext != 9
+                    // {println!("{:?} {}",&m.msg,m.ext);}
+                    if spliter.need_merge(&m)
+                    {
+                        if let Some((data,ext)) = spliter.merge(&m)
+                        {
+                            _temp_data = Some(data);
+                            m.ext = ext;
+                            m.msg = _temp_data.as_ref().unwrap().as_slice();
+                        }else{
+                            continue;
+                        }
+                    }
+                    if let Some((d,e)) = self.handler.handle_ex(m)
+                    {
+                        self.send(d,e).await;
+                    }
+                }
+                package = None;
+            }
+            if let Err(e) = sender.check_send().await{
+                StopNoPlug!(self,runtime,e,on_ret);
+            }
+
+            if let Ok(n) = SystemTime::now().duration_since(heartbeat_t)
+            {
+                if n >= self.heartbeat_dur
+                {
+                    heartbeat_t = SystemTime::now();
+                    if let Err(e) = self.write_msg(& sender, vec![9], 9).await{
+                        StopNoPlug!(self,runtime,e,on_ret);
+                    }
+                }
+            }
+
+            if asy.can_encrypt() {
+                let mut _data = self.pop_msg().await;
+                if let Some(mut v) = _data {
+                    if spliter.need_split(v.0.len(),v.1)
+                    {
+                        let msgs = spliter.split(&mut v.0,v.1);
+                        for i in msgs.into_iter(){
+                            let ( data,ext,tag) = i;
+                            let  send_data = match asy.encrypt(data, ext) {
+                                EncryptRes::EncryptSucc(d) => {
+                                    d
+                                }
+                                _ => { data.to_vec()}
+                            };
+                            let real_pkg = self.parser.package_tf(send_data, ext,tag);
+                            match sender.send_msg(real_pkg).await
+                            {
+                                Ok(_) => { }
+                                Err(e) => {
+                                    StopNoPlug!(self,runtime,e,on_ret);
+                                }
+                            }
+                        }
+                    }else {
+                        match asy.encrypt(&v.0, v.1) {
+                            EncryptRes::EncryptSucc(d) => {
+                                v.0 = d;
+                            }
+                            EncryptRes::NotChange => {}
+                            _ => {}
+                        };
+                        if let Err(e) = self.write_msg(&sender, v.0, v.1).await{
+                            StopNoPlug!(self,runtime,e,on_ret);
+                        }
+                    }
+                }else{
+                    sleep(Duration::from_millis(1)).await;
+                }
+            }
+
+            if !self.still_runing().await
+            {
+                break;
+            }
+
+        }
+        sender.close_session().await;
+        self.stop().await;
+        println!("waiting for recv worker!");
+        runtime.shutdown_background();
+        println!("recv worker end!");
+        on_ret.await;
         Ok(())
     }
 }
