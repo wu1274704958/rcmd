@@ -4,6 +4,8 @@ mod extc;
 mod model;
 mod client_handlers;
 mod client_plugs;
+mod handlers;
+mod db;
 #[macro_use]
 extern crate lazy_static;
 extern crate get_if_addrs;

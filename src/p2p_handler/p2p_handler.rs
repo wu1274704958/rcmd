@@ -93,6 +93,7 @@ impl P2PHandlerSer{
             EXT_P2P_CONNECT_SUCCESS_STAGE1_CS =>  EXT_P2P_CONNECT_SUCCESS_STAGE1_SC,
             EXT_P2P_CONNECT_SUCCESS_CS =>   EXT_P2P_CONNECT_SUCCESS_SC,
             EXT_P2P_WAITING_CONNECT_CS=> EXT_P2P_WAITING_CONNECT_SC,
+            EXT_P2P_CLIENT_DISCONNECT_CS => EXT_P2P_CLIENT_DISCONNECT_SC,
             _=>{abort()}
         }
     }
@@ -278,6 +279,36 @@ impl SubHandle for P2PHandlerSer{
                 respo.extend_from_slice(0u32.to_be_bytes().as_ref());
                 return Some((respo,Self::get_respones_ext(ext)));
             }
+
+            EXT_P2P_CLIENT_DISCONNECT_CS => {
+                let key = LinkData::gen_key(id.clone(),cp_lid);
+                let mut map = self.data.map.lock().await;
+                let link_data = if let Some(v) = map.get_mut(&key) {v}
+                else{
+                    respo.extend_from_slice(EXT_ERR_NOT_FOUND_LINK_DATA.to_be_bytes().as_ref());
+                    return Some((respo,Self::get_respones_ext(ext)));
+                };
+
+                match link_data.state() {
+                    
+                    LinkState::Step2Success(ser_id,_)  => {
+                        if ser_id == id {
+                            drop(link_data);
+                            drop(map);
+                            self.data.remove(&key).await;
+                        }else{
+                            respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
+                            return Some((respo,Self::get_respones_ext(ext)));
+                        }
+                    }
+                     _ => {
+                         respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
+                         return Some((respo,Self::get_respones_ext(ext)));
+                     }
+                }
+                respo.extend_from_slice(0u32.to_be_bytes().as_ref());
+                return Some((respo,Self::get_respones_ext(ext)));
+            }
             
             _ => {None}
         }
@@ -287,7 +318,8 @@ impl SubHandle for P2PHandlerSer{
         ext == EXT_ACCEPT_LINK_P2P_CS ||
         ext == EXT_P2P_CONNECT_SUCCESS_STAGE1_CS || 
         ext == EXT_P2P_CONNECT_SUCCESS_CS ||
-        ext == EXT_P2P_WAITING_CONNECT_CS
+        ext == EXT_P2P_WAITING_CONNECT_CS || 
+        ext == EXT_P2P_CLIENT_DISCONNECT_CS 
     }
 
 }

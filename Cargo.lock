@@ -1541,6 +1541,7 @@ version = "0.1.0"
 dependencies = [
  "ahash 0.6.3",
  "args",
+ "async-std",
  "async-trait",
  "encoding_rs",
  "flate2",

@@ -125,9 +125,11 @@ where SH : SubHandle<ABClient=ABC,Id=LID>,
     async fn set_client_st(&self,id:LID,s:State)
     {
         let mut abs = self.clients.lock().await;
-        if let Some(mut a) = abs.get_mut(&id)
+        if let Some(a) = abs.get_mut(&id)
         {
-            a.set_state(s)
+            if !a.state().is_wait_kill(){
+                a.set_state(s)
+            }
         }
     }
 
@@ -169,7 +171,7 @@ where
     LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
     ABC: ABClient<LID = LID> + Send
 {
-    let mut abs = clients.lock().await;
+    let abs = clients.lock().await;
     if let Some(a) = abs.get(&id)
     {
         Some(a.state())
@@ -184,9 +186,11 @@ where
     ABC: ABClient<LID = LID> + Send
 {
     let mut abs = clients.lock().await;
-    if let Some(mut a) = abs.get_mut(&id)
+    if let Some(a) = abs.get_mut(&id)
     {
-        a.set_state(s)
+        if !a.state().is_wait_kill(){
+            a.set_state(s)
+        }
     }
 }
 

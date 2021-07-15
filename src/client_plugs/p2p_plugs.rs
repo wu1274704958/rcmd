@@ -1,16 +1,20 @@
-use rcmd_suit::{client_plug::client_plug::ClientPlug, utils::stream_parser::{Stream,StreamParse}};
-use std::{collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}, usize};
-use tokio::net::UdpSocket;
+use async_std::channel::{Receiver, Sender, unbounded};
+use rcmd_suit::{ab_client::AbClient, agreement::DefParser, client_plug::client_plug::ClientPlug, config_build::ConfigBuilder, handler::{DefHandler, TestHandler}, plug::DefPlugMgr, plugs::heart_beat::HeartBeat, servers::udp_server::{UdpServer, run_udp_server_with_channel}, utils::stream_parser::{Stream,StreamParse}};
+use std::{cell::Cell, collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}, usize};
+use tokio::{net::UdpSocket, runtime::{self, Runtime}, sync::MutexGuard};
 use rcmd_suit::utils::udp_sender::USErr;
 use async_trait::async_trait;
 use std::net::{SocketAddr, IpAddr};
 use tokio::sync::Mutex;
 use num_enum::TryFromPrimitive;
-
+use crate::{comm, handlers};
 use crate::extc::*;
 use std::mem::size_of;
 use std::convert::TryFrom;
-use std::process::abort;
+use rcmd_suit::handler::Handle;
+use rcmd_suit::plug::PlugMgr;
+
+use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -29,6 +33,7 @@ impl Into<u16> for Ext{
         self as u16
     }
 }
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum P2PErr {
     LinkExist,
@@ -49,12 +54,11 @@ impl From<std::io::Error> for P2PErr
         P2PErr::Wrap((code,str))
     }
 }
-
+#[allow(dead_code)]
 #[derive(Eq, PartialEq,Debug)]
 enum LinkState{
     WaitAccept,
     Accepted,
-    ReadyToTryConnect,
     TryConnect(SocketAddr),
     Stage1Success(bool),
     Stage2Success(bool),
@@ -66,22 +70,29 @@ enum LinkState{
     WaitingHello4,
     PrepareRealLink
 }
+#[derive(Clone, Copy)]
+pub enum LocalEntity {
+    Ser(usize),
+    Client(usize),
+    None
+}
 
-struct LinkData
+pub struct LinkData
 {
     cp: usize,
     state: LinkState,
     verify_code :Option<Weak<String>>,
-    connected_addr: Option<SocketAddr>
+    connected_addr: Option<SocketAddr>,
+    local_entity: LocalEntity
 }
 
-struct PlugData{
+pub struct PlugData{
     socket:Option<Arc<UdpSocket>>,
     port: u16,
     link_map: HashMap<usize,LinkData>,
     cpid_map: HashMap<Arc<String>,usize>,
-
-}
+    pub ser_map: HashMap<usize,usize>,
+} 
 
 impl PlugData {
     pub fn new() -> PlugData
@@ -91,23 +102,77 @@ impl PlugData {
             port : 0,
             link_map: HashMap::new(),
             cpid_map: HashMap::new(),
+            ser_map: HashMap::new(),
         }
+    }
+
+    pub fn rm_link(&mut self,cpid:usize) -> Option<LinkData>
+    {
+        if let Some(link) = self.link_map.remove(&cpid)
+        {
+            if let Some(ref s) = link.verify_code{
+                if let Some(ref s) = s.upgrade()
+                {
+                    self.cpid_map.remove(s);
+                }
+            }
+            Some(link)
+        }else{
+            None
+        }
+    }
+
+    pub fn get_cpid_verify_code(&self,code:Arc<String>) -> Option<usize>
+    {
+        if let Some(cpid) = self.cpid_map.get(&code)
+        {
+            Some(*cpid)
+        }else{
+            None
+        }
+    }
+
+    pub fn client_connected(&mut self,cp:usize,cid:usize) -> bool
+    {
+        if self.ser_map.contains_key(&cid)
+        {
+            return false;
+        }
+        if let Some(link) = self.link_map.get_mut(&cp)
+        {
+            if let LocalEntity::None = link.local_entity{
+                link.local_entity = LocalEntity::Ser(cid);
+                self.ser_map.insert(cid, cp);
+            }else{
+                return false;
+            }
+        }else{
+            return false;
+        }
+        true
     }
 }
 
 pub struct P2PPlug
 {
     data : Arc<Mutex<PlugData>>,
-    curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>
+    curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+    runtime: Arc<Mutex<Option<runtime::Runtime>>>,
+    ser_sender: Mutex<Option<Sender<(SocketAddr,Vec<u8>)>>>,
+    ser_clients: Arc<Mutex<HashMap<usize,Box<AbClient>>>>,
 }
 
 impl P2PPlug
 {
     pub fn new(curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)-> P2PPlug
     {
+
         P2PPlug{
             data : Arc::new(Mutex::new(PlugData::new())),
-            curr_sender 
+            curr_sender,
+            runtime: Arc::new(Mutex::new(None)),
+            ser_sender :Mutex::new(None),
+            ser_clients : Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
@@ -204,18 +269,7 @@ impl P2PPlug
     async fn rm_link(&self,cpid:usize) -> Option<LinkData>
     {
         let mut d = self.data.lock().await;
-        if let Some(link) = d.link_map.remove(&cpid)
-        {
-            if let Some(ref s) = link.verify_code{
-                if let Some(ref s) = s.upgrade()
-                {
-                    d.cpid_map.remove(s);
-                }
-            }
-            Some(link)
-        }else{
-            None
-        }
+        d.rm_link(cpid)
     }
 
     async fn add_link(&self,st:LinkState,cpid:usize) -> bool
@@ -228,7 +282,8 @@ impl P2PPlug
             cp :cpid,
             state : st,
             verify_code : None,
-            connected_addr:None
+            connected_addr:None,
+            local_entity: LocalEntity::None
         });
         true
     }
@@ -252,16 +307,11 @@ impl P2PPlug
         }
     }
 
-    async fn get_cpid_verify_code(&self,code:String) -> Option<usize>
+    pub async fn get_cpid_verify_code(&self,code:String) -> Option<usize>
     {
         let c = Arc::new(code);
         let d = self.data.lock().await;
-        if let Some(cpid) = d.cpid_map.get(&c)
-        {
-            Some(*cpid)
-        }else{
-            None
-        }
+        d.get_cpid_verify_code(c)
     }
 
     async fn get_verify_code_cpid(&self,id:usize) -> Option<Arc<String>>
@@ -286,6 +336,23 @@ impl P2PPlug
             true
         }else{
             false
+        }
+    }
+
+    async fn prepare_runtime<F>(&self,f:F)
+        where F:FnOnce()
+    {
+        let mut rt = self.runtime.lock().await;
+        if let Some(ref r) = *rt
+        {
+            f(r);
+        }else{
+            let r = runtime::Builder::new_multi_thread()
+                .worker_threads(8)
+                .build()
+                .unwrap();
+            f(&r);
+            *rt = Some(r);
         }
     }
 
@@ -314,6 +381,16 @@ impl P2PPlug
             port
         }else{return None;};
         Some(SocketAddr::new(IpAddr::V4(ip),port))
+    }
+
+    async fn get_socket(&self) -> Option<Arc<UdpSocket>>
+    {
+        let d = self.data.lock().await;
+        if let Some(ref s) = d.socket
+        {
+            return Some(s.clone());
+        }
+        None
     }
 
     async fn send_udp_msg(&self,addr:SocketAddr,msg:&[u8],times:u8) -> Result<(),P2PErr>
@@ -354,9 +431,6 @@ impl P2PPlug
             Ext::Hello2 => LinkState::TryConnect(addr),
             Ext::Hello3 => LinkState::WaitingHello3,
             Ext::Hello4 => LinkState::Stage1Success(false),
-            _ => {
-                abort()
-            }
         }
     }
 
@@ -367,9 +441,6 @@ impl P2PPlug
             Ext::Hello2 => LinkState::Stage1Success(false),
             Ext::Hello3 => LinkState::Stage1Success(true),
             Ext::Hello4 => LinkState::PrepareRealLink,
-            _ => {
-                abort()
-            }
         }
     }
 
@@ -436,7 +507,7 @@ impl ClientPlug for P2PPlug
     }
 
     async fn on_recv_oth_msg(&self, addr: SocketAddr, data: &[u8]) {
-        println!("recv other msg from {:?}\n{:?}",&addr,data);
+        //println!("recv other msg from {:?}\n{:?}",&addr,data);
         if let Some((msg,ext)) = Self::unwrap(data)
         {
             
@@ -466,6 +537,19 @@ impl ClientPlug for P2PPlug
                                         link.connected_addr = Some(addr);
                                         //准备p2p服务器
                                         println!("准备p2p服务器");
+                                        let mut ser_sender = self.ser_sender.lock().await;
+                                        if ser_sender.is_none(){
+                                            let (s,rx) = unbounded::<(SocketAddr,Vec<u8>)>();
+                                            *ser_sender = Some(s);
+                                            let sock = self.get_socket().await.unwrap();
+                                            let cls = self.ser_clients.clone();
+                                            let plug_data_cp = self.data.clone();
+                                            let curr_sender_cp = self.curr_sender.clone();
+                                            
+                                            self.prepare_runtime(|runtime|{
+                                                runtime.spawn(lauch_p2p_ser(rx, sock, cls, plug_data_cp, curr_sender_cp));
+                                            }).await;
+                                        }
                                     }
                                     Ext::Hello4 => {
                                         self.send_data(link.cp.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_STAGE1_CS).await;
@@ -488,11 +572,12 @@ impl ClientPlug for P2PPlug
                         }
                     }
                 }
-
-                _ => {}
             }
         }else{
-
+            let mut ser_sender = self.ser_sender.lock().await;
+            if let Some(ref mut sender) = *ser_sender{
+                sender.send((addr,data.to_vec())).await;
+            }
         }
     }
 
@@ -575,4 +660,48 @@ impl ClientPlug for P2PPlug
         }
     }
 
+}
+
+async fn lauch_p2p_ser(
+    rx:Receiver<(SocketAddr,Vec<u8>)>,
+    sock: Arc<UdpSocket>,
+    clients: Arc<Mutex<HashMap<usize,Box<AbClient>>>>,
+    plug_data: Arc<Mutex<PlugData>>,
+    curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>
+)
+{
+    let config = ConfigBuilder::new()
+        .thread_count(4)
+        .build();
+
+    let mut handler = DefHandler::<TestHandler>::new();
+    let parser = DefParser::new();
+    let mut plugs = DefPlugMgr::<HeartBeat>::with_time();
+    let mut dead_plugs = DefPlugMgr::<HeartBeat>::new();
+
+    {
+        handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
+        handler.add_handler(Arc::new(TestHandler{}));
+        handler.add_handler(Arc::new(P2PVerifyHandler::new(plug_data.clone(), curr_sender.clone())));
+
+        plugs.add_plug(Arc::new(HeartBeat{}));
+        
+        dead_plugs.add_plug(Arc::new(P2POnDeadPlugClientSer::new(plug_data,curr_sender)));
+        
+    }
+
+    let server = UdpServer::with_clients(
+        handler.into(),
+        parser.into(),
+        plugs.into(),
+        dead_plugs.into(),
+        config,
+        clients
+    );
+    lazy_static::initialize(&comm::IGNORE_EXT);
+    let msg_split_ignore:Option<&'static Vec<u32>> = Some(&comm::IGNORE_EXT);
+    let asy_cry_ignore:Option<&'static Vec<u32>> = Some(&comm::IGNORE_EXT);
+    //udp_server_run!(server,msg_split_ignore,msg_split_ignore);
+
+    run_udp_server_with_channel(rx,sock,server,msg_split_ignore,asy_cry_ignore).await;
 }

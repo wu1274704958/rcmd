@@ -1,6 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData, sync::{Arc}};
+use async_std::channel::Receiver;
 use tokio::runtime::{self, Runtime};
-use crate::{handler::{self, Handle, SubHandle}, plug};
+use crate::{handler::{ Handle, SubHandle}, plug};
 use crate::config_build::Config;
 use crate::plug::{PlugMgr,Plug};
 use crate::agreement::Agreement;
@@ -12,14 +13,13 @@ use crate::asy_cry::{DefAsyCry,AsyCry,EncryptRes,NoAsyCry};
 use crate::utils::udp_sender::{DefUdpSender, UdpSender, USErr};
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use tokio::io;
-use tokio::io::AsyncWriteExt;
-use tokio::sync::{Mutex,mpsc};
+use tokio::sync::{Mutex};
 use crate::utils::msg_split::{DefMsgSplit, MsgSplit};
 use crate::tools::platform_handle;
 use ahash::RandomState;
 use ahash::CallHasher;
 use std::hash::BuildHasher;
+use std::future::Future;
 
 pub struct UdpServer<LID,ABC,P,SH,H,PL,PLM>
     where SH : SubHandle<ABClient=ABC,Id=LID>,
@@ -81,6 +81,37 @@ impl<LID,ABC,P,SH,H,PL,PLM> UdpServer<LID,ABC,P,SH,H,PL,PLM>
         }
     }
 
+    pub fn with_clients(
+        handler:Arc<H>,
+        parser:Arc<P>,
+        plug_mgr:Arc<PLM>,
+        dead_plug_mgr:Arc<PLM>,
+        config:Config,
+        clients: Arc<Mutex<HashMap<LID,Box<ABC>>>>,
+    )
+        -> UdpServer<LID,ABC,P,SH,H,PL,PLM>
+    {
+        let runtime = runtime::Builder::new_multi_thread()
+            .worker_threads(config.thread_count)
+            .build()
+            .unwrap();
+        let logic_id = Arc::new(Mutex::new(LID::zero()));
+        UdpServer::<LID,ABC,P,SH,H,PL,PLM>{
+            _a: Default::default(),
+            _b: Default::default(),
+            handler,
+            parser,
+            plug_mgr,
+            dead_plug_mgr,
+            config:Arc::new(config),
+            runtime,
+            logic_id,
+            clients,
+            buf_len: 65536,
+            channel_buf : 10000,
+        }
+    }
+
     pub fn with_buf_len(
         handler:Arc<H>,
         parser:Arc<P>,
@@ -111,9 +142,11 @@ impl<LID,ABC,P,SH,H,PL,PLM> UdpServer<LID,ABC,P,SH,H,PL,PLM>
     async fn set_client_st(&self,id:LID,s:State)
     {
         let mut abs = self.clients.lock().await;
-        if let Some(mut a) = abs.get_mut(&id)
+        if let Some( a) = abs.get_mut(&id)
         {
-            a.set_state(s)
+            if !a.state().is_wait_kill(){
+                a.set_state(s)
+            }
         }
     }
 
@@ -155,7 +188,7 @@ pub async fn get_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>
         LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
         ABC: ABClient<LID = LID> + Send
 {
-    let mut abs = clients.lock().await;
+    let abs = clients.lock().await;
     if let Some(a) = abs.get(&id)
     {
         Some(a.state())
@@ -170,9 +203,11 @@ pub async fn set_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>
         ABC: ABClient<LID = LID> + Send
 {
     let mut abs = clients.lock().await;
-    if let Some(mut a) = abs.get_mut(&id)
+    if let Some(a) = abs.get_mut(&id)
     {
-        a.set_state(s)
+        if !a.state().is_wait_kill(){
+            a.set_state(s)
+        }
     }
 }
 
@@ -227,11 +262,11 @@ async fn clean<LID,ABC,PL,PLM,F>(
           PLM: PlugMgr<PL> + Send + std::marker::Sync,
           LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
           ABC: ABClient<LID = LID> + Send,
-            F:FnOnce()
+          F : futures::Future<Output=()>,
 {
     dead_plugs_cp.run(logic_id.clone(),&clients,conf).await;
     del_client_ex(&clients,&lid,logic_id).await;
-    on_ret();
+    on_ret.await;
 }
 
 #[allow(unused_must_use)]
@@ -259,7 +294,7 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM,F,SE>
           P : Agreement + Send + std::marker::Sync,
           LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send,
           ABC: ABClient<LID = LID> + Send,
-          F : FnOnce(),
+          F : futures::Future<Output=()>,
           SE : UdpSender + Send + std::marker::Sync
 {
     let local_addr = socket.local_addr().unwrap();
@@ -470,12 +505,11 @@ pub async fn run_udp_server<LID,ABC,P,SH,H,PL,PLM>(
           ABC: ABClient<LID = LID> + Send + 'static
 
 {
-    let channel_buf = server.channel_buf;
     let sock = Arc::new(UdpSocket::bind(server.config.addr).await?);
     platform_handle(sock.as_ref());
 
-    let linker_map = Arc::new(std::sync::Mutex::new(HashMap::<u64,Arc<DefUdpSender>>::new()));
-    let mut hash_builder = RandomState::new();
+    let linker_map = Arc::new(Mutex::new(HashMap::<u64,Arc<DefUdpSender>>::new()));
+    let hash_builder = RandomState::new();
 
     loop {
         let mut buf = Vec::with_capacity(server.buf_len);
@@ -486,7 +520,7 @@ pub async fn run_udp_server<LID,ABC,P,SH,H,PL,PLM>(
 
                 let id = CallHasher::get_hash(&addr, hash_builder.build_hasher());
                 let has = {
-                    let mut map = linker_map.lock().unwrap();
+                    let mut map = linker_map.lock().await;
                     if let Some(link) = map.get(&id){
                         link.check_recv(&buf[0..len]).await;
                         while link.need_check().await { link.check_recv(&[]).await; }
@@ -501,7 +535,7 @@ pub async fn run_udp_server<LID,ABC,P,SH,H,PL,PLM>(
                         println!("check_recv end -------------------------");
                         while sender.need_check().await { sender.check_recv(&[]).await; }
                         println!("-------------------------");
-                        let mut map = linker_map.lock().unwrap();
+                        let mut map = linker_map.lock().await;
                         map.insert(id, sender.clone());
                     }
                     {
@@ -518,9 +552,9 @@ pub async fn run_udp_server<LID,ABC,P,SH,H,PL,PLM>(
 
                         server.runtime.spawn(run_in(
                             clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,sender,
-                            addr,move ||{
+                            addr,async move{
                                 let id_ = id;
-                                let mut map = linker_map_cp.lock().unwrap();
+                                let mut map = linker_map_cp.lock().await;
                                 map.remove(&id_);
                                 println!("disconnect id = {}",id_);
                             },asy_cry_ignore.clone(),msg_split_ignore.clone()
@@ -535,6 +569,92 @@ pub async fn run_udp_server<LID,ABC,P,SH,H,PL,PLM>(
             }
         }
     }
+
+    Ok(())
+}
+
+#[allow(unused_must_use)]
+pub async fn run_udp_server_with_channel<LID,ABC,P,SH,H,PL,PLM>(
+    rx:Receiver<(SocketAddr,Vec<u8>)>,
+    sock: Arc<UdpSocket>,
+    server:UdpServer<LID,ABC,P,SH,H,PL,PLM>,
+    msg_split_ignore:Option<&'static Vec<u32>>,
+    asy_cry_ignore:Option<&'static Vec<u32>>
+) -> Result<(), Box<dyn std::error::Error>>
+    where SH : SubHandle<ABClient=ABC,Id=LID> + 'static,
+          H : Handle<SH> + Send + std::marker::Sync + 'static,
+          PL : Plug<ABClient=ABC,Id=LID,Config=Config> + 'static,
+          PLM: PlugMgr<PL> + Send + std::marker::Sync + 'static,
+          P : Agreement + Send + std::marker::Sync + 'static,
+          LID : AddAssign + Clone + Copy + Eq + std::hash::Hash+num_traits::identities::Zero + num_traits::identities::One + Send + std::marker::Sync + 'static,
+          ABC: ABClient<LID = LID> + Send + 'static
+
+{
+    let linker_map = Arc::new(Mutex::new(HashMap::<u64,Arc<DefUdpSender>>::new()));
+    let hash_builder = RandomState::new();
+
+    loop {
+
+        match rx.recv().await{
+            Ok((addr,buf)) =>{
+                let id = CallHasher::get_hash(&addr, hash_builder.build_hasher());
+                let has = {
+                    let map = linker_map.lock().await;
+                    if let Some(link) = map.get(&id){
+                        link.check_recv(&buf[..]).await;
+                        while link.need_check().await { link.check_recv(&[]).await; }
+                        true
+                    }else { false }
+                };
+                if !has
+                {
+                    let sender = Arc::new(DefUdpSender::create(sock.clone(),addr));
+                    {
+                        sender.check_recv(&buf[..]).await;
+                        println!("check_recv end -------------------------");
+                        while sender.need_check().await { sender.check_recv(&[]).await; }
+                        println!("-------------------------");
+                        let mut map = linker_map.lock().await;
+                        map.insert(id, sender.clone());
+                    }
+                    {
+                        let linker_map_cp = linker_map.clone();
+                        let clients = server.clients.clone();
+                        let lid = server.logic_id.clone();
+                        let conf = server.config.clone();
+                        let handler_cp = server.handler.clone();
+                        let parser_cp = server.parser.clone();
+                        let plugs_cp = server.plug_mgr.clone();
+                        let dead_plugs_cp:Arc<_> = server.dead_plug_mgr.clone();
+                        let sock_cp = sock.clone();
+                        dbg!(&addr);
+                        let on_ret = async move{
+                            let id_ = id;
+                            let mut map = linker_map_cp.lock().await;
+                            map.remove(&id_);
+                            println!("disconnect id = {}",id_);
+                        };
+                        server.runtime.spawn(run_in(
+                            clients,lid,conf,handler_cp,parser_cp,plugs_cp,dead_plugs_cp,sock_cp,sender,
+                            addr, on_ret,asy_cry_ignore.clone(),msg_split_ignore.clone()
+                        ));
+
+                        println!("Spawn a client handler!!!");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("err = {:?}",e);
+                let mut cls =  server.clients.lock().await;
+                for c in cls.values_mut(){
+                    c.set_state(State::WaitKill);
+                }
+                break;
+            }
+        }
+    }
+
+    server.runtime.shutdown_background();
 
     Ok(())
 }

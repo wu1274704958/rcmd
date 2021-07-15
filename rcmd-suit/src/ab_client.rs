@@ -1,7 +1,5 @@
 use std::net::SocketAddr;
 use std::thread::ThreadId;
-use tokio::net::TcpStream;
-use std::cell::RefCell;
 use crate::ab_client::State::Ready;
 use std::time::SystemTime;
 use std::collections::VecDeque;
@@ -17,6 +15,21 @@ pub enum State
     Dead,
     WaitKill
 }
+
+impl State {
+    pub fn is_wait_kill(&self) -> bool
+    {
+        match *self{
+            State::Ready|
+            State::Alive|
+            State::Wait |
+            State::Busy |
+            State::Dead => false,
+            State::WaitKill => true,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AbClient
 {
