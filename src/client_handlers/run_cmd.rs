@@ -4,7 +4,7 @@ use crate::model;
 use terminal::Color;
 use rcmd_suit::client_handler::SubHandle;
 use rcmd_suit::utils::rcmd::CmdRes;
-
+use async_trait::async_trait;
 pub struct RunCmd
 {
 }
@@ -16,10 +16,10 @@ impl RunCmd {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for RunCmd
 {
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         
         let s = String::from_utf8_lossy(data).to_string();
         let res = serde_json::from_str::<model::SendMsg>(s.as_str());

@@ -1,32 +1,22 @@
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::collections::HashMap;
-use crate::ab_client::AbClient;
-use std::collections::hash_map::RandomState;
 use crate::agreement::Message;
-use std::future::Future;
-use async_std::task::Context;
-use tokio::macros::support::{Pin, Poll};
-use std::marker::PhantomData;
-use std::ops::{DerefMut, Deref};
-use std::time::SystemTime;
-
-
+use async_trait::async_trait;
+#[async_trait]
 pub trait SubHandle:Send + Sync {
-    fn handle(&self,data:&[u8],len:u32,ext:u32)-> Option<(Vec<u8>,u32)>;
+    async fn handle(&self,data:&[u8],len:u32,ext:u32)-> Option<(Vec<u8>,u32)>;
     fn interested(&self,ext:u32)->bool{true} 
 }
-
+#[async_trait]
 pub trait Handle
 {
-    fn handle_ex(&self,data:Message<'_>
+    async fn handle_ex(&self,data:Message<'_>
                  )-> Option<(Vec<u8>,u32)>
     {
         for i in 0..self.handler_count()
         {
             let handler = self.get_handler(i);
             if handler.interested(data.ext) {
-                if let Some((v,ext)) = handler.handle(data.msg,data.len,data.ext)
+                if let Some((v,ext)) = handler.handle(data.msg,data.len,data.ext).await
                 {
                     return Some((v,ext));
                 }

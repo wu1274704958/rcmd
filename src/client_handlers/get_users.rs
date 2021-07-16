@@ -7,6 +7,7 @@ use std::collections::hash_map::RandomState;
 use crate::extc::*;
 use terminal::Color;
 use rcmd_suit::client_handler::SubHandle;
+use async_trait::async_trait;
 
 pub struct GetUser
 {
@@ -21,10 +22,10 @@ impl GetUser {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for GetUser
 {
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
 
         let s = String::from_utf8_lossy(data).to_string();
         let u = serde_json::from_str::<serde_json::Value>(s.as_str()).unwrap();
@@ -62,10 +63,10 @@ impl RecvMsg {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for RecvMsg
 {
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         if ext != EXT_RECV_MSG {return  None;}
         let s = String::from_utf8_lossy(data).to_string();
         let u = serde_json::from_str::<model::RecvMsg>(s.as_str()).unwrap();

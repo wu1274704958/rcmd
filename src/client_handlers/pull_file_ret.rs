@@ -12,7 +12,7 @@ use std::io::Read;
 use std::ffi::OsStr;
 use rcmd_suit::client_handler::SubHandle;
 use rcmd_suit::tools::u32_form_bytes;
-
+use async_trait::async_trait;
 pub struct PullFileRet
 {
 
@@ -25,10 +25,10 @@ impl PullFileRet {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for PullFileRet
 {
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         match ext
         {
             EXT_PULL_FILE_S => {

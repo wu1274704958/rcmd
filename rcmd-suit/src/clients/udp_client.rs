@@ -66,7 +66,7 @@ macro_rules! StopNoPlug {
 }
 
 impl <'a,T,A> UdpClient<T,A>
-    where T:Handle,
+    where T:Handle + std::marker::Sync,
           A : Agreement
 {
     pub fn new(bind_addr:impl ToSocketAddrs,handler:Arc<T>,parser:A)-> Self
@@ -371,7 +371,7 @@ impl <'a,T,A> UdpClient<T,A>
                         }
                     }
                     plug_collect.handle(m).await;
-                    if let Some((d,e)) = self.handler.handle_ex(m)
+                    if let Some((d,e)) = self.handler.handle_ex(m).await
                     {
                         self.send(d,e).await;
                     }
@@ -452,6 +452,7 @@ impl <'a,T,A> UdpClient<T,A>
     #[allow(unused_must_use)]
     pub async fn run_with_sender<SE,CP,F>(
         &self,
+        addr:SocketAddr,
         rx:Receiver<Vec<u8>>,
         sock: Arc<UdpSocket>,
         asy_cry_ignore:Option<&Vec<u32>>,
@@ -620,7 +621,7 @@ impl <'a,T,A> UdpClient<T,A>
                             continue;
                         }
                     }
-                    if let Some((d,e)) = self.handler.handle_ex(m)
+                    if let Some((d,e)) = self.handler.handle_ex(m).await
                     {
                         self.send(d,e).await;
                     }

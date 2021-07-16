@@ -1,5 +1,5 @@
 use async_std::channel::{Receiver, Sender, unbounded};
-use rcmd_suit::{ab_client::AbClient, agreement::DefParser, client_plug::client_plug::ClientPlug, config_build::ConfigBuilder, handler::{DefHandler, TestHandler}, plug::DefPlugMgr, plugs::heart_beat::HeartBeat, servers::udp_server::{UdpServer, run_udp_server_with_channel}, utils::stream_parser::{Stream,StreamParse}};
+use rcmd_suit::{ab_client::AbClient, agreement::DefParser, client_plug::client_plug::ClientPlug, config_build::ConfigBuilder, handler::{DefHandler, TestHandler}, plug::DefPlugMgr, plugs::heart_beat::HeartBeat, servers::udp_server::{UdpServer, run_udp_server_with_channel}, utils::stream_parser::{Stream, StreamParse}, client_handler};
 use std::{cell::Cell, collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}, usize};
 use tokio::{net::UdpSocket, runtime::{self, Runtime}, sync::MutexGuard};
 use rcmd_suit::utils::udp_sender::{USErr, DefUdpSender};
@@ -15,9 +15,11 @@ use rcmd_suit::handler::Handle;
 use rcmd_suit::plug::PlugMgr;
 
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
-use ahash::RandomState;
+use ahash::{RandomState, CallHasher};
 use std::panic::resume_unwind;
 use rcmd_suit::clients::udp_client::UdpClient;
+use std::hash::BuildHasher;
+use crate::client_plugs::p2p_dead_plug::P2PVerifyClientHandler;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -76,7 +78,7 @@ enum LinkState{
 #[derive(Clone, Copy)]
 pub enum LocalEntity {
     Ser(usize),
-    Client(usize),
+    Client(u64),
     None
 }
 
@@ -87,6 +89,17 @@ pub struct LinkData
     verify_code :Option<Weak<String>>,
     connected_addr: Option<SocketAddr>,
     local_entity: LocalEntity
+}
+
+impl LinkData {
+    fn get_verify_code(&self) -> Option<Arc<String>>
+    {
+        if let Some(ref c) = self.verify_code
+        {
+            return c.upgrade();
+        }
+        None
+    }
 }
 
 pub struct PlugData{
@@ -155,6 +168,17 @@ impl PlugData {
         }
         true
     }
+
+    pub fn ser_connect_succ_repo(&mut self,cp:usize) -> bool
+    {
+        if let Some(link) = self.link_map.get_mut(&cp)
+        {
+            link.state = LinkState::Stage2Success(false);
+            true
+        }else{
+            false
+        }
+    }
 }
 
 pub struct P2PPlug
@@ -165,6 +189,8 @@ pub struct P2PPlug
     ser_sender: Mutex<Option<Sender<(SocketAddr,Vec<u8>)>>>,
     ser_clients: Arc<Mutex<HashMap<usize,Box<AbClient>>>>,
     hash_builder: RandomState,
+    cli_map: Arc<Mutex<HashMap<u64,(usize,Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>,
+    cli_sender_map : Arc<Mutex<HashMap<u64,Sender<Vec<u8>>>>>
 }
 
 impl P2PPlug
@@ -178,7 +204,9 @@ impl P2PPlug
             runtime: Arc::new(Mutex::new(None)),
             ser_sender :Mutex::new(None),
             ser_clients : Arc::new(Mutex::new(HashMap::new())),
-            hash_builder: RandomState::new()
+            hash_builder: RandomState::new(),
+            cli_map : Arc::new(Mutex::new(HashMap::new())),
+            cli_sender_map : Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
@@ -477,6 +505,36 @@ impl P2PPlug
         }
         None
     }
+
+    async fn add_client(&self,ck:u64,s:Sender<Vec<u8>>,msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,cp:usize) -> bool
+    {
+        let mut cli_sender_map = self.cli_sender_map.lock().await;
+        if cli_sender_map.contains_key(&ck)
+        {
+            return false;
+        }
+        cli_sender_map.insert(ck,s);
+        drop(cli_sender_map);
+        let mut cli_map = self.cli_map.lock().await;
+        cli_map.insert(ck,(cp,msg_queue));
+        true
+    }
+    async fn rm_client(&self,ck:u64) -> Option<usize>
+    {
+        let mut cli_sender_map = self.cli_sender_map.lock().await;
+        if !cli_sender_map.contains_key(&ck)
+        {
+            return None;
+        }
+        cli_sender_map.remove(&ck);
+        drop(cli_sender_map);
+        let mut cli_map = self.cli_map.lock().await;
+        if let Some(v) = cli_map.remove(&ck)
+        {
+            return Some(v.0);
+        }
+        None
+    }
 }
 
 #[async_trait]
@@ -571,9 +629,23 @@ impl ClientPlug for P2PPlug
                                         self.send_data(link.cp.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_STAGE1_CS).await;
                                         //准备p2p client
                                         println!("准备p2p client");
+                                        let addr_key = CallHasher::get_hash(&addr,self.hash_builder.build_hasher());
+                                        let (s,rx) = unbounded::<Vec<u8>>();
+                                        let sock = self.get_socket().await.unwrap();
+                                        let msg_queue = Arc::new(Mutex::new(VecDeque::new()));
+                                        let plug_data_cp = self.data.clone();
+                                        let curr_sender_cp = self.curr_sender.clone();
+                                        let verify_code = link.get_verify_code().unwrap();
+                                        let cli_sender_map = self.cli_sender_map.clone();
+                                        let cli_map = self.cli_map.clone();
+                                        link.local_entity = LocalEntity::Client(addr_key);
+                                        self.add_client(addr_key,s,msg_queue.clone(),link.cp).await;
 
-                                        self.
-
+                                        self.prepare_runtime(|runtime|{
+                                            runtime.spawn(lauch_p2p_client(
+                                                addr,rx,sock,msg_queue,addr_key, plug_data_cp,
+                                                curr_sender_cp,verify_code,cli_sender_map,cli_map));
+                                        }).await;
                                     }
                                     _ => {}
                                 }
@@ -593,6 +665,16 @@ impl ClientPlug for P2PPlug
                 }
             }
         }else{
+            let addr_key = CallHasher::get_hash(&addr,self.hash_builder.build_hasher());
+
+            let mut cli_sender = self.cli_sender_map.lock().await;
+
+            if let Some(sender) = cli_sender.get_mut(&addr_key)
+            {
+                sender.send(data.to_vec()).await;
+                return;
+            }
+
             let mut ser_sender = self.ser_sender.lock().await;
             if let Some(ref mut sender) = *ser_sender{
                 sender.send((addr,data.to_vec())).await;
@@ -726,24 +808,32 @@ async fn lauch_p2p_ser(
 }
 
 async fn lauch_p2p_client(
+    addr:SocketAddr,
     rx:Receiver<Vec<u8>>,
     sock: Arc<UdpSocket>,
     msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
     key: u64,
     plug_data: Arc<Mutex<PlugData>>,
-    verify_code: Arc<String>
+    curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+    verify_code: Arc<String>,
+    cli_sender_map: Arc<Mutex<HashMap<u64, Sender<Vec<u8>>>>>,
+    cli_map: Arc<Mutex<HashMap<u64, (usize, Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>
 )
 {
-    let mut handler = DefHandler::new();
+    let mut handler = client_handler::DefHandler::new();
 
     {
         let mut msg = msg_queue.lock().await;
         msg.push_back((verify_code.as_bytes().to_vec(),EXT_P2P_CLIENT_VERIFY_CS));
+        drop(msg);
+        use rcmd_suit::client_handler::Handle;
+
+        handler.add_handler(Arc::new(P2PVerifyClientHandler::new(plug_data.clone(),curr_sender.clone())));
     }
 
     {
         let client = Arc::new( UdpClient::with_msg_queue(
-            (ip, args.bind_port),
+            addr,
             Arc::new(handler),
             DefParser::new(),
             msg_queue.clone()
@@ -751,10 +841,18 @@ async fn lauch_p2p_client(
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
         client.run_with_sender::<DefUdpSender,P2PPlug,_>(
-            rx,sock,
+            addr,rx,sock,
             msg_split_ignore,msg_split_ignore,
             async {
-
+                let mut cli_sender_map = cli_sender_map.lock().await;
+                cli_sender_map.remove(&key);
+                drop(cli_sender_map);
+                let mut cli_map = cli_map.lock().await;
+                if let Some(v) = cli_map.remove(&key)
+                {
+                    let mut d = plug_data.lock().await;
+                    d.rm_link(v.0);
+                }
             }).await;
     }
 }

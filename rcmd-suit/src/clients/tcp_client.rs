@@ -19,7 +19,7 @@ pub struct TcpClient<T,A>
 }
 
 impl <'a,T,A> TcpClient<T,A>
-    where T:Handle,
+    where T:Handle + std::marker::Sync,
     A : Agreement
 {
     pub fn new(handler:Arc<T>,parser:A)-> Self
@@ -208,7 +208,7 @@ impl <'a,T,A> TcpClient<T,A>
                             continue;
                         }
                     }
-                    if let Some((d,e)) = self.handler.handle_ex(m)
+                    if let Some((d,e)) = self.handler.handle_ex(m).await
                     {
                         self.send(d,e);
                     }

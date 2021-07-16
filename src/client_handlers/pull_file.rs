@@ -12,7 +12,7 @@ use std::io::Read;
 use std::ffi::OsStr;
 use rcmd_suit::client_handler::SubHandle;
 use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE, ext_content};
-
+use async_trait::async_trait;
 pub struct PullFile
 {
     queue:Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>
@@ -26,10 +26,10 @@ impl PullFile {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for PullFile
 {
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         
         let mut id_buf = data[0..size_of::<usize>()].to_vec();
         let name = String::from_utf8_lossy(&data[size_of::<usize>()..]).to_string();

@@ -5,7 +5,7 @@ use rcmd_suit::tools::{TOKEN_BEGIN,TOKEN_END};
 use std::mem::size_of;
 use rcmd_suit::tools::{u32_form_bytes,set_slices_form_u32};
 use rcmd_suit::client_handler::SubHandle;
-
+use async_trait::async_trait;
 pub struct SendFile
 {
 
@@ -18,10 +18,10 @@ impl SendFile {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for SendFile
 {
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         match ext
         {
             EXT_SAVE_FILE_RET |

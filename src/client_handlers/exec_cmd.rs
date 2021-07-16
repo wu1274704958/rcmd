@@ -5,7 +5,7 @@ use rcmd_suit::utils::rcmd::{Rcmd, CmdRes};
 use rcmd_suit::client_handler::SubHandle;
 use crate::model;
 use rcmd_suit::tools;
-
+use async_trait::async_trait;
 pub struct Exec
 {
     rcmd:Arc<Mutex<Rcmd>>
@@ -19,10 +19,10 @@ impl Exec {
         }
     }
 }
-
+#[async_trait]
 impl SubHandle for Exec
 {
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
        
         let cmd = String::from_utf8_lossy(data).to_string();
         let msg = serde_json::from_str::<model::SendMsg>(&cmd);

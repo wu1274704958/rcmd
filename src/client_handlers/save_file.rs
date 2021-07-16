@@ -7,7 +7,7 @@ use std::mem::size_of;
 use getopts::HasArg::No;
 use rcmd_suit::tools::{ext_content, TOKEN_BEGIN, TOKEN_END};
 use rcmd_suit::client_handler::SubHandle;
-
+use async_trait::async_trait;
 pub struct SaveFile
 {
     file_map:Arc<Mutex<HashMap<String,(File,usize)>>>,
@@ -57,10 +57,10 @@ fn ret(id_buf:&[u8],mut v2:Vec<u8>)->Vec<u8>
     v.append(&mut v2);
     v
 }
-
+#[async_trait]
 impl SubHandle for SaveFile
 {
-    fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, data: &[u8], len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
       
         let mut id_buf = [0u8;size_of::<usize>()];
         id_buf.copy_from_slice(&data[0..size_of::<usize>()]);
