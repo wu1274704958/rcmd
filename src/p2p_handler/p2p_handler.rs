@@ -188,7 +188,7 @@ impl SubHandle for P2PHandlerSer{
                 }
             }
             EXT_P2P_CONNECT_SUCCESS_STAGE1_CS => {
-                
+                println!("Recv Stage1 success!!");
                 let key = LinkData::gen_key(id.clone(),cp_lid);
                 let mut map = self.data.map.lock().await;
                 let link_data = if let Some(v) = map.get_mut(&key) {v}

@@ -674,6 +674,7 @@ impl ClientPlug for P2PPlug
                 sender.send(data.to_vec()).await;
                 return;
             }
+            drop(cli_sender);
 
             let mut ser_sender = self.ser_sender.lock().await;
             if let Some(ref mut sender) = *ser_sender{
