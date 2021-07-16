@@ -2,7 +2,7 @@ use async_std::channel::{Receiver, Sender, unbounded};
 use rcmd_suit::{ab_client::AbClient, agreement::DefParser, client_plug::client_plug::ClientPlug, config_build::ConfigBuilder, handler::{DefHandler, TestHandler}, plug::DefPlugMgr, plugs::heart_beat::HeartBeat, servers::udp_server::{UdpServer, run_udp_server_with_channel}, utils::stream_parser::{Stream,StreamParse}};
 use std::{cell::Cell, collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}, usize};
 use tokio::{net::UdpSocket, runtime::{self, Runtime}, sync::MutexGuard};
-use rcmd_suit::utils::udp_sender::USErr;
+use rcmd_suit::utils::udp_sender::{USErr, DefUdpSender};
 use async_trait::async_trait;
 use std::net::{SocketAddr, IpAddr};
 use tokio::sync::Mutex;
@@ -17,6 +17,7 @@ use rcmd_suit::plug::PlugMgr;
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
 use ahash::RandomState;
 use std::panic::resume_unwind;
+use rcmd_suit::clients::udp_client::UdpClient;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -143,6 +144,7 @@ impl PlugData {
         if let Some(link) = self.link_map.get_mut(&cp)
         {
             if let LocalEntity::None = link.local_entity{
+                link.state = LinkState::Stage2Success(true);
                 link.local_entity = LocalEntity::Ser(cid);
                 self.ser_map.insert(cid, cp);
             }else{
@@ -569,6 +571,9 @@ impl ClientPlug for P2PPlug
                                         self.send_data(link.cp.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_STAGE1_CS).await;
                                         //准备p2p client
                                         println!("准备p2p client");
+
+                                        self.
+
                                     }
                                     _ => {}
                                 }
@@ -724,8 +729,32 @@ async fn lauch_p2p_client(
     rx:Receiver<Vec<u8>>,
     sock: Arc<UdpSocket>,
     msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
-
+    key: u64,
+    plug_data: Arc<Mutex<PlugData>>,
+    verify_code: Arc<String>
 )
 {
+    let mut handler = DefHandler::new();
 
+    {
+        let mut msg = msg_queue.lock().await;
+        msg.push_back((verify_code.as_bytes().to_vec(),EXT_P2P_CLIENT_VERIFY_CS));
+    }
+
+    {
+        let client = Arc::new( UdpClient::with_msg_queue(
+            (ip, args.bind_port),
+            Arc::new(handler),
+            DefParser::new(),
+            msg_queue.clone()
+        ));
+        lazy_static::initialize(&comm::IGNORE_EXT);
+        let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
+        client.run_with_sender::<DefUdpSender,P2PPlug,_>(
+            rx,sock,
+            msg_split_ignore,msg_split_ignore,
+            async {
+
+            }).await;
+    }
 }

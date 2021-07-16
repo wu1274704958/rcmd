@@ -451,7 +451,7 @@ impl <'a,T,A> UdpClient<T,A>
 
     #[allow(unused_must_use)]
     pub async fn run_with_sender<SE,CP,F>(
-        &self,addr:SocketAddr,
+        &self,
         rx:Receiver<Vec<u8>>,
         sock: Arc<UdpSocket>,
         asy_cry_ignore:Option<&Vec<u32>>,
@@ -488,7 +488,6 @@ impl <'a,T,A> UdpClient<T,A>
         let run_cp = self.runing.clone();
         let sock_cp = sock.clone();
         let err_cp = err.clone();
-        let addr_cp = addr;
 
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
