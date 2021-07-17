@@ -465,12 +465,6 @@ impl <'a,T,A> UdpClient<T,A>
             F: futures::Future<Output=()>
     {
 
-        if let Ok(addr) = sock.local_addr() {
-            let mut local_addr = self.local_addr.lock().await;
-            *local_addr = Some(addr);
-        }
-
-
         // In a loop, read data from the socket and write the data back.
         let mut heartbeat_t = SystemTime::now();
         let mut asy = DefAsyCry::create();
@@ -487,7 +481,6 @@ impl <'a,T,A> UdpClient<T,A>
         let err:Arc<Mutex<Option<USErr>>> = Arc::new(Mutex::new(None));
         let sender_cp = sender.clone();
         let run_cp = self.runing.clone();
-        let sock_cp = sock.clone();
         let err_cp = err.clone();
 
         let runtime = tokio::runtime::Builder::new_multi_thread()

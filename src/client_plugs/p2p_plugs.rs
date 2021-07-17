@@ -20,6 +20,8 @@ use std::panic::resume_unwind;
 use rcmd_suit::clients::udp_client::UdpClient;
 use std::hash::BuildHasher;
 use crate::client_plugs::p2p_dead_plug::P2PVerifyClientHandler;
+use std::time::Duration;
+use tokio::time::sleep;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -383,6 +385,7 @@ impl P2PPlug
         }else{
             let r = runtime::Builder::new_multi_thread()
                 .worker_threads(8)
+                .enable_time()
                 .build()
                 .unwrap();
             f(&r);
@@ -572,8 +575,14 @@ impl ClientPlug for P2PPlug
             *ser_sender = None;
         }
         {
+            let mut cli_sender_map = self.cli_sender_map.lock().await;
+            cli_sender_map.clear();
+        }
+        {
             let mut runtime = self.runtime.lock().await;
             if let Some(r) = runtime.take(){
+                println!("Drop runtime");
+                sleep(Duration::from_millis(1000)).await;
                 r.shutdown_background();
             }
         }
@@ -611,19 +620,18 @@ impl ClientPlug for P2PPlug
                                         link.connected_addr = Some(addr);
                                         //准备p2p服务器
                                         println!("准备p2p服务器");
-                                        let mut ser_sender = self.ser_sender.lock().await;
-                                        if ser_sender.is_none(){
-                                            let (s,rx) = unbounded::<(SocketAddr,Vec<u8>)>();
-                                            *ser_sender = Some(s);
-                                            let sock = self.get_socket().await.unwrap();
-                                            let cls = self.ser_clients.clone();
-                                            let plug_data_cp = self.data.clone();
-                                            let curr_sender_cp = self.curr_sender.clone();
-                                            
-                                            self.prepare_runtime(|runtime|{
-                                                runtime.spawn(lauch_p2p_ser(rx, sock, cls, plug_data_cp, curr_sender_cp));
-                                            }).await;
-                                        }
+                                         let mut ser_sender = self.ser_sender.lock().await;
+                                         if ser_sender.is_none(){
+                                             let (s,rx) = unbounded::<(SocketAddr,Vec<u8>)>();
+                                             *ser_sender = Some(s);
+                                             let cls = self.ser_clients.clone();
+                                             let plug_data_cp = self.data.clone();
+                                             let curr_sender_cp = self.curr_sender.clone();
+                                             let sock = d.socket.as_ref().unwrap().clone();
+                                             self.prepare_runtime(|runtime|{
+                                                 runtime.spawn(lauch_p2p_ser(rx, sock, cls, plug_data_cp, curr_sender_cp));
+                                             }).await;
+                                         }
                                     }
                                     Ext::Hello4 => {
                                         self.send_data(link.cp.to_be_bytes().to_vec(),EXT_P2P_CONNECT_SUCCESS_STAGE1_CS).await;
@@ -631,7 +639,6 @@ impl ClientPlug for P2PPlug
                                         println!("准备p2p client");
                                         let addr_key = CallHasher::get_hash(&addr,self.hash_builder.build_hasher());
                                         let (s,rx) = unbounded::<Vec<u8>>();
-                                        let sock = self.get_socket().await.unwrap();
                                         let msg_queue = Arc::new(Mutex::new(VecDeque::new()));
                                         let plug_data_cp = self.data.clone();
                                         let curr_sender_cp = self.curr_sender.clone();
@@ -640,6 +647,7 @@ impl ClientPlug for P2PPlug
                                         let cli_map = self.cli_map.clone();
                                         link.local_entity = LocalEntity::Client(addr_key);
                                         self.add_client(addr_key,s,msg_queue.clone(),link.cp).await;
+                                        let sock = d.socket.as_ref().unwrap().clone();
 
                                         self.prepare_runtime(|runtime|{
                                             runtime.spawn(lauch_p2p_client(
