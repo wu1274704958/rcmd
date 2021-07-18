@@ -240,7 +240,7 @@ async fn console(
                         continue;
                     }
                     match s.trim(){
-                        "quit" =>{
+                        "-" =>{
                             break;
                         }
                         _=>{

@@ -23,7 +23,8 @@ pub enum LinkState{
     TryConnectAToB(u8,SocketAddr,SystemTime,u8,u8),
     Failed,
     Step1Success(usize,u8,SystemTime),
-    Step2Success(usize,u8)
+    Step2Success(usize,u8),
+    NotifyConstructRelay(u8,SystemTime,u8)
 }
 
 #[derive(Debug)]
@@ -36,7 +37,8 @@ pub struct LinkData{
     local_addr: HashMap<usize,Vec<SocketAddr>>,
     timeout:Duration,
     a_addr: SocketAddr,
-    b_addr: SocketAddr
+    b_addr: SocketAddr,
+    relay: Option<u8>
 }
 
 pub struct P2PLinkData
@@ -365,7 +367,8 @@ impl LinkData {
             local_addr:local_addr_map,
             timeout:Duration::from_secs(2),
             a_addr,
-            b_addr
+            b_addr,
+            relay: None
         }
     }
 
@@ -425,7 +428,7 @@ impl LinkData {
     }
 
     fn try_connect_local_times() -> u8 { 3u8 }
-    fn try_connect_times() -> u8 { 18u8 } //必须偶数
+    fn try_connect_times() -> u8 { 10u8 } //必须偶数
     fn try_wait_time() -> Duration { Duration::from_secs(2) }
     fn wait_step2_time() -> Duration { Duration::from_secs(10) }
     //优先取_1的地址
@@ -490,7 +493,8 @@ impl LinkData {
                         if d >= Self::try_wait_time(){
                             times += 1;
                             if times > Self::try_connect_times(){ 
-                                self.set_state(LinkState::Failed);
+                                //self.set_state(LinkState::Failed);
+                                self.state = LinkState::NotifyConstructRelay(100,SystemTime::now(),0);
                             }else{
                                 self.set_state(LinkState::TryConnectAToB(100,self.b_addr,now,times,0));
                             }
@@ -503,7 +507,8 @@ impl LinkData {
                             let next = self.get_local_addr_next_translation(self.b, self.a, addr_id);
                             if next.is_none(){
                                 if times > Self::try_connect_local_times(){
-                                    self.state = LinkState::Failed;
+                                    //self.state = LinkState::Failed;
+                                    self.state = LinkState::NotifyConstructRelay(0,SystemTime::now(),0);
                                 }else{
                                     let addrs = self.get_local_addr(self.a).unwrap();
                                     self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),times + 1,0);
@@ -538,7 +543,8 @@ impl LinkData {
                             let next = self.get_local_addr_next_slantdown(self.a, self.b, addr_id);
                             if next.is_none(){
                                 if times > Self::try_connect_local_times(){
-                                    self.state = LinkState::Failed;
+                                    //self.state = LinkState::Failed;
+                                    self.state = LinkState::NotifyConstructRelay(0,SystemTime::now(),0);
                                 }else{
                                     let addrs = self.get_local_addr(self.a).unwrap();
                                     self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),times + 1,0);
