@@ -362,7 +362,7 @@ impl SubHandle for P2PHandlerSer{
                     if let std::net::IpAddr::V4(ip) = addr.ip(){
                         data.extend_from_slice(ip.octets().as_ref());
                     }
-                    data.extend_from_slice(a_addr.port().to_be_bytes().as_ref());
+                    data.extend_from_slice(addr.port().to_be_bytes().as_ref());
                     data.extend_from_slice(rest);
                     cp.push_msg(data,EXT_P2P_RELAY_MSG_SC);
                 }
