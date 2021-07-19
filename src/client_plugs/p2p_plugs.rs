@@ -90,7 +90,8 @@ pub struct LinkData
     state: LinkState,
     verify_code :Option<Weak<String>>,
     connected_addr: Option<SocketAddr>,
-    local_entity: LocalEntity
+    local_entity: LocalEntity,
+    relay: Option<SocketAddr>
 }
 
 impl LinkData {
@@ -101,6 +102,10 @@ impl LinkData {
             return c.upgrade();
         }
         None
+    }
+
+    pub fn relay(&self) -> Option<SocketAddr> {
+        self.relay
     }
 }
 
@@ -192,7 +197,8 @@ pub struct P2PPlug
     ser_clients: Arc<Mutex<HashMap<usize,Box<AbClient>>>>,
     hash_builder: RandomState,
     cli_map: Arc<Mutex<HashMap<u64,(usize,Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>,
-    cli_sender_map : Arc<Mutex<HashMap<u64,Sender<Vec<u8>>>>>
+    cli_sender_map : Arc<Mutex<HashMap<u64,Sender<Vec<u8>>>>>,
+    relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
 }
 
 impl P2PPlug
@@ -208,7 +214,8 @@ impl P2PPlug
             ser_clients : Arc::new(Mutex::new(HashMap::new())),
             hash_builder: RandomState::new(),
             cli_map : Arc::new(Mutex::new(HashMap::new())),
-            cli_sender_map : Arc::new(Mutex::new(HashMap::new()))
+            cli_sender_map : Arc::new(Mutex::new(HashMap::new())),
+            relay_map : Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
@@ -319,7 +326,8 @@ impl P2PPlug
             state : st,
             verify_code : None,
             connected_addr:None,
-            local_entity: LocalEntity::None
+            local_entity: LocalEntity::None,
+            relay: None
         });
         true
     }
@@ -402,7 +410,8 @@ impl P2PPlug
         ext == EXT_REQ_LINK_P2P_REJECTED_SC ||
         ext == EXT_P2P_SYNC_VERIFY_CODE_SC ||
         ext == EXT_P2P_WAIT_CONNECT_SC ||
-        ext == EXT_P2P_TRY_CONNECT_SC
+        ext == EXT_P2P_TRY_CONNECT_SC ||
+        ext == EXT_P2P_NOTIFY_RELAY_SC
     }
 
     fn parse_addr(s:&mut Stream) -> Option<SocketAddr>
@@ -432,6 +441,17 @@ impl P2PPlug
 
     async fn send_udp_msg(&self,addr:SocketAddr,msg:&[u8],times:u8) -> Result<(),P2PErr>
     {
+        {
+            let relay = self.relay_map.lock().await;
+            if let Some(cpid) = relay.get(&addr)
+            {
+                let mut d = Vec::with_capacity(msg.len() + size_of::<usize>());
+                d.extend_from_slice(cpid.to_be_bytes().as_ref());
+                d.extend_from_slice(msg);
+                self.send_data(d,EXT_P2P_RELAY_MSG_CS).await;
+                return Ok(());
+            }
+        }
         let d = self.data.lock().await;
         if let Some(ref s) = d.socket
         {
@@ -628,8 +648,11 @@ impl ClientPlug for P2PPlug
                                              let plug_data_cp = self.data.clone();
                                              let curr_sender_cp = self.curr_sender.clone();
                                              let sock = d.socket.as_ref().unwrap().clone();
+                                             let relay_map = self.relay_map.clone();
                                              self.prepare_runtime(|runtime|{
-                                                 runtime.spawn(lauch_p2p_ser(rx, sock, cls, plug_data_cp, curr_sender_cp));
+                                                 runtime.spawn(lauch_p2p_ser(
+                                                     rx, sock, cls,
+                                                     plug_data_cp, curr_sender_cp,relay_map));
                                              }).await;
                                          }
                                     }
@@ -648,11 +671,12 @@ impl ClientPlug for P2PPlug
                                         link.local_entity = LocalEntity::Client(addr_key);
                                         self.add_client(addr_key,s,msg_queue.clone(),link.cp).await;
                                         let sock = d.socket.as_ref().unwrap().clone();
+                                        let relay_map = self.relay_map.clone();
 
                                         self.prepare_runtime(|runtime|{
                                             runtime.spawn(lauch_p2p_client(
                                                 addr,rx,sock,msg_queue,addr_key, plug_data_cp,
-                                                curr_sender_cp,verify_code,cli_sender_map,cli_map));
+                                                curr_sender_cp,verify_code,cli_sender_map,cli_map,relay_map));
                                         }).await;
                                     }
                                     _ => {}
@@ -703,7 +727,10 @@ impl ClientPlug for P2PPlug
             EXT_REQ_LINK_P2P_REJECTED_SC|
             EXT_P2P_SYNC_VERIFY_CODE_SC|
             EXT_P2P_WAIT_CONNECT_SC |
-            EXT_P2P_TRY_CONNECT_SC => {
+            EXT_P2P_TRY_CONNECT_SC |
+            EXT_P2P_NOTIFY_RELAY_SC |
+            EXT_P2P_RELAY_MSG_SC
+            => {
                 false
             }
             _ => {true}
@@ -734,7 +761,15 @@ impl ClientPlug for P2PPlug
             EXT_REQ_LINK_P2P_REJECTED_SC => {
                 let cpid = cpid.unwrap();
                 println!("客户端删除link cp {}",cpid);
-                self.rm_link(cpid).await;
+                if let Some(link) = self.rm_link(cpid).await
+                {
+                    if let Some(addr) = link.relay()
+                    {
+                        let mut relay = self.relay_map.lock().await;
+                        let res = relay.remove(&addr);
+                        println!("Rm link relay {:?}",res);
+                    }
+                }
             }
             EXT_P2P_SYNC_VERIFY_CODE_SC => {
                 let cpid = cpid.unwrap();
@@ -766,6 +801,32 @@ impl ClientPlug for P2PPlug
                     }
                 }
             }
+            EXT_P2P_NOTIFY_RELAY_SC => {
+                let cpid = cpid.unwrap();
+                if let Some(addr) = Self::parse_addr(&mut stream)
+                {
+                    if let Some(c) = self.get_verify_code_cpid(cpid).await
+                    {
+                        println!("建立转发通道to {:?}",addr);
+                        let mut d = self.data.lock().await;
+                        if let Some(link) = d.link_map.get_mut(&cpid)
+                        {
+                            link.relay = Some(addr);
+                            drop(link);
+                            drop(d);
+                            let mut relay = self.relay_map.lock().await;
+                            relay.insert(addr,cpid);
+                            self.send_data(_msg.msg[0..size_of::<usize>()].to_vec(),EXT_P2P_NOTIFY_RELAY_CS).await;
+                        }
+                    }
+                }
+            }
+            EXT_P2P_RELAY_MSG_SC => {
+                if let Some(addr) = Self::parse_addr(&mut stream)
+                {
+                    self.on_recv_oth_msg(addr,stream.get_rest()).await;
+                }
+            }
             _=>{}
         }
     }
@@ -777,7 +838,8 @@ async fn lauch_p2p_ser(
     sock: Arc<UdpSocket>,
     clients: Arc<Mutex<HashMap<usize,Box<AbClient>>>>,
     plug_data: Arc<Mutex<PlugData>>,
-    curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>
+    curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+    relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
 )
 {
     let config = ConfigBuilder::new()
@@ -796,7 +858,7 @@ async fn lauch_p2p_ser(
 
         plugs.add_plug(Arc::new(HeartBeat{}));
         
-        dead_plugs.add_plug(Arc::new(P2POnDeadPlugClientSer::new(plug_data,curr_sender)));
+        dead_plugs.add_plug(Arc::new(P2POnDeadPlugClientSer::new(plug_data,curr_sender,relay_map)));
         
     }
 
@@ -826,7 +888,8 @@ async fn lauch_p2p_client(
     curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
     verify_code: Arc<String>,
     cli_sender_map: Arc<Mutex<HashMap<u64, Sender<Vec<u8>>>>>,
-    cli_map: Arc<Mutex<HashMap<u64, (usize, Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>
+    cli_map: Arc<Mutex<HashMap<u64, (usize, Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>,
+    relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
 )
 {
     let mut handler = client_handler::DefHandler::new();
@@ -860,7 +923,14 @@ async fn lauch_p2p_client(
                 if let Some(v) = cli_map.remove(&key)
                 {
                     let mut d = plug_data.lock().await;
-                    d.rm_link(v.0);
+                    if let Some(link) = d.rm_link(v.0)
+                    {
+                        if let Some(addr) = link.relay {
+                            let mut relay = relay_map.lock().await;
+                            let res = relay.remove(&addr);
+                            println!("Rm link relay {:?}",res);
+                        }
+                    }
                 }
             }).await;
     }

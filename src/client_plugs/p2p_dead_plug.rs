@@ -12,22 +12,26 @@ use crate::extc::*;
 
 use super::p2p_plugs::PlugData;
 use rcmd_suit::utils::stream_parser::Stream;
+use std::net::SocketAddr;
 
 
 pub struct P2POnDeadPlugClientSer{
     plug_data: Arc<Mutex<PlugData>>,
-    curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>
+    curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+    relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
 }
 
 impl P2POnDeadPlugClientSer{
     pub fn new(
         plug_data: Arc<Mutex<PlugData>>,
-        curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>
+        curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+        relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
     )-> P2POnDeadPlugClientSer
     {
         P2POnDeadPlugClientSer{
             plug_data,
-            curr_sender
+            curr_sender,
+            relay_map
         }
     }
 }
@@ -46,6 +50,14 @@ impl Plug for P2POnDeadPlugClientSer {
             {
                 let mut sender = self.curr_sender.lock().await;
                 sender.push_back((cpid.to_be_bytes().to_vec(),EXT_P2P_CLIENT_DISCONNECT_CS));
+                drop(sender);
+
+                if let Some(addr) = _link.relay()
+                {
+                    let mut relay = self.relay_map.lock().await;
+                    let res = relay.remove(&addr);
+                    println!("Rm link relay {:?}",res);
+                }
             }
         }
     }

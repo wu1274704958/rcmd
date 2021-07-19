@@ -107,7 +107,7 @@ impl Plug for P2PPlug {
                             c.push_msg(verify_code, EXT_P2P_SYNC_VERIFY_CODE_SC);
                         }
                     }
-                    match d.next_state(clients).await {
+                    match d.next_state(clients) {
 
                         Some(LinkState::TryConnectBToA(_addr_id,addr,_time , _times,sub_st)) => {
                             match sub_st {
@@ -152,6 +152,41 @@ impl Plug for P2PPlug {
                                     }
                                 }
                                 _=>{}
+                            }
+                        }
+                        Some(LinkState::NotifyConstructRelay(addr_id,time,st)) =>
+                        {
+                            if st == 0{
+                                let (a_addr,b_addr) = if addr_id >= 100{
+                                    (d.a_addr(),d.b_addr())
+                                }else{
+                                    let av = d.get_local_addr(a);
+                                    let bv = d.get_local_addr(b);
+                                    if av.is_some() && bv.is_some(){
+                                        (av.unwrap()[0],bv.unwrap()[0])
+                                    }else{
+                                        (d.a_addr(),d.b_addr())
+                                    }
+                                };
+                                if let Some(c) = cls.get_mut(&a)
+                                {
+                                    let mut data = b_.to_vec();
+                                    if let std::net::IpAddr::V4(ip) = b_addr.ip(){
+                                        data.extend_from_slice(ip.octets().as_ref());
+                                    }
+                                    data.extend_from_slice(b_addr.port().to_be_bytes().as_ref());
+                                    c.push_msg(data, EXT_P2P_NOTIFY_RELAY_SC);
+                                }
+                                if let Some(c) = cls.get_mut(&b)
+                                {
+                                    let mut data = a_.to_vec();
+                                    if let std::net::IpAddr::V4(ip) = a_addr.ip(){
+                                        data.extend_from_slice(ip.octets().as_ref());
+                                    }
+                                    data.extend_from_slice(a_addr.port().to_be_bytes().as_ref());
+                                    c.push_msg(data, EXT_P2P_NOTIFY_RELAY_SC);
+                                }
+                                d.set_state(LinkState::NotifyConstructRelay(addr_id,SystemTime::now(),st + 1));
                             }
                         }
                         Some(LinkState::Failed)=>{

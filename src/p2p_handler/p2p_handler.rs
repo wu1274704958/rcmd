@@ -1,5 +1,5 @@
 use rcmd_suit::handler::SubHandle;
-use std::process::abort;
+use std::process::{abort, exit};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::{u32, u8, usize};
@@ -38,7 +38,7 @@ pub struct LinkData{
     timeout:Duration,
     a_addr: SocketAddr,
     b_addr: SocketAddr,
-    relay: Option<u8>
+    relay: Option<(SocketAddr,SocketAddr)>
 }
 
 pub struct P2PLinkData
@@ -96,6 +96,8 @@ impl P2PHandlerSer{
             EXT_P2P_CONNECT_SUCCESS_CS =>   EXT_P2P_CONNECT_SUCCESS_SC,
             EXT_P2P_WAITING_CONNECT_CS=> EXT_P2P_WAITING_CONNECT_SC,
             EXT_P2P_CLIENT_DISCONNECT_CS => EXT_P2P_CLIENT_DISCONNECT_SC,
+            EXT_P2P_NOTIFY_RELAY_CS => 0,
+            EXT_P2P_RELAY_MSG_CS => 0,
             _=>{abort()}
         }
     }
@@ -311,6 +313,61 @@ impl SubHandle for P2PHandlerSer{
                 respo.extend_from_slice(0u32.to_be_bytes().as_ref());
                 return Some((respo,Self::get_respones_ext(ext)));
             }
+
+            EXT_P2P_NOTIFY_RELAY_CS => {
+                let key = LinkData::gen_key(id.clone(),cp_lid);
+                let mut map = self.data.map.lock().await;
+                let link_data = if let Some(v) = map.get_mut(&key) {v}
+                else{
+                    return None;
+                };
+
+                match link_data.state() {
+                    LinkState::NotifyConstructRelay(addr_id,time,st)  => {
+                        if st >= 1 {
+                            link_data.set_state(LinkState::NotifyConstructRelay(addr_id,time,st + 1));
+                            if st + 1 == 3
+                            {
+                                let addr = if addr_id >= 100 {
+                                    (link_data.a_addr,link_data.b_addr )
+                                }else{
+                                    let a = link_data.a.clone();
+                                    let b = link_data.b.clone();
+                                    let a_addr = if let Some(v ) = link_data.get_local_addr(a)
+                                    {v}else{return None;};
+                                    let b_addr = if let Some(v ) = link_data.get_local_addr(b)
+                                    {v}else{return None;};
+                                    (a_addr[0],b_addr[0])
+                                };
+                                link_data.relay = Some(addr);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return None;
+            }
+
+            EXT_P2P_RELAY_MSG_CS => {
+                let key = LinkData::gen_key(id.clone(),cp_lid);
+                let mut map = self.data.map.lock().await;
+                let link_data = if let Some(v) = map.get_mut(&key) {v}
+                else{
+                    return None;
+                };
+                if let Some((a_addr,b_addr)) = link_data.relay{
+                    let addr = if id == link_data.a { a_addr }else{ b_addr };
+                    let rest = stream.get_rest();
+                    let mut data = Vec::with_capacity(6 + rest.len());
+                    if let std::net::IpAddr::V4(ip) = addr.ip(){
+                        data.extend_from_slice(ip.octets().as_ref());
+                    }
+                    data.extend_from_slice(a_addr.port().to_be_bytes().as_ref());
+                    data.extend_from_slice(rest);
+                    cp.push_msg(data,EXT_P2P_RELAY_MSG_SC);
+                }
+                None
+            }
             
             _ => {None}
         }
@@ -321,7 +378,9 @@ impl SubHandle for P2PHandlerSer{
         ext == EXT_P2P_CONNECT_SUCCESS_STAGE1_CS || 
         ext == EXT_P2P_CONNECT_SUCCESS_CS ||
         ext == EXT_P2P_WAITING_CONNECT_CS || 
-        ext == EXT_P2P_CLIENT_DISCONNECT_CS 
+        ext == EXT_P2P_CLIENT_DISCONNECT_CS ||
+        ext == EXT_P2P_NOTIFY_RELAY_CS ||
+        ext == EXT_P2P_RELAY_MSG_CS
     }
 
 }
@@ -468,7 +527,7 @@ impl LinkData {
         }
     }
 
-    pub async fn next_state(&mut self,_clients: &Arc<Mutex<HashMap<usize, Box<AbClient>>>>) -> Option<LinkState>
+    pub fn next_state(&mut self,_clients: &Arc<Mutex<HashMap<usize, Box<AbClient>>>>) -> Option<LinkState>
     {
         match self.state {
             LinkState::Agreed => {
@@ -492,9 +551,12 @@ impl LinkData {
                     if let Ok(d) = now.duration_since(time){
                         if d >= Self::try_wait_time(){
                             times += 1;
-                            if times > Self::try_connect_times(){ 
-                                //self.set_state(LinkState::Failed);
-                                self.state = LinkState::NotifyConstructRelay(100,SystemTime::now(),0);
+                            if times > Self::try_connect_times(){
+                                if self.relay.is_some() {
+                                    self.set_state(LinkState::Failed);
+                                }else {
+                                    self.state = LinkState::NotifyConstructRelay(100, SystemTime::now(), 0);
+                                }
                             }else{
                                 self.set_state(LinkState::TryConnectAToB(100,self.b_addr,now,times,0));
                             }
@@ -507,8 +569,11 @@ impl LinkData {
                             let next = self.get_local_addr_next_translation(self.b, self.a, addr_id);
                             if next.is_none(){
                                 if times > Self::try_connect_local_times(){
-                                    //self.state = LinkState::Failed;
-                                    self.state = LinkState::NotifyConstructRelay(0,SystemTime::now(),0);
+                                    if self.relay.is_some() {
+                                        self.state = LinkState::Failed;
+                                    }else {
+                                        self.state = LinkState::NotifyConstructRelay(0, SystemTime::now(), 0);
+                                    }
                                 }else{
                                     let addrs = self.get_local_addr(self.a).unwrap();
                                     self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),times + 1,0);
@@ -543,8 +608,11 @@ impl LinkData {
                             let next = self.get_local_addr_next_slantdown(self.a, self.b, addr_id);
                             if next.is_none(){
                                 if times > Self::try_connect_local_times(){
-                                    //self.state = LinkState::Failed;
-                                    self.state = LinkState::NotifyConstructRelay(0,SystemTime::now(),0);
+                                    if self.relay.is_some() {
+                                        self.state = LinkState::Failed;
+                                    }else {
+                                        self.state = LinkState::NotifyConstructRelay(0, SystemTime::now(), 0);
+                                    }
                                 }else{
                                     let addrs = self.get_local_addr(self.a).unwrap();
                                     self.state = LinkState::TryConnectBToA(0,addrs[0],SystemTime::now(),times + 1,0);
@@ -572,10 +640,31 @@ impl LinkData {
                     }
                 }
             }
+            LinkState::NotifyConstructRelay(_,time,st) => {
+                if st < 3 {
+                    if let Ok(dur) = SystemTime::now().duration_since(time){
+                        if dur > Duration::from_secs_f32(2f32){
+                            self.state = LinkState::Failed;
+                            return Some(self.state);
+                        }
+                    }
+                }else{
+                    self.state = LinkState::Agreed;
+                    return self.next_state(_clients);
+                }
+            }
 
             _ => {}
         }
         None
+    }
+
+
+    pub fn a_addr(&self) -> SocketAddr {
+        self.a_addr
+    }
+    pub fn b_addr(&self) -> SocketAddr {
+        self.b_addr
     }
 }
 #[allow(dead_code)]
