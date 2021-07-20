@@ -1,5 +1,5 @@
 use async_std::channel::{Receiver, Sender, unbounded};
-use rcmd_suit::{ab_client::AbClient, agreement::DefParser, client_plug::client_plug::ClientPlug, config_build::ConfigBuilder, handler::{DefHandler, TestHandler}, plug::DefPlugMgr, plugs::heart_beat::HeartBeat, servers::udp_server::{UdpServer, run_udp_server_with_channel}, utils::stream_parser::{Stream, StreamParse}, client_handler};
+use rcmd_suit::{ab_client::AbClient, agreement::DefParser, client_plug::client_plug::ClientPlug, config_build::ConfigBuilder, handler::{DefHandler, TestHandler}, plug::DefPlugMgr, plugs::heart_beat::HeartBeat, servers::udp_server::{UdpServer}, utils::stream_parser::{Stream, StreamParse}, client_handler};
 use std::{cell::Cell, collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}, usize};
 use tokio::{net::UdpSocket, runtime::{self, Runtime}, sync::MutexGuard};
 use rcmd_suit::utils::udp_sender::{USErr, DefUdpSender, UdpSender};
@@ -23,6 +23,7 @@ use crate::client_plugs::p2p_dead_plug::P2PVerifyClientHandler;
 use std::time::Duration;
 use tokio::time::sleep;
 use crate::client_plugs::attched_udp_sender::AttchedUdpSender;
+use crate::client_plugs::udp_server_channel::run_udp_server_with_channel;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -850,7 +851,7 @@ async fn lauch_p2p_ser(
     clients: Arc<Mutex<HashMap<usize,Box<AbClient>>>>,
     plug_data: Arc<Mutex<PlugData>>,
     curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
-    relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
+    relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>,
 )
 {
     let config = ConfigBuilder::new()
@@ -869,7 +870,7 @@ async fn lauch_p2p_ser(
 
         plugs.add_plug(Arc::new(HeartBeat{}));
         
-        dead_plugs.add_plug(Arc::new(P2POnDeadPlugClientSer::new(plug_data,curr_sender,relay_map)));
+        dead_plugs.add_plug(Arc::new(P2POnDeadPlugClientSer::new(plug_data,curr_sender.clone(),relay_map.clone())));
         
     }
 
@@ -886,7 +887,7 @@ async fn lauch_p2p_ser(
     let asy_cry_ignore:Option<&'static Vec<u32>> = Some(&comm::IGNORE_EXT);
     //udp_server_run!(server,msg_split_ignore,msg_split_ignore);
 
-    run_udp_server_with_channel(rx,sock,server,msg_split_ignore,asy_cry_ignore).await;
+    run_udp_server_with_channel(rx,sock,server,msg_split_ignore,asy_cry_ignore,relay_map,curr_sender).await;
 }
 
 async fn lauch_p2p_client(

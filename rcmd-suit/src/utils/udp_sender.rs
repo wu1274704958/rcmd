@@ -24,12 +24,12 @@ use std::thread::sleep;
 use crate::utils::data_current_limiter::DataCurrentLimiter;
 
 #[async_trait]
-pub trait UdpSender{
+pub trait UdpSender : std::marker::Send + std::marker::Sync{
     async fn send_msg(&self,v:Vec<u8>)->Result<(),USErr>;
     async fn check_recv(&self, data: &[u8]) -> Result<(),USErr>;
     async fn pop_recv_msg(&self) -> Result<Vec<u8>,USErr>;
     async fn need_check(&self)->bool;
-    fn create(sock:Arc<UdpSocket>,addr:SocketAddr) ->Self;
+    fn create(sock:Arc<UdpSocket>,addr:SocketAddr) ->Self where Self: Sized;
     async fn set_max_msg_len(&mut self,len:u16);
     fn max_msg_len(&self)->u16;
     async fn set_min_msg_len(&mut self,len:u16);
