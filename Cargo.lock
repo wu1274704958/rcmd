@@ -1550,6 +1550,7 @@ dependencies = [
  "getopts",
  "lazy_static",
  "mysql",
+ "num-traits",
  "num_enum",
  "rand 0.7.3",
  "rcmd-suit",

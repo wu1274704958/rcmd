@@ -457,7 +457,8 @@ impl <'a,T,A> UdpClient<T,A>
         sock: Arc<UdpSocket>,
         asy_cry_ignore:Option<&Vec<u32>>,
         msg_split_ignore:Option<&Vec<u32>>,
-        on_ret: F
+        on_ret: F,
+        sender: Arc<SE>
     ) -> Result<(),USErr>
 
         where
@@ -477,7 +478,6 @@ impl <'a,T,A> UdpClient<T,A>
         }
         let mut package = None;
 
-        let sender = Arc::new(SE::create(sock.clone(),addr));
         let err:Arc<Mutex<Option<USErr>>> = Arc::new(Mutex::new(None));
         let sender_cp = sender.clone();
         let run_cp = self.runing.clone();

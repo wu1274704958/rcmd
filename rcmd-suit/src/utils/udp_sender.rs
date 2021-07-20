@@ -47,7 +47,7 @@ pub trait UdpSender{
     async fn close_session(&self)->Result<(),USErr>;
 }
 
-enum SessionState{
+pub enum SessionState{
     Closed,
     Null,
     WaitResponse(u128,SystemTime,u16),
@@ -196,7 +196,7 @@ impl Debug for USErr
 #[derive(TryFromPrimitive)]
 #[derive(Copy, Clone)]
 #[allow(non_camel_case_types)]
-enum SpecialExt {
+pub enum SpecialExt {
     send_recv = u32::max_value(),
     miss_cache = u32::max_value() - 1,
     send_sid = 100,

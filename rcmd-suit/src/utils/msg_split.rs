@@ -282,6 +282,11 @@ impl DefUdpMsgSplit{
         }
         a > b
     }
+
+
+    pub fn set_unit_size(&mut self, unit_size: usize) {
+        self.unit_size = unit_size;
+    }
 }
 
 #[test]
