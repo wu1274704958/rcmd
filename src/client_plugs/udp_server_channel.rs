@@ -58,6 +58,7 @@ pub async fn run_udp_server_with_channel<LID,ABC,P,SH,H,PL,PLM>(
                         let relay_map = relay_map.lock().await;
                         if let Some(cpid) = relay_map.get(&addr)
                         {
+                            println!("Create Relay Sender");
                             Arc::new(AttchedUdpSender::new(curr_sender.clone(),
                                                            EXT_P2P_RELAY_MSG_CS,*cpid))
                         }else{

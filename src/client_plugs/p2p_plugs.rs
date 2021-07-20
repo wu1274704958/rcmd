@@ -24,6 +24,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use crate::client_plugs::attched_udp_sender::AttchedUdpSender;
 use crate::client_plugs::udp_server_channel::run_udp_server_with_channel;
+use crate::client_plugs::p2p_plugs::LocalEntity::Client;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -780,6 +781,9 @@ impl ClientPlug for P2PPlug
                         let mut relay = self.relay_map.lock().await;
                         let res = relay.remove(&addr);
                         println!("Rm link relay {:?}",res);
+                        if let Client(key) = link.local_entity{
+                            self.rm_client(key).await;
+                        }
                     }
                 }
             }
