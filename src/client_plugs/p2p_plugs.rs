@@ -983,7 +983,7 @@ async fn lauch_p2p_client_relay(
         ));
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
-        let sender = Arc::new(AttchedUdpSender::new(msg_queue.clone(),
+        let sender = Arc::new(AttchedUdpSender::new(curr_sender,
                                                     EXT_P2P_RELAY_MSG_CS,cpid));
         client.run_with_sender::<_,P2PPlug,_>(
             addr,rx,sock,
