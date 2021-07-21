@@ -6,6 +6,7 @@ mod client_handlers;
 mod client_plugs;
 mod handlers;
 mod db;
+mod utils;
 #[macro_use]
 extern crate lazy_static;
 extern crate get_if_addrs;
