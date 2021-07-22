@@ -200,6 +200,18 @@ impl Plug for P2PPlug {
                                 c.push_msg(a_.to_vec(), EXT_ERR_P2P_LINK_FAILED);
                             }
                         }
+
+                        Some(LinkState::Rejected) => {
+                            need_rm = true;
+                            if let Some(c) = cls.get_mut(&a)
+                            {
+                                c.push_msg(b_.to_vec(), EXT_REQ_LINK_P2P_REJECTED_SC);
+                            }
+                            if let Some(c) = cls.get_mut(&b)
+                            {
+                                c.push_msg(a_.to_vec(), EXT_ERR_P2P_WAIT_ACCEPT_TIMEOUT);
+                            }
+                        }
                         _ => {}
                     }
                 }

@@ -10,6 +10,7 @@ use crate::model;
 use std::str::FromStr;
 use crate::extc::*;
 use async_trait::async_trait;
+use std::any::{TypeId, Any};
 
 pub struct RemoteCmd{
     msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
@@ -116,5 +117,9 @@ impl CmdHandler for RemoteCmd {
             }
         }
         CmdRet::None
+    }
+
+    fn get_type(&self) -> TypeId {
+        self.type_id()
     }
 }

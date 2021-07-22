@@ -17,7 +17,8 @@ use std::ptr::eq;
 
 #[derive(Copy, Clone,Debug)]
 pub enum LinkState{
-    WaitResponse,
+    WaitResponse(SystemTime),
+    Rejected,
     Agreed,
     TryConnectBToA(u8,SocketAddr,SystemTime,u8,u8),
     TryConnectAToB(u8,SocketAddr,SystemTime,u8,u8),
@@ -165,7 +166,7 @@ impl SubHandle for P2PHandlerSer{
                     respo.extend_from_slice(EXT_ERR_NOT_FOUND_LINK_DATA.to_be_bytes().as_ref());
                     return Some((respo,EXT_ACCEPT_LINK_P2P_SC));
                 };
-                if let LinkState::WaitResponse = link_data.state()
+                if let LinkState::WaitResponse(_) = link_data.state()
                 {
                     if accept {
                         link_data.set_state(LinkState::Agreed);
@@ -187,7 +188,7 @@ impl SubHandle for P2PHandlerSer{
                     respo.extend_from_slice(0u32.to_be_bytes().as_ref());
                     return Some((respo,EXT_ACCEPT_LINK_P2P_SC));
                 }else{
-                    respo.extend_from_slice(EXT_ERR_ALREADY_ACCEPT.to_be_bytes().as_ref());
+                    respo.extend_from_slice(EXT_ERR_P2P_BAD_REQUEST.to_be_bytes().as_ref());
                     return Some((respo,EXT_ACCEPT_LINK_P2P_SC));
                 }
             }
@@ -420,7 +421,7 @@ impl LinkData {
         let verify_code = Self::gen_verify_code(&key);
         LinkData{
             a,b,
-            state:LinkState::WaitResponse,
+            state:LinkState::WaitResponse(SystemTime::now()),
             key,
             verify_code,
             local_addr:local_addr_map,
@@ -488,6 +489,7 @@ impl LinkData {
 
     fn try_connect_local_times() -> u8 { 3u8 }
     fn try_connect_times() -> u8 { 10u8 } //必须偶数
+    fn wait_accept_time() -> Duration { Duration::from_secs(10) }
     fn try_wait_time() -> Duration { Duration::from_secs(2) }
     fn wait_step2_time() -> Duration { Duration::from_secs(10) }
     //优先取_1的地址
@@ -530,6 +532,14 @@ impl LinkData {
     pub fn next_state(&mut self,_clients: &Arc<Mutex<HashMap<usize, Box<AbClient>>>>) -> Option<LinkState>
     {
         match self.state {
+            LinkState::WaitResponse(time) => {
+                if let Ok(d) = SystemTime::now().duration_since(time){
+                    if d >= Self::wait_accept_time() {
+                        self.state = LinkState::Rejected;
+                        return Some(self.state);
+                    }
+                }
+            }
             LinkState::Agreed => {
                 if self.a_addr.ip().eq(&self.b_addr.ip())//外网地址一致 可能在同一局域网下
                 {

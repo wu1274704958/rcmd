@@ -25,6 +25,7 @@ use tokio::time::sleep;
 use crate::client_plugs::attched_udp_sender::AttchedUdpSender;
 use crate::client_plugs::udp_server_channel::run_udp_server_with_channel;
 use crate::client_plugs::p2p_plugs::LocalEntity::Client;
+use crate::client_plugs::p2p_event::P2PEvent;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -201,12 +202,14 @@ pub struct P2PPlug
     hash_builder: RandomState,
     cli_map: Arc<Mutex<HashMap<u64,(usize,Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>,
     cli_sender_map : Arc<Mutex<HashMap<u64,Sender<Vec<u8>>>>>,
-    relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
+    relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>,
+    event:Option<Arc<dyn P2PEvent>>
 }
 
 impl P2PPlug
 {
-    pub fn new(curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)-> P2PPlug
+    pub fn new(curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+               event:Option<Arc<dyn P2PEvent>>)-> P2PPlug
     {
 
         P2PPlug{
@@ -218,7 +221,8 @@ impl P2PPlug
             hash_builder: RandomState::new(),
             cli_map : Arc::new(Mutex::new(HashMap::new())),
             cli_sender_map : Arc::new(Mutex::new(HashMap::new())),
-            relay_map : Arc::new(Mutex::new(HashMap::new()))
+            relay_map : Arc::new(Mutex::new(HashMap::new())),
+            event
         }
     }
 
@@ -766,9 +770,14 @@ impl ClientPlug for P2PPlug
                 let cpid = cpid.unwrap();
                 println!("收到请求p2p连接 cp {}",cpid);
                 self.add_link(LinkState::WaitAccept, cpid).await;
-                //先自动同意
-                self.accept_p2p(cpid, true).await;
+                if let Some(ref f) = self.event{
+                    f.on_recv_p2p_req(cpid).await;
+                }else {
+                    //先自动同意
+                    self.accept_p2p(cpid, true).await;
+                }
             }
+            EXT_ERR_P2P_WAIT_ACCEPT_TIMEOUT|
             EXT_ERR_P2P_LINK_FAILED|
             EXT_ERR_P2P_CP_OFFLINE |
             EXT_REQ_LINK_P2P_REJECTED_SC => {
@@ -784,6 +793,11 @@ impl ClientPlug for P2PPlug
                         if let Client(key) = link.local_entity{
                             self.rm_client(key).await;
                         }
+                    }
+                }
+                if _msg.ext == EXT_ERR_P2P_WAIT_ACCEPT_TIMEOUT{
+                    if let Some(ref f) = self.event {
+                        f.on_recv_wait_accept_timeout(cpid).await;
                     }
                 }
             }

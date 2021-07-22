@@ -32,6 +32,11 @@ use rcmd_suit::client_plug::client_plug::ClientPluCollect;
 use crate::client_plugs::p2p_plugs::P2PPlug;
 use crate::utils::command_mgr::CmdMgr;
 use crate::command::main_cmd::MainCmd;
+use futures::executor::block_on;
+use crate::command::p2p_cmd::AcceptP2P;
+use crate::client_plugs::p2p_event::P2PEvent;
+use async_trait::async_trait;
+use std::any::TypeId;
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -68,9 +73,18 @@ async fn main() -> io::Result<()>
         handler.add_handler(Arc::new(client_handlers::pull_file_ret::PullFileRet::new()));
     }
 
+    let p2p_plug_clone = Arc::new(Mutex::new(None));
+
     let mut plugs = ClientPluCollect::<P2PPlug>::new();
-    let p2p_plug = Arc::new(P2PPlug::new(msg_queue.clone()));
+    let p2p_plug = Arc::new(
+        P2PPlug::new(msg_queue.clone(),
+                     Some(Arc::new(DefP2PEvent::new(cmd_mgr.clone(),p2p_plug_clone.clone())))));
     plugs.add_plug(p2p_plug.clone());
+
+    {
+        let mut p = p2p_plug_clone.lock().await;
+        *p = Some(p2p_plug.clone());
+    }
 
     cmd_mgr.push(Box::new(MainCmd::new(msg_queue.clone(),p2p_plug.clone()))).await;
 
@@ -115,5 +129,34 @@ fn on_save_file(name:&str,len:usize,ext:u32)
             println!("recv file {} complete size {} bytes!",name,len);
         }
         _=>{}
+    }
+}
+
+struct DefP2PEvent{
+    mgr :Arc<CmdMgr>,
+    p2p_plug:Arc<Mutex<Option<Arc<P2PPlug>>>>
+}
+
+impl DefP2PEvent{
+    pub fn new(mgr: Arc<CmdMgr>, p2p_plug: Arc<Mutex<Option<Arc<P2PPlug>>>>) -> Self {
+        DefP2PEvent { mgr, p2p_plug }
+    }
+}
+#[async_trait]
+impl P2PEvent for DefP2PEvent{
+    async fn on_recv_p2p_req(&self, cpid: usize) {
+        let plug = self.p2p_plug.lock().await;
+        if let Some(ref p) = *plug{
+            self.mgr.push(Box::new(AcceptP2P::new(p.clone(),cpid))).await;
+        }
+    }
+
+    async fn on_recv_wait_accept_timeout(&self, cpid: usize) {
+        if let Some(id) = self.mgr.get_top_type().await{
+            if id == TypeId::of::<AcceptP2P>()
+            {
+                self.mgr.pop().await;
+            }
+        }
     }
 }

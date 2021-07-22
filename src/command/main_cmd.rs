@@ -11,6 +11,7 @@ use std::str::FromStr;
 use crate::extc::*;
 use async_trait::async_trait;
 use crate::command::remote_cmd::RemoteCmd;
+use std::any::{TypeId, Any};
 
 pub struct MainCmd{
     msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
@@ -170,6 +171,10 @@ impl CmdHandler for MainCmd{
             }
         }
         CmdRet::None
+    }
+
+    fn get_type(&self) -> TypeId {
+        self.type_id()
     }
 }
 

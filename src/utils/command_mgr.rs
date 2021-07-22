@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::VecDeque;
 use tokio::io::AsyncReadExt;
-
+use std::any::TypeId;
 
 
 #[async_trait]
@@ -14,6 +14,7 @@ pub trait CmdHandler : std::marker::Send +  std::marker::Sync
     async fn is_handle_once(&self) -> bool { false }
     async fn on_one_key(&mut self,b:u8) -> CmdRet;
     async fn on_line(&mut self,cmd:Vec<&str>,str:&str) -> CmdRet;
+    fn get_type(&self) -> TypeId;
 }
 
 pub enum CmdRet
@@ -157,5 +158,16 @@ impl CmdMgr
         }
         let mut is_runing = self.is_runing.lock().await;
         *is_runing = false;
+    }
+
+    pub async fn get_top_type(&self) -> Option<TypeId>
+    {
+        let h = self.handler.lock().await;
+        if let Some(ch) = h.back()
+        {
+            Some(ch.get_type())
+        }else{
+            None
+        }
     }
 }
