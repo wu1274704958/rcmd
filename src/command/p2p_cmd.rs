@@ -19,7 +19,7 @@ impl AcceptP2P{
 impl CmdHandler for AcceptP2P
 {
     async fn on_add(&mut self) {
-        print!("{} 请求p2p连接是否同意？[y/n]",self.cp);
+        println!("{} 请求p2p连接是否同意？[y/n]",self.cp);
     }
 
     async fn on_pop(&mut self) {
@@ -30,18 +30,15 @@ impl CmdHandler for AcceptP2P
         }
     }
 
-    async fn is_handle_once(&self) -> bool {
-        true
-    }
 
     async fn on_one_key(&mut self, b: u8) -> CmdRet {
-        self.accept = b == b'y';
-        self.p2p_plug.accept_p2p(self.cp,self.accept).await;
-        CmdRet::PoPSelf
+        CmdRet::None
     }
 
     async fn on_line(&mut self, cmd: Vec<&str>, str: &str) -> CmdRet {
-        CmdRet::None
+        self.accept = "y" == cmd[0];
+        self.p2p_plug.accept_p2p(self.cp,self.accept).await;
+        CmdRet::PoPSelf
     }
 
     fn get_type(&self) -> TypeId {

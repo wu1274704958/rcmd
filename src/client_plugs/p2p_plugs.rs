@@ -418,7 +418,8 @@ impl P2PPlug
         ext == EXT_P2P_SYNC_VERIFY_CODE_SC ||
         ext == EXT_P2P_WAIT_CONNECT_SC ||
         ext == EXT_P2P_TRY_CONNECT_SC ||
-        ext == EXT_P2P_NOTIFY_RELAY_SC
+        ext == EXT_P2P_NOTIFY_RELAY_SC ||
+        ext == EXT_ERR_P2P_WAIT_ACCEPT_TIMEOUT
     }
 
     fn parse_addr(s:&mut Stream) -> Option<SocketAddr>
@@ -746,7 +747,8 @@ impl ClientPlug for P2PPlug
             EXT_P2P_WAIT_CONNECT_SC |
             EXT_P2P_TRY_CONNECT_SC |
             EXT_P2P_NOTIFY_RELAY_SC |
-            EXT_P2P_RELAY_MSG_SC
+            EXT_P2P_RELAY_MSG_SC|
+            EXT_ERR_P2P_WAIT_ACCEPT_TIMEOUT
             => {
                 false
             }
