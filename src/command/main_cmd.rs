@@ -12,6 +12,7 @@ use crate::extc::*;
 use async_trait::async_trait;
 use crate::command::remote_cmd::RemoteCmd;
 use std::any::{TypeId, Any};
+use crate::command::p2p_cmd::P2PCmd;
 
 pub struct MainCmd{
     msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
@@ -156,6 +157,23 @@ impl CmdHandler for MainCmd{
                     }
                 };
                 self.p2p_plug.req_link(lid).await;
+            }
+            "p" => {
+                if cmds.len() < 2 { return CmdRet::None; }
+                let lid = match usize::from_str(cmds[1].trim()) {
+                    Ok(v) => { v }
+                    Err(e) => {
+                        dbg!(e);
+                        return CmdRet::None;
+                    }
+                };
+                if self.p2p_plug.has_entity(lid).await
+                {
+                    return CmdRet::Push(Box::new(P2PCmd::new(self.p2p_plug.clone(),lid)));
+                }else{
+                    println!("Not find this entity!");
+                }
+                return CmdRet::None;
             }
             _ => {
                 let help = r"

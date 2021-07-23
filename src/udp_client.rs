@@ -8,6 +8,7 @@ mod handlers;
 mod db;
 mod utils;
 mod command;
+mod p2p_client_handler;
 #[macro_use]
 extern crate lazy_static;
 extern crate get_if_addrs;

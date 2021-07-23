@@ -26,6 +26,7 @@ use crate::client_plugs::attched_udp_sender::AttchedUdpSender;
 use crate::client_plugs::udp_server_channel::run_udp_server_with_channel;
 use crate::client_plugs::p2p_plugs::LocalEntity::Client;
 use crate::client_plugs::p2p_event::P2PEvent;
+use crate::p2p_client_handler::upload_file::UploadHandler;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -51,6 +52,9 @@ pub enum P2PErr {
     NotFindAnyLocalAddr,
     NotReady,
     BadState,
+    NoEntity,
+    NoLink,
+    NotKnow,
     Wrap((i32,String))
 }
 
@@ -224,6 +228,91 @@ impl P2PPlug
             relay_map : Arc::new(Mutex::new(HashMap::new())),
             event
         }
+    }
+
+    pub async fn has_entity(&self,cpid:usize) -> bool
+    {
+        let d = self.data.lock().await;
+        if let Some(link) = d.link_map.get(&cpid)
+        {
+            return if let LocalEntity::None = link.local_entity
+            {
+                false
+            }else {
+                true
+            };
+        }
+        false
+    }
+
+    pub async fn send_msg(&self,cpid:usize,data:Vec<u8>,ext:u32) -> Result<(),P2PErr>
+    {
+        let d = self.data.lock().await;
+        if let Some(link) = d.link_map.get(&cpid)
+        {
+            return match link.local_entity {
+                LocalEntity::Ser(id) => {
+                    let mut scs =  self.ser_clients.lock().await;
+                    if let Some(c) = scs.get_mut(&id)
+                    {
+                        c.push_msg(data,ext);
+                    }else{
+                        return Err(P2PErr::NotKnow);
+                    }
+                    Ok(())
+                }
+                Client(id) => {
+                    let mut cs = self.cli_map.lock().await;
+                    if let Some(c) = cs.get_mut(&id)
+                    {
+                        let mut queue =  c.1.lock().await;
+                        queue.push_back((data,ext));
+                    }else{
+                        return Err(P2PErr::NotKnow);
+                    }
+                    Ok(())
+                }
+                LocalEntity::None => { return Err(P2PErr::NoEntity); }
+            }
+        }
+        Err(P2PErr::NoLink)
+    }
+
+    pub async fn send_msg_ex(&self,cpid:usize,ds:Vec<(Vec<u8>,u32)>) -> Result<(),P2PErr>
+    {
+        let d = self.data.lock().await;
+        if let Some(link) = d.link_map.get(&cpid)
+        {
+            return match link.local_entity {
+                LocalEntity::Ser(id) => {
+                    let mut scs =  self.ser_clients.lock().await;
+                    if let Some(c) = scs.get_mut(&id)
+                    {
+                        for (data,ext) in ds.into_iter() {
+                            c.push_msg(data, ext);
+                        }
+                    }else{
+                        return Err(P2PErr::NotKnow);
+                    }
+                    Ok(())
+                }
+                Client(id) => {
+                    let mut cs = self.cli_map.lock().await;
+                    if let Some(c) = cs.get_mut(&id)
+                    {
+                        let mut queue =  c.1.lock().await;
+                        for data  in ds.into_iter() {
+                            queue.push_back(data);
+                        }
+                    }else{
+                        return Err(P2PErr::NotKnow);
+                    }
+                    Ok(())
+                }
+                LocalEntity::None => { return Err(P2PErr::NoEntity); }
+            }
+        }
+        Err(P2PErr::NoLink)
     }
 
     pub fn get_local_ip() -> Vec<Ipv4Addr>
@@ -887,6 +976,7 @@ async fn lauch_p2p_ser(
         handler.add_handler(Arc::new(handlers::heart_beat::HeartbeatHandler{}));
         handler.add_handler(Arc::new(TestHandler{}));
         handler.add_handler(Arc::new(P2PVerifyHandler::new(plug_data.clone(), curr_sender.clone())));
+        handler.add_handler(Arc::new(UploadHandler::new()));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
         
@@ -933,6 +1023,7 @@ async fn lauch_p2p_client(
         use rcmd_suit::client_handler::Handle;
 
         handler.add_handler(Arc::new(P2PVerifyClientHandler::new(plug_data.clone(),curr_sender.clone())));
+        handler.add_handler(Arc::new(UploadHandler::new()));
     }
 
     {
@@ -993,6 +1084,7 @@ async fn lauch_p2p_client_relay(
         use rcmd_suit::client_handler::Handle;
 
         handler.add_handler(Arc::new(P2PVerifyClientHandler::new(plug_data.clone(),curr_sender.clone())));
+        handler.add_handler(Arc::new(UploadHandler::new()));
     }
 
     {
