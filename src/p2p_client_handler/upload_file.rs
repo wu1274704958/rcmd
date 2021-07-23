@@ -67,9 +67,9 @@ async fn handle_comm(data: &[u8],this:&UploadHandler,id:usize,ext:u32) -> Option
             if let Some(len) = u32::stream_parse(&mut s)
             {
                 let a = String::from_utf8_lossy( s.get_rest());
-                if ext == EXT_UPLOAD_FILE_CREATE_BACK { println!("开始接收 {}",a);}
+                if ext == EXT_UPLOAD_FILE_CREATE_BACK { println!("对方开始接收 {}",a);}
                 else if ext == EXT_UPLOAD_FILE_ELF_BACK {
-                    println!("接收完成 {}",a);
+                    println!("对方接收完成 {}",a);
                 }
             }
             return None;
