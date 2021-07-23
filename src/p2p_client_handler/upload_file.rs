@@ -59,6 +59,24 @@ impl client_handler::SubHandle for UploadHandler{
 
 async fn handle_comm(data: &[u8],this:&UploadHandler,id:usize,ext:u32) -> Option<(Vec<u8>,u32)>
 {
+    match ext {
+        EXT_UPLOAD_FILE_CREATE_BACK|
+        EXT_UPLOAD_FILE_ELF_BACK |
+        EXT_UPLOAD_FILE_BACK =>{
+            let mut s = Stream::new(data);
+            if let Some(len) = u32::stream_parse(&mut s)
+            {
+                let a = String::from_utf8_lossy( s.get_rest());
+                if ext == EXT_UPLOAD_FILE_CREATE_BACK { println!("开始接收 {}",a);}
+                else if ext == EXT_UPLOAD_FILE_ELF_BACK {
+                    println!("接收完成 {}",a);
+                }
+            }
+            return None;
+        }
+        _=>{}
+    }
+
     if data[0] != TOKEN_BEGIN
     {
         return Some((vec![],EXT_AGREEMENT_ERR_CODE));
@@ -162,23 +180,6 @@ async fn handle_comm(data: &[u8],this:&UploadHandler,id:usize,ext:u32) -> Option
                 return Some((rd,EXT_UPLOAD_FILE_ELF_BACK));
             }
         }
-    }
-
-    match ext {
-        EXT_UPLOAD_FILE_CREATE_BACK|
-        EXT_UPLOAD_FILE_ELF_BACK =>{
-            let mut s = Stream::new(data);
-            if let Some(len) = u32::stream_parse(&mut s)
-            {
-                let a = String::from_utf8_lossy( s.get_rest());
-                if ext == EXT_UPLOAD_FILE_CREATE_BACK { println!("开始接收 {}",a);}
-                else{
-                    println!("接收完成 {}",a);
-                }
-            }
-
-        }
-        _=>{}
     }
 
     Some((rd,EXT_DEFAULT_ERR_CODE))
