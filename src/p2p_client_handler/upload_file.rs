@@ -11,6 +11,8 @@ use async_trait::async_trait;
 use tokio::prelude::io::AsyncWriteExt;
 use std::sync::Arc;
 use rcmd_suit::client_handler;
+use rcmd_suit::utils::stream_parser::Stream;
+use rcmd_suit::utils::stream_parser::StreamParse;
 
 pub struct UploadHandler
 {
@@ -39,6 +41,7 @@ impl SubHandle for UploadHandler
 
     fn interested(&self, ext:u32) ->bool {
         ext == EXT_UPLOAD_FILE_CREATE || ext == EXT_UPLOAD_FILE || ext == EXT_UPLOAD_FILE_ELF
+        || ext == EXT_UPLOAD_FILE_CREATE_BACK || ext == EXT_UPLOAD_FILE_BACK || ext == EXT_UPLOAD_FILE_ELF_BACK
     }
 }
 
@@ -50,6 +53,7 @@ impl client_handler::SubHandle for UploadHandler{
 
     fn interested(&self, ext: u32) -> bool {
         ext == EXT_UPLOAD_FILE_CREATE || ext == EXT_UPLOAD_FILE || ext == EXT_UPLOAD_FILE_ELF
+            || ext == EXT_UPLOAD_FILE_CREATE_BACK || ext == EXT_UPLOAD_FILE_BACK || ext == EXT_UPLOAD_FILE_ELF_BACK
     }
 }
 
@@ -159,5 +163,23 @@ async fn handle_comm(data: &[u8],this:&UploadHandler,id:usize,ext:u32) -> Option
             }
         }
     }
+
+    match ext {
+        EXT_UPLOAD_FILE_CREATE_BACK|
+        EXT_UPLOAD_FILE_ELF_BACK =>{
+            let mut s = Stream::new(data);
+            if let Some(len) = u32::stream_parse(&mut s)
+            {
+                let a = String::from_utf8_lossy( s.get_rest());
+                if ext == EXT_UPLOAD_FILE_CREATE_BACK { println!("开始接收 {}",a);}
+                else{
+                    println!("接收完成 {}",a);
+                }
+            }
+
+        }
+        _=>{}
+    }
+
     Some((rd,EXT_DEFAULT_ERR_CODE))
 }
