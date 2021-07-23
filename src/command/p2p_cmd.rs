@@ -7,6 +7,7 @@ use tokio::fs::OpenOptions;
 use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE};
 use tokio::io::AsyncReadExt;
 use crate::extc::*;
+use rcmd_suit::ext_code::EXT_DEFAULT;
 
 pub struct AcceptP2P{
     p2p_plug : Arc<P2PPlug>,
@@ -101,7 +102,7 @@ impl CmdHandler for P2PCmd{
                                         break;
                                     } else {
                                         d.reserve(n);
-                                        d.extend_from_slice(&buf[..]);
+                                        d.extend_from_slice(&buf[0..n]);
                                         self.p2p_plug.send_msg(self.cp,d, if is_first { EXT_UPLOAD_FILE_CREATE } else { EXT_UPLOAD_FILE }).await;
                                         is_first = false;
                                     }
@@ -115,6 +116,11 @@ impl CmdHandler for P2PCmd{
                         eprintln!("{}", e);
                     }
                 }
+                CmdRet::None
+            }
+            "0" => {
+                let d = cmds[1].as_bytes().to_vec();
+                self.p2p_plug.send_msg(self.cp,d,EXT_DEFAULT).await;
                 CmdRet::None
             }
             _ => {

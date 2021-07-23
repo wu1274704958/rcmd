@@ -28,6 +28,9 @@ pub const EXT_SAVE_FILE_ELF_RET:u32 = 59;
 pub const EXT_SAVE_FILE_CREATE_RET:u32 = 60;
 pub const EXT_PULL_FILE_S:u32 = 61;
 pub const EXT_PULL_FILE_C:u32 = 62;
+pub const EXT_UPLOAD_FILE_BACK:u32 = 63;
+pub const EXT_UPLOAD_FILE_ELF_BACK:u32 = 64;
+pub const EXT_UPLOAD_FILE_CREATE_BACK:u32 = 65;
 
 //P2P 相关
 pub const EXT_REQ_HELP_LINK_P2P_CS:u32 = 63;
