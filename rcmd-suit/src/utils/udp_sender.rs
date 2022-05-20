@@ -48,11 +48,13 @@ pub trait UdpSender : std::marker::Send + std::marker::Sync{
 }
 
 pub enum SessionState{
-    Closed,
+    Closed(u128),
     Null,
     WaitResponse(u128,SystemTime,u16),
     WaitResponseCp(u128,SystemTime,u16),
-    Has(u128)
+    Has(u128),
+    ReqClose(u128,SystemTime,u16),
+    PrepareClose(u128,SystemTime,u16),
 }
 
 impl SessionState{
@@ -63,14 +65,18 @@ impl SessionState{
             SessionState::WaitResponse(_, _, _) => {false}
             SessionState::WaitResponseCp(_, _, _) => {true}
             SessionState::Has(_) => {true}
-            SessionState::Closed => {false}
+            SessionState::Closed(_) => {false}
+            SessionState::ReqClose(_, _, _) => {false}
+            SessionState::PrepareClose(_, _, _) => {false}
         }
     }
 
     pub fn is_close(&self) -> bool
     {
         match self {
-            SessionState::Closed => {true},
+            SessionState::ReqClose(_,_,_)|
+            SessionState::PrepareClose(_,_,_)|
+            SessionState::Closed(_) => {true},
             _ => {false}
         }
     }
@@ -119,7 +125,9 @@ pub enum USErr{
     SendSessionFailed,
     AlreadyClosed,
     CpAlreadyClosed,
-    CpRequestClosed
+    CpRequestClosed,
+    BadRequest,
+    CloseSuccess
 }
 
 impl USErr {
@@ -143,6 +151,8 @@ impl USErr {
             USErr::AlreadyClosed => {-14}
             USErr::CpAlreadyClosed => {-15}
             USErr::CpRequestClosed => {-16}
+            USErr::BadRequest => {-17}
+            USErr::CloseSuccess => {-18}
         }
     }
 
@@ -166,6 +176,8 @@ impl USErr {
             USErr::AlreadyClosed=>{"Session already closed!".to_string()}
             USErr::CpAlreadyClosed => {"Cp Session already closed!".to_string()}
             USErr::CpRequestClosed => {"Cp Session request closed!".to_string()}
+            USErr::BadRequest => {"Bad Request!".to_string()}
+            USErr::CloseSuccess => {"Close Success!".to_string()}
         }
     }
 }
@@ -202,8 +214,11 @@ pub enum SpecialExt {
     send_sid = 100,
     response_send_sid = 101,
     response_cp_send_sid = 102,
-    send_close = 103,
-    skip_message = 104,
+    req_close = 103,
+    cp_close = 104,
+    close_succ = 105,
+    skip_message = 106,
+    err_beigin = 4999,
     err_already_has_sid = 5000,
     err_waiting_response = 5001,
     err_bad_session = 5002,
@@ -212,6 +227,8 @@ pub enum SpecialExt {
     err_waiting_response_cp = 5005,
     err_not_wait_sid_resp_cp = 5006,
     err_already_closed = 5007,
+    err_bad_request = 5008,
+    err_end = 6000,
 }
 
 impl Into<u32> for SpecialExt{
@@ -421,6 +438,14 @@ impl DefUdpSender
         if msg.len() == 1 && msg[0] == 199 && tag == TOKEN_NORMAL {
             //println!("get inside msg type ext = {}",ext);
             let sp_ext = SpecialExt::try_from(ext).unwrap();
+            if ext > SpecialExt::err_beigin.into() && ext < SpecialExt::err_end.into()
+            {
+                return self.handle_special_err(sp_ext).await;
+            }
+            if ext >= SpecialExt::req_close.into() && ext <= SpecialExt::close_succ.into()
+            {
+                return self.handle_special_close(sp_ext,id,sid).await;
+            }
             match sp_ext {
                 SpecialExt::send_recv => {
                     //println!("op recv msg {}",id);
@@ -457,7 +482,9 @@ impl DefUdpSender
                         }
                         SessionState::WaitResponseCp(_, _, _) => {}
                         SessionState::Has(v) => {}
-                        SessionState::Closed => {
+                        SessionState::Closed(_) |
+                        SessionState::PrepareClose(_,_,_) |
+                        SessionState::ReqClose(_,_,_) => {
                             self.send_ext(SpecialExt::err_already_closed).await?;
                         }
                     }
@@ -484,9 +511,13 @@ impl DefUdpSender
                         SessionState::Has(v) => {
                             if v != sid {
                                 self.send_ext(SpecialExt::err_already_has_sid).await?;
+                            }else {
+                                self.send_sid_response(sid, SpecialExt::response_cp_send_sid).await?;
                             }
                         }
-                        SessionState::Closed => {
+                        SessionState::Closed(_) |
+                        SessionState::PrepareClose(_,_,_) |
+                        SessionState::ReqClose(_,_,_) => {
                             self.send_ext(SpecialExt::err_already_closed).await?;
                         }
                     }
@@ -514,49 +545,11 @@ impl DefUdpSender
                                 self.send_ext(SpecialExt::err_already_has_sid).await?;
                             }
                         }
-                        SessionState::Closed => {
+                        SessionState::Closed(_)|
+                        SessionState::PrepareClose(_,_,_) |
+                        SessionState::ReqClose(_,_,_) => {
                             self.send_ext(SpecialExt::err_already_closed).await?;
                         }
-                    }
-                    Ok(true)
-                }
-                SpecialExt::err_already_has_sid => {
-                    Err(USErr::AlreadyHasSession)
-                }
-                SpecialExt::err_waiting_response => {
-                    Err(USErr::WaitSessionResponse)
-                }
-                SpecialExt::err_waiting_response_cp => {
-                    Err(USErr::WaitSessionResponseCp)
-                }
-                SpecialExt::err_bad_session => {
-                    Err(USErr::BadSessionID)
-                }
-                SpecialExt::err_not_wait_sid_resp => {
-                    Err(USErr::NotWaitingSessionResponse)
-                }
-                SpecialExt::err_no_session => {
-                    Err(USErr::NoSession)
-                }
-                SpecialExt::err_not_wait_sid_resp_cp => {
-                    Err(USErr::NotWaitingSessionResponseCp)
-                }
-                SpecialExt::err_already_closed => {
-                    Err(USErr::CpAlreadyClosed)
-                }
-                SpecialExt::send_close => {
-                    let mut sid_ = self.sid.lock().await;
-                    match *sid_ {
-                        SessionState::Has(v) => {
-                            if sid != v {
-                                self.send_ext(SpecialExt::err_bad_session).await?;
-                            }else {
-                                println!("cp request close!");
-                                *sid_ = SessionState::Closed;
-                                return Err(USErr::CpRequestClosed);
-                            }
-                        }
-                        _ => {}
                     }
                     Ok(true)
                 }
@@ -565,6 +558,135 @@ impl DefUdpSender
             }
         }else{
             Ok(false)
+        }
+    }
+
+    async fn handle_special_err(&self,ext:SpecialExt) -> Result<bool,USErr>
+    {
+        match ext
+        {
+            SpecialExt::err_already_has_sid => {
+                Err(USErr::AlreadyHasSession)
+            }
+            SpecialExt::err_waiting_response => {
+                Err(USErr::WaitSessionResponse)
+            }
+            SpecialExt::err_waiting_response_cp => {
+                Err(USErr::WaitSessionResponseCp)
+            }
+            SpecialExt::err_bad_session => {
+                Err(USErr::BadSessionID)
+            }
+            SpecialExt::err_not_wait_sid_resp => {
+                Err(USErr::NotWaitingSessionResponse)
+            }
+            SpecialExt::err_no_session => {
+                Err(USErr::NoSession)
+            }
+            SpecialExt::err_not_wait_sid_resp_cp => {
+                Err(USErr::NotWaitingSessionResponseCp)
+            }
+            SpecialExt::err_already_closed => {
+                Err(USErr::CpAlreadyClosed)
+            }
+            SpecialExt::err_bad_request => {
+                Err(USErr::BadRequest)
+            }
+            _ => {
+                Ok(false)
+            }
+        }
+    }
+
+    async fn clear_send_queue(&self)
+    {
+        let mut queue = self.queue.lock().await;
+        let mut msg_map = self.msg_map.lock().await;
+        queue.clear();
+        msg_map.clear();
+    }
+
+    async fn handle_special_close(&self,ext:SpecialExt,id:usize,sid:u128) -> Result<bool,USErr>
+    {
+        match ext
+        {
+            SpecialExt::req_close => {
+                let mut sid_ = self.sid.lock().await;
+                match *sid_ {
+                    SessionState::Has(v) => {
+                        if sid != v {
+                            self.send_ext(SpecialExt::err_bad_session).await?;
+                        }else {
+                            println!("cp request close!");
+                            *sid_ = SessionState::PrepareClose(sid,SystemTime::now(),1);
+                            drop(sid);
+                            self.clear_send_queue().await;
+                            self.send_sid_response(sid, SpecialExt::cp_close).await?;
+                        }
+                    }
+                    SessionState::Null |
+                    SessionState::WaitResponse(_,_,_)|
+                    SessionState::WaitResponseCp(_,_,_)=> {
+                        self.send_ext(SpecialExt::err_no_session).await?;
+                    }
+                    _ => {}
+                }
+                Ok(true)
+            }
+            SpecialExt::cp_close =>{
+                let mut sid_ = self.sid.lock().await;
+                match *sid_ {
+                    SessionState::ReqClose(v,_,_) => {
+                        if sid != v{
+                            self.send_ext(SpecialExt::err_bad_session).await?;
+                        }else{
+                            println!("cp response close!");
+                            *sid_ = SessionState::Closed(sid);
+                            drop(sid);
+                            self.send_sid_response(sid, SpecialExt::close_succ).await?;
+                            return Err(USErr::CloseSuccess);
+                        }
+                    }
+                    SessionState::Closed(v) =>{
+                        if sid != v{
+                            self.send_ext(SpecialExt::err_bad_request).await?;
+                        }else{
+                            self.send_sid_response(sid, SpecialExt::close_succ).await?;
+                        }
+                    }
+                    _ => {
+                        self.send_ext(SpecialExt::err_bad_request).await?;
+                    }
+                }
+                Ok(true)
+            }
+            SpecialExt::close_succ =>{
+                let mut sid_ = self.sid.lock().await;
+                match *sid_ {
+                    SessionState::PrepareClose(v,_,_) => {
+                        if sid != v{
+                            self.send_ext(SpecialExt::err_bad_session).await?;
+                        }else{
+                            println!("cp close success close self!");
+                            *sid_ = SessionState::Closed(sid);
+                            drop(sid);
+                            return Err(USErr::CloseSuccess);
+                        }
+                    }
+                    SessionState::Closed(v) => {
+                        if sid != v{
+                            self.send_ext(SpecialExt::err_bad_request).await?;
+                        }
+                    }
+                    _ => {
+                        self.send_ext(SpecialExt::err_bad_request).await?;
+                    }
+                }
+                Ok(true)
+            }
+            _ => {
+                Ok(false)
+            }
         }
     }
 
@@ -803,7 +925,9 @@ impl DefUdpSender
             SessionState::WaitResponse(_, _, _) => {None}
             SessionState::WaitResponseCp(v,_,_) => {Some(v)}
             SessionState::Has(v) => {Some(v)}
-            SessionState::Closed => {None}
+            SessionState::Closed(_) |
+            SessionState::PrepareClose(_,_,_) |
+            SessionState::ReqClose(_,_,_) => {None}
         }
     }
 
@@ -827,7 +951,9 @@ impl DefUdpSender
             SessionState::WaitResponse(_, _, _) => {false}
             SessionState::WaitResponseCp(v_,_,_) => {v == v_}
             SessionState::Has(v_) => {v == v_}
-            SessionState::Closed => {false}
+            SessionState::Closed(_)|
+            SessionState::PrepareClose(_,_,_) |
+            SessionState::ReqClose(_,_,_) => {false}
         }
     }
 
@@ -908,13 +1034,12 @@ impl DefUdpSender
     async fn send_close_session(&self) ->Result<(),USErr>
     {
         let sid_ = self.get_sid().await.unwrap();
-        let v = Self::warp_ex(&[199],SpecialExt::send_close.into(),TOKEN_NORMAL,0,sid_,None);
+        let v = Self::warp_ex(&[199],SpecialExt::req_close.into(),TOKEN_NORMAL,0,sid_,None);
         {
             let mut sid = self.sid.lock().await;
-            *sid = SessionState::Closed;
+            *sid = SessionState::ReqClose(sid_,SystemTime::now(),1);
         }
-        self.send(v.as_slice()).await?;
-        self.send(v.as_slice()).await?;
+        self.clear_send_queue().await;
         self.send(v.as_slice()).await?;
         Ok(())
     }
@@ -940,7 +1065,9 @@ impl UdpSender for DefUdpSender
                     return Ok(());
                 }
                 SessionState::WaitResponseCp(_, _, _) => {}
-                SessionState::Closed => {
+                SessionState::Closed(_)|
+                SessionState::PrepareClose(_,_,_) |
+                SessionState::ReqClose(_,_,_) => {
                     return Err(USErr::AlreadyClosed);
                 }
                 Has(_) => {}
@@ -1067,33 +1194,65 @@ impl UdpSender for DefUdpSender
         {
             let mut sid = self.sid.lock().await;
 
-            if let SessionState::WaitResponse(v,t,times) = *sid {
-                if times > self.max_retry_times {
-                    return Err(USErr::SendSessionFailed);
+            match *sid {
+                SessionState::Closed(_) => {
+                    return Err(USErr::AlreadyClosed);
                 }
-                if let Ok(dur) = SystemTime::now().duration_since(t)
-                {
-                    if dur > self.timeout
+                SessionState::WaitResponse(v,t,times) => {
+                    if times > self.max_retry_times {
+                        return Err(USErr::SendSessionFailed);
+                    }
+                    if let Ok(dur) = SystemTime::now().duration_since(t)
                     {
-                        let d = Self::warp_ex(&[199],SpecialExt::send_sid.into(),TOKEN_NORMAL,0,v,None);
-                        self.send(d.as_slice()).await?;
-                        *sid = SessionState::WaitResponse(v,SystemTime::now(),times + 1);
+                        if dur > self.timeout
+                        {
+                            self.send_sid_response(v,SpecialExt::send_sid).await?;
+                            *sid = SessionState::WaitResponse(v,SystemTime::now(),times + 1);
+                        }
                     }
                 }
-            }
-            if let SessionState::WaitResponseCp(v,t,times) = *sid {
-                if times > self.max_retry_times {
-                    return Err(USErr::SendSessionFailed);
-                }
-                if let Ok(dur) = SystemTime::now().duration_since(t)
-                {
-                    if dur > self.timeout
+                SessionState::WaitResponseCp(v,t,times) => {
+                    if times > self.max_retry_times {
+                        return Err(USErr::SendSessionFailed);
+                    }
+                    if let Ok(dur) = SystemTime::now().duration_since(t)
                     {
-                        let d = Self::warp_ex(&[199],SpecialExt::response_send_sid.into(),TOKEN_NORMAL,0,v,None);
-                        self.send(d.as_slice()).await?;
-                        *sid = SessionState::WaitResponseCp(v,SystemTime::now(),times + 1);
+                        if dur > self.timeout
+                        {
+                            self.send_sid_response(v,SpecialExt::response_send_sid).await?;
+                            *sid = SessionState::WaitResponseCp(v,SystemTime::now(),times + 1);
+                        }
                     }
                 }
+                SessionState::ReqClose(v,t,times) => {
+                    if times > self.max_retry_times {
+                        *sid = SessionState::Closed(v);
+                        return Err(USErr::AlreadyClosed);
+                    }
+                    if let Ok(dur) = SystemTime::now().duration_since(t)
+                    {
+                        if dur > self.timeout
+                        {
+                            self.send_sid_response(v,SpecialExt::req_close).await?;
+                            *sid = SessionState::ReqClose(v,SystemTime::now(),times + 1);
+                        }
+                    }
+                }
+                SessionState::PrepareClose(v,t,times) => {
+                    if times > self.max_retry_times {
+                        *sid = SessionState::Closed(v);
+                        return Err(USErr::AlreadyClosed);
+                    }
+                    if let Ok(dur) = SystemTime::now().duration_since(t)
+                    {
+                        if dur > self.timeout
+                        {
+                            self.send_sid_response(v,SpecialExt::cp_close).await?;
+                            *sid = SessionState::PrepareClose(v,SystemTime::now(),times + 1);
+                        }
+                    }
+                }
+                _=> {}
             }
         }
         let mut avg_times = 0f32;
