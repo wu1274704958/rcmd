@@ -1341,22 +1341,35 @@ impl UdpSender for DefUdpSender
     }
 
     async fn build_session(&self) -> Result<(), USErr> {
-        if self.has_sid().await {
-            return Err(USErr::AlreadyHasSession);
-        }
-        if self.is_waiting_session().await {
-            return Err(USErr::WaitSessionResponse);
-        }
-        self.send_session().await?;
-        Ok(())
+        let sid = self.sid.lock().await;
+        return match *sid{
+            SessionState::Closed(_) => {Err((USErr::AlreadyClosed))}
+            SessionState::Null => {
+                self.send_session().await?;
+                Ok(())
+            }
+            SessionState::WaitResponse(_, _, _) => {Err(USErr::AlreadyHasSession)}
+            SessionState::WaitResponseCp(_, _, _) => {Err(USErr::AlreadyHasSession)}
+            Has(_) => { Err(USErr::AlreadyHasSession) }
+            SessionState::ReqClose(_, _, _) => {Err((USErr::AlreadyClosed))}
+            SessionState::PrepareClose(_, _, _) => {Err((USErr::AlreadyClosed))}
+        };
     }
 
     async fn close_session(&self) -> Result<(), USErr> {
-        if !self.has_session().await
-        {
-            return Err(USErr::NoSession);
-        }
-        self.send_close_session().await
+        let sid = self.sid.lock().await;
+        return match *sid{
+            SessionState::Closed(_) => {Err((USErr::AlreadyClosed))}
+            SessionState::Null => {Err((USErr::NoSession)) }
+            SessionState::WaitResponse(_, _, _) => {Err(USErr::NoSession)}
+            SessionState::WaitResponseCp(_, _, _) => {Err(USErr::NoSession)}
+            Has(_) => {
+                self.send_close_session().await?;
+                Ok(())
+            }
+            SessionState::ReqClose(_, _, _) => {Err((USErr::AlreadyClosed))}
+            SessionState::PrepareClose(_, _, _) => {Err((USErr::AlreadyClosed))}
+        };
     }
 }
 

@@ -1036,8 +1036,7 @@ async fn lauch_p2p_client(
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
         let sender = Arc::new(DefUdpSender::create(sock.clone(),addr));
-        client.run_with_sender::<DefUdpSender,P2PPlug,_>(
-            addr,rx,sock,
+        client.run_with_sender::<P2PPlug,_>(rx,
             msg_split_ignore,msg_split_ignore,
             async {
                 let mut cli_sender_map = cli_sender_map.lock().await;
@@ -1098,8 +1097,7 @@ async fn lauch_p2p_client_relay(
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
         let sender = Arc::new(AttchedUdpSender::new(curr_sender,
                                                     EXT_P2P_RELAY_MSG_CS,cpid));
-        client.run_with_sender::<_,P2PPlug,_>(
-            addr,rx,sock,
+        client.run_with_sender::<P2PPlug,_>(rx,
             msg_split_ignore,msg_split_ignore,
             async {
                 let mut cli_sender_map = cli_sender_map.lock().await;

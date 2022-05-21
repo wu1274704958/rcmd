@@ -87,12 +87,12 @@ async fn main() -> io::Result<()>
         *p = Some(p2p_plug.clone());
     }
 
-    cmd_mgr.push(Box::new(MainCmd::new(msg_queue.clone(),p2p_plug.clone()))).await;
+
 
     let client_plug_ptr = Arc::new(plugs);
     {
         let msg_queue = msg_queue.clone();
-        let client = Arc::new( UdpClient::with_msg_queue_runing(
+        let client = Arc::new( UdpClient::<_,_,DefUdpSender>::with_msg_queue_runing(
             (ip, args.bind_port),
             Arc::new(handler),
             DefParser::new(),
@@ -101,12 +101,15 @@ async fn main() -> io::Result<()>
         ));
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
-        let run = client.run::<DefUdpSender,P2PPlug,_>(
+        let run = client.run::<P2PPlug,_>(
             args.ip,args.port,
             msg_split_ignore,msg_split_ignore,
             client_plug_ptr,async{});
 
+        cmd_mgr.push(Box::new(MainCmd::new(msg_queue.clone(),p2p_plug.clone()))).await;
+
         let cmd_run = cmd_mgr.run();
+
         futures::join!(cmd_run,run);
     }
     Ok(())
