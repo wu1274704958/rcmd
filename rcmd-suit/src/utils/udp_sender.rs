@@ -1054,6 +1054,7 @@ impl DefUdpSender
 impl UdpSender for DefUdpSender
 {
     async fn send_msg(&self, v: Vec<u8>) -> Result<(),USErr> {
+        self.check_err().await?;
         let mut msg_split = self.msg_split.lock().await;
         {
             let sid = self.sid.lock().await;

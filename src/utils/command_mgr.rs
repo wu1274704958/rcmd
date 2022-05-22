@@ -156,8 +156,8 @@ impl CmdMgr
                 break;
             }
         }
-        let mut is_runing = self.is_runing.lock().await;
-        *is_runing = false;
+        // let mut is_runing = self.is_runing.lock().await;
+        // *is_runing = false;
     }
 
     pub async fn get_top_type(&self) -> Option<TypeId>
