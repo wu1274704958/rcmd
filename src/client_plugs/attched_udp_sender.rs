@@ -673,14 +673,18 @@ impl AttchedUdpSender {
 
     async fn send_close_session(&self) ->Result<(),USErr>
     {
-        let sid_ = self.get_sid().await.unwrap();
-        let v = Self::warp_ex(&[199],SpecialExt::req_close.into(),TOKEN_NORMAL,0,sid_,None);
+        let mut sid_ = 0;
         {
             let mut sid = self.sid.lock().await;
+            if let SessionState::Has(v) = *sid{
+                sid_ = v;
+            }else{
+                return Err(USErr::NoSession);
+            }
             *sid = SessionState::ReqClose(sid_,SystemTime::now(),1);
         }
         self.clear_send_queue().await;
-        self.send(v.as_slice()).await?;
+        self.send_sid_response(sid_,SpecialExt::req_close).await?;
         Ok(())
     }
 }
@@ -856,21 +860,35 @@ impl UdpSender for AttchedUdpSender
     }
 
     async fn build_session(&self) -> Result<(), USErr> {
-        if self.has_sid().await {
-            return Err(USErr::AlreadyHasSession);
-        }
-        if self.is_waiting_session().await {
-            return Err(USErr::WaitSessionResponse);
-        }
-        self.send_session().await?;
-        Ok(())
+        let sid = self.sid.lock().await;
+        return match *sid{
+            SessionState::Closed(_) => {Err((USErr::AlreadyClosed))}
+            SessionState::Null => {
+                self.send_session().await?;
+                Ok(())
+            }
+            SessionState::WaitResponse(_, _, _) => {Err(USErr::AlreadyHasSession)}
+            SessionState::WaitResponseCp(_, _, _) => {Err(USErr::AlreadyHasSession)}
+            SessionState::Has(_) => { Err(USErr::AlreadyHasSession) }
+            SessionState::ReqClose(_, _, _) => {Err((USErr::AlreadyClosed))}
+            SessionState::PrepareClose(_, _, _) => {Err((USErr::AlreadyClosed))}
+        };
     }
 
     async fn close_session(&self) -> Result<(), USErr> {
-        if !self.has_session().await
-        {
-            return Err(USErr::NoSession);
-        }
-        self.send_close_session().await
+        let sid = self.sid.lock().await;
+        return match *sid{
+            SessionState::Closed(_) => {Err((USErr::AlreadyClosed))}
+            SessionState::Null => {Err((USErr::NoSession)) }
+            SessionState::WaitResponse(_, _, _) => {Err(USErr::NoSession)}
+            SessionState::WaitResponseCp(_, _, _) => {Err(USErr::NoSession)}
+            SessionState::Has(_) => {
+                drop(sid);
+                self.send_close_session().await?;
+                Ok(())
+            }
+            SessionState::ReqClose(_, _, _) => {Err((USErr::AlreadyClosed))}
+            SessionState::PrepareClose(_, _, _) => {Err((USErr::AlreadyClosed))}
+        };
     }
 }

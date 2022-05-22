@@ -13,23 +13,24 @@ use async_trait::async_trait;
 use crate::command::remote_cmd::RemoteCmd;
 use std::any::{TypeId, Any};
 use crate::command::p2p_cmd::P2PCmd;
+use rcmd_suit::clients::udp_client::{UdpClient, UdpClientErr};
+use rcmd_suit::utils::udp_sender::DefUdpSender;
+use rcmd_suit::agreement::DefParser;
+use rcmd_suit::client_handler::DefHandler;
 
 pub struct MainCmd{
-    msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+    client: Arc<UdpClient<DefHandler,DefParser,DefUdpSender>>,
     p2p_plug: Arc<P2PPlug>
 }
 
 impl MainCmd{
-    pub fn new(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, p2p_plug: Arc<P2PPlug>) -> Self {
-        MainCmd { msg_queue, p2p_plug }
+    pub fn new(client: Arc<UdpClient<DefHandler,DefParser,DefUdpSender>>, p2p_plug: Arc<P2PPlug>) -> Self {
+        MainCmd { client, p2p_plug }
     }
 
     pub async fn send(&self,data: Vec<u8>,ext:u32)
     {
-        let mut a = self.msg_queue.lock().await;
-        {
-            a.push_back((data,ext));
-        }
+        self.client.send(data,ext).await;
     }
 }
 #[async_trait]
@@ -39,6 +40,9 @@ impl CmdHandler for MainCmd{
     }
 
     async fn on_pop(&mut self) {
+        if let Err(UdpClientErr::UsError(e)) = self.client.close_session().await{
+            eprintln!("close session failed {:?}",e);
+        };
         println!("再见！(*^_^*)");
     }
 
@@ -145,7 +149,7 @@ impl CmdHandler for MainCmd{
                         return CmdRet::None;
                     }
                 };
-                return CmdRet::Push(Box::new(RemoteCmd::new(self.msg_queue.clone(),lid)));
+                return CmdRet::Push(Box::new(RemoteCmd::new(self.client.clone(),lid)));
             }
             "9" => {
                 if cmds.len() < 2 { return CmdRet::None; }

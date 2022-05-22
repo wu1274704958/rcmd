@@ -106,7 +106,7 @@ async fn main() -> io::Result<()>
             msg_split_ignore,msg_split_ignore,
             client_plug_ptr,async{});
 
-        cmd_mgr.push(Box::new(MainCmd::new(msg_queue.clone(),p2p_plug.clone()))).await;
+        cmd_mgr.push(Box::new(MainCmd::new(client.clone(),p2p_plug.clone()))).await;
 
         let cmd_run = cmd_mgr.run();
 

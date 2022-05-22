@@ -11,9 +11,13 @@ use std::str::FromStr;
 use crate::extc::*;
 use async_trait::async_trait;
 use std::any::{TypeId, Any};
+use rcmd_suit::clients::udp_client::UdpClient;
+use rcmd_suit::client_handler::DefHandler;
+use rcmd_suit::agreement::DefParser;
+use rcmd_suit::utils::udp_sender::DefUdpSender;
 
 pub struct RemoteCmd{
-    msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
+    client: Arc<UdpClient<DefHandler,DefParser,DefUdpSender>>,
     remote_id:usize
 }
 
@@ -21,14 +25,11 @@ impl RemoteCmd{
 
     pub async fn send(&self,data: Vec<u8>,ext:u32)
     {
-        let mut a = self.msg_queue.lock().await;
-        {
-            a.push_back((data,ext));
-        }
+        self.client.send(data,ext).await;
     }
 
-    pub fn new(msg_queue: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, remote_id: usize) -> Self {
-        RemoteCmd { msg_queue, remote_id }
+    pub fn new(client: Arc<UdpClient<DefHandler,DefParser,DefUdpSender>>, remote_id: usize) -> Self {
+        RemoteCmd { client, remote_id }
     }
 }
 #[async_trait]

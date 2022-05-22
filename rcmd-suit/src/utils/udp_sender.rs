@@ -22,6 +22,7 @@ use num_enum::TryFromPrimitive;
 use std::convert::TryFrom;
 use std::thread::sleep;
 use crate::utils::data_current_limiter::DataCurrentLimiter;
+use futures::future::err;
 
 #[async_trait]
 pub trait UdpSender : std::marker::Send + std::marker::Sync{
@@ -46,7 +47,7 @@ pub trait UdpSender : std::marker::Send + std::marker::Sync{
     async fn build_session(&self)->Result<(),USErr>;
     async fn close_session(&self)->Result<(),USErr>;
 }
-
+#[derive(Debug)]
 pub enum SessionState{
     Closed(u128),
     Null,
@@ -1033,14 +1034,18 @@ impl DefUdpSender
 
     async fn send_close_session(&self) ->Result<(),USErr>
     {
-        let sid_ = self.get_sid().await.unwrap();
-        let v = Self::warp_ex(&[199],SpecialExt::req_close.into(),TOKEN_NORMAL,0,sid_,None);
+        let mut sid_ = 0;
         {
             let mut sid = self.sid.lock().await;
+            if let Has(v) = *sid{
+                sid_ = v;
+            }else{
+                return Err(USErr::NoSession);
+            }
             *sid = SessionState::ReqClose(sid_,SystemTime::now(),1);
         }
         self.clear_send_queue().await;
-        self.send(v.as_slice()).await?;
+        self.send_sid_response(sid_,SpecialExt::req_close).await?;
         Ok(())
     }
 }
@@ -1364,6 +1369,7 @@ impl UdpSender for DefUdpSender
             SessionState::WaitResponse(_, _, _) => {Err(USErr::NoSession)}
             SessionState::WaitResponseCp(_, _, _) => {Err(USErr::NoSession)}
             Has(_) => {
+                drop(sid);
                 self.send_close_session().await?;
                 Ok(())
             }
