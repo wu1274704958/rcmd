@@ -776,7 +776,7 @@ impl ClientPlug for P2PPlug
                                         self.prepare_runtime(|runtime|{
                                             if is_relay {
                                                 runtime.spawn(lauch_p2p_client_relay(
-                                                    addr, rx, sock, msg_queue, addr_key,cpid, plug_data_cp,
+                                                    addr, rx, msg_queue, addr_key,cpid, plug_data_cp,
                                                     curr_sender_cp, verify_code, cli_sender_map, cli_map, relay_map));
                                             }
                                             else {
@@ -1062,7 +1062,6 @@ async fn lauch_p2p_client(
 async fn lauch_p2p_client_relay(
     addr:SocketAddr,
     rx:Receiver<Vec<u8>>,
-    sock: Arc<UdpSocket>,
     msg_queue: Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
     key: u64,
     cpid: usize,
