@@ -30,7 +30,6 @@ pub trait UdpSender : std::marker::Send + std::marker::Sync{
     async fn check_recv(&self, data: &[u8]) -> Result<(),USErr>;
     async fn pop_recv_msg(&self) -> Result<Vec<u8>,USErr>;
     async fn need_check(&self)->bool;
-    fn create(sock:Arc<UdpSocket>,addr:SocketAddr) ->Self where Self: Sized;
     async fn set_max_msg_len(&mut self,len:u16);
     fn max_msg_len(&self)->u16;
     async fn set_min_msg_len(&mut self,len:u16);
@@ -241,6 +240,37 @@ impl Into<u32> for SpecialExt{
 
 impl DefUdpSender
 {
+    pub fn New(sock: Arc<UdpSocket>,addr:SocketAddr) ->Self {
+        let max_cache_size = 1;
+        ///消息分割器 的子协议头所占的字节数
+        const sub_head_size:usize = size_of::<u128>() + size_of::<u32>() * 3;
+        let max_len = 65500 - (Self::package_len() + sub_head_size);
+        let min_len = 1472 - (Self::package_len() + sub_head_size);
+        DefUdpSender
+        {
+            addr,
+            sock,
+            max_len: max_len as _,
+            min_len: min_len as _,
+            max_cache_size,
+            min_cache_size:1,
+            cache_size: Arc::new(Mutex::new(1)),
+            mid: Arc::new(Mutex::new(usize::zero())),
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+            msg_map: Arc::new(Mutex::new(HashMap::new())),
+            expect_id: Arc::new(Mutex::new(1)),
+            recv_cache: Arc::new(Mutex::new(HashMap::new())),
+            subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
+            timeout: Duration::from_millis(400),
+            msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
+            max_retry_times: 6,
+            recv_queue: Arc::new(Mutex::new(VecDeque::new())),
+            error :Arc::new(Mutex::new(None)),
+            sid: Arc::new(Mutex::new(SessionState::Null)),
+            adjust_cache_size_time: Arc::new(Mutex::new(SystemTime::now())),
+            avg_retry_times: Arc::new(Mutex::new((0,0f32))),
+        }
+    }
     async fn get_mid(&self)->usize
     {
         let mut mid = self.mid.lock().await;
@@ -1117,41 +1147,6 @@ impl UdpSender for DefUdpSender
 
     async fn need_check(&self) -> bool {
         self.need_check().await
-    }
-
-    fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        let max_cache_size = 1;
-        ///消息分割器 的子协议头所占的字节数
-        const sub_head_size:usize = size_of::<u128>() + size_of::<u32>() * 3;
-        let max_len = 65500 - (Self::package_len() + sub_head_size);
-        let min_len = 1472 - (Self::package_len() + sub_head_size);
-        DefUdpSender{
-            addr,
-            sock,
-            max_len: max_len as _,
-            min_len: min_len as _,
-            max_cache_size,
-            min_cache_size:1,
-            cache_size: Arc::new(Mutex::new(1)),
-            mid: Arc::new(Mutex::new(usize::zero())),
-            queue: Arc::new(Mutex::new(VecDeque::new())),
-            msg_map: Arc::new(Mutex::new(HashMap::new())),
-            expect_id: Arc::new(Mutex::new(1)),
-            recv_cache: Arc::new(Mutex::new(HashMap::new())),
-            subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
-            timeout: Duration::from_millis(400),
-            msg_split: Arc::new(Mutex::new(UdpMsgSplit::with_max_unit_size(max_len,min_len))),
-            max_retry_times: 6,
-            recv_queue: Arc::new(Mutex::new(VecDeque::new())),
-            error :Arc::new(Mutex::new(None)),
-            sid: Arc::new(Mutex::new(SessionState::Null)),
-            adjust_cache_size_time: Arc::new(Mutex::new(SystemTime::now())),
-            avg_retry_times: Arc::new(Mutex::new((0,0f32))),
-            // data_current_limiter: Arc::new(DataCurrentLimiter::new(
-            //     Duration::from_millis(20),
-            //     (1024*1024*4) / (1000/20) ,10,10
-            // ))
-        }
     }
 
     async fn set_max_msg_len(&mut self, len: u16) {

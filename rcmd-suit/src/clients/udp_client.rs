@@ -40,7 +40,7 @@ pub struct UdpClient<T,A,SE>
     sender:Arc<Mutex<Option<Arc<SE>>>>,
     pub heartbeat_dur:Duration,
     pub nomsg_rest_dur:Duration,
-    bind_addr:SocketAddr,
+    pub bind_addr:SocketAddr,
     pub buf_size:usize,
     parser:A,
     local_addr:Arc<Mutex<Option<SocketAddr>>>
@@ -237,9 +237,10 @@ impl <'a,T,A,SE> UdpClient<T,A,SE>
     }
 
     #[allow(unused_must_use)]
-    pub async fn run<CP,F>(&self,ip:Ipv4Addr,port:u16,asy_cry_ignore:Option<&Vec<u32>>,
+    pub async fn run<CP,F>(&self,sock:Arc<UdpSocket>,addr:SocketAddr,asy_cry_ignore:Option<&Vec<u32>>,
                      msg_split_ignore:Option<&Vec<u32>>,
                     plug_collect:Arc<ClientPluCollect<CP>>,
+                    sender:Arc<SE>,
                     on_ret: F
     ) -> Result<(),UdpClientErr>
 
@@ -250,9 +251,9 @@ impl <'a,T,A,SE> UdpClient<T,A,SE>
     {
         plug_collect.on_init().await;
 
-        let sock = Arc::new( UdpSocket::bind(self.bind_addr).await? );
-        platform_handle(sock.as_ref());
-        let addr = SocketAddr::new(IpAddr::V4(ip), port);
+        // let sock = Arc::new( UdpSocket::bind(self.bind_addr).await? );
+        // platform_handle(sock.as_ref());
+        // let addr = SocketAddr::new(IpAddr::V4(ip), port);
 
 
         plug_collect.on_create_socket(sock.clone()).await;
@@ -279,7 +280,6 @@ impl <'a,T,A,SE> UdpClient<T,A,SE>
         }
         let mut package = None;
 
-        let sender = Arc::new(SE::create(sock.clone(),addr));
         let err:Arc<Mutex<Option<USErr>>> = Arc::new(Mutex::new(None));
         let sender_cp = sender.clone();
         let run_cp = self.runing.clone();

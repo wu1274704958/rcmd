@@ -529,7 +529,7 @@ pub async fn run_udp_server<LID,ABC,P,SH,H,PL,PLM>(
                 };
                 if !has
                 {
-                    let mut sender = Arc::new(DefUdpSender::create(sock.clone(),addr));
+                    let mut sender = Arc::new(DefUdpSender::New(sock.clone(),addr));
                     {
                         sender.check_recv(&buf[0..len]).await;
                         println!("check_recv end -------------------------");

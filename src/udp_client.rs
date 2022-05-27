@@ -27,7 +27,7 @@ use rcmd_suit::clients::udp_client::UdpClient;
 use std::net::{ IpAddr};
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::client_handler::{DefHandler, Handle};
-use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE};
+use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END, SEND_BUF_SIZE, platform_handle};
 use rcmd_suit::utils::udp_sender::{DefUdpSender, USErr};
 use rcmd_suit::client_plug::client_plug::ClientPluCollect;
 use crate::client_plugs::p2p_plugs::P2PPlug;
@@ -38,6 +38,8 @@ use crate::command::p2p_cmd::AcceptP2P;
 use crate::client_plugs::p2p_event::P2PEvent;
 use async_trait::async_trait;
 use std::any::TypeId;
+use tokio::net::UdpSocket;
+use async_std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> io::Result<()>
@@ -99,12 +101,17 @@ async fn main() -> io::Result<()>
             msg_queue.clone(),
             is_runing
         ));
+
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
+        let sock = Arc::new( UdpSocket::bind(client.bind_addr).await? );
+        platform_handle(sock.as_ref());
+        let addr = SocketAddr::new(IpAddr::V4(args.ip), args.port);
+        let sender = Arc::new(DefUdpSender::New(sock.clone(),addr));
         let run = client.run::<P2PPlug,_>(
-            args.ip,args.port,
+            sock,addr,
             msg_split_ignore,msg_split_ignore,
-            client_plug_ptr,async{});
+            client_plug_ptr,sender,async{});
 
         cmd_mgr.push(Box::new(MainCmd::new(client.clone(),p2p_plug.clone()))).await;
 

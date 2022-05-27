@@ -1035,7 +1035,7 @@ async fn lauch_p2p_client(
         ));
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
-        let sender = Arc::new(DefUdpSender::create(sock.clone(),addr));
+        let sender = Arc::new(DefUdpSender::New(sock.clone(),addr));
         client.run_with_sender::<P2PPlug,_>(rx,
             msg_split_ignore,msg_split_ignore,
             async {

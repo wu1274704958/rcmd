@@ -757,10 +757,6 @@ impl UdpSender for AttchedUdpSender
         self.need_check().await
     }
 
-    fn create(sock: Arc<UdpSocket>,addr:SocketAddr) -> Self {
-        abort()
-    }
-
     async fn set_max_msg_len(&mut self, len: u16) {}
 
     fn max_msg_len(&self) -> u16 {

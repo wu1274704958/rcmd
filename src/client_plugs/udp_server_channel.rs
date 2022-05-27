@@ -63,7 +63,7 @@ pub async fn run_udp_server_with_channel<LID,ABC,P,SH,H,PL,PLM>(
                                                            EXT_P2P_RELAY_MSG_CS,*cpid))
                         }else{
                             drop(relay_map);
-                            Arc::new(DefUdpSender::create(sock.clone(),addr))
+                            Arc::new(DefUdpSender::New(sock.clone(),addr))
                         }
                     };
 
