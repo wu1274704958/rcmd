@@ -17,7 +17,7 @@ use rcmd_suit::plug::PlugMgr;
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
 use ahash::{RandomState, CallHasher};
 use std::panic::resume_unwind;
-use rcmd_suit::clients::udp_client::UdpClient;
+use rcmd_suit::clients::udp_client::{UdpClient, IUdpClient};
 use std::hash::BuildHasher;
 use crate::client_plugs::p2p_dead_plug::P2PVerifyClientHandler;
 use std::time::Duration;
@@ -55,6 +55,7 @@ pub enum P2PErr {
     NoEntity,
     NoLink,
     NotKnow,
+    NotAttachedClient,
     Wrap((i32,String))
 }
 
@@ -123,7 +124,7 @@ pub struct PlugData{
     link_map: HashMap<usize,LinkData>,
     cpid_map: HashMap<Arc<String>,usize>,
     pub ser_map: HashMap<usize,usize>,
-} 
+}
 
 impl PlugData {
     pub fn new() -> PlugData
@@ -204,7 +205,7 @@ pub struct P2PPlug
     ser_sender: Mutex<Option<Sender<(SocketAddr,Vec<u8>)>>>,
     ser_clients: Arc<Mutex<HashMap<usize,Box<AbClient>>>>,
     hash_builder: RandomState,
-    cli_map: Arc<Mutex<HashMap<u64,(usize,Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>,
+    cli_map: Arc<Mutex<HashMap<u64,(usize,Option<Arc<dyn IUdpClient>>)>>>,
     cli_sender_map : Arc<Mutex<HashMap<u64,Sender<Vec<u8>>>>>,
     relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>,
     event:Option<Arc<dyn P2PEvent>>
@@ -265,8 +266,11 @@ impl P2PPlug
                     let mut cs = self.cli_map.lock().await;
                     if let Some(c) = cs.get_mut(&id)
                     {
-                        let mut queue =  c.1.lock().await;
-                        queue.push_back((data,ext));
+                        if let Some(cli) = c.1.clone(){
+                            cli.send(data,ext).await;
+                        }else{
+                            return Err(P2PErr::NotAttachedClient);
+                        }
                     }else{
                         return Err(P2PErr::NotKnow);
                     }
@@ -300,9 +304,12 @@ impl P2PPlug
                     let mut cs = self.cli_map.lock().await;
                     if let Some(c) = cs.get_mut(&id)
                     {
-                        let mut queue =  c.1.lock().await;
-                        for data  in ds.into_iter() {
-                            queue.push_back(data);
+                        if let Some(v) = c.1.clone(){
+                            for data  in ds.into_iter() {
+                                v.send(data.0, data.1).await;
+                            }
+                        }else{
+                            return Err(P2PErr::NotAttachedClient);
                         }
                     }else{
                         return Err(P2PErr::NotKnow);
@@ -361,7 +368,7 @@ impl P2PPlug
         self.add_link(LinkState::WaitAccept, cpid).await;
 
         self.send_data(d, EXT_REQ_HELP_LINK_P2P_CS).await;
-    
+
         Ok(())
     }
 
@@ -395,7 +402,7 @@ impl P2PPlug
         }
 
         self.send_data(d, EXT_ACCEPT_LINK_P2P_CS).await;
-    
+
         Ok(())
     }
 
@@ -626,7 +633,7 @@ impl P2PPlug
         None
     }
 
-    async fn add_client(&self,ck:u64,s:Sender<Vec<u8>>,msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,cp:usize) -> bool
+    async fn add_client(&self,ck:u64,s:Sender<Vec<u8>>,cli:Option<Arc<dyn IUdpClient>>,cp:usize) -> bool
     {
         let mut cli_sender_map = self.cli_sender_map.lock().await;
         if cli_sender_map.contains_key(&ck)
@@ -636,8 +643,30 @@ impl P2PPlug
         cli_sender_map.insert(ck,s);
         drop(cli_sender_map);
         let mut cli_map = self.cli_map.lock().await;
-        cli_map.insert(ck,(cp,msg_queue));
+        cli_map.insert(ck,(cp,cli));
         true
+    }
+    async fn attached_client(&self,ck:u64,cli:Arc<dyn IUdpClient>) -> bool
+    {
+        Self::attached_client_ex(self.cli_map.clone(),ck,cli).await
+    }
+    async fn attached_client_ex(cli_map_: Arc<Mutex<HashMap<u64,(usize,Option<Arc<dyn IUdpClient>>)>>>,
+                                ck:u64,cli:Arc<dyn IUdpClient>) -> bool
+    {
+        let mut cli_map = cli_map_.lock().await;
+        if let Some(v)  = cli_map.get_mut(&ck)
+        {
+            if (*v).1.is_some()
+            {
+                eprintln!("p2p attached_client too many times!!!");
+                false
+            }else{
+                (*v).1 = Some(cli);
+                true
+            }
+        }else {
+            false
+        }
     }
     async fn rm_client(&self,ck:u64) -> Option<usize>
     {
@@ -710,7 +739,7 @@ impl ClientPlug for P2PPlug
         //println!("recv other msg from {:?}\n{:?}",&addr,data);
         if let Some((msg,ext)) = Self::unwrap(data)
         {
-            
+
             let e =  Ext::try_from(ext).unwrap();
             match e {
                 Ext::Hello1 |
@@ -768,7 +797,7 @@ impl ClientPlug for P2PPlug
                                         let cli_sender_map = self.cli_sender_map.clone();
                                         let cli_map = self.cli_map.clone();
                                         link.local_entity = LocalEntity::Client(addr_key);
-                                        self.add_client(addr_key,s,msg_queue.clone(),link.cp).await;
+                                        self.add_client(addr_key,s,None,link.cp).await;
                                         let sock = d.socket.as_ref().unwrap().clone();
                                         let relay_map = self.relay_map.clone();
 
@@ -979,9 +1008,9 @@ async fn lauch_p2p_ser(
         handler.add_handler(Arc::new(UploadHandler::new()));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
-        
+
         dead_plugs.add_plug(Arc::new(P2POnDeadPlugClientSer::new(plug_data,curr_sender.clone(),relay_map.clone())));
-        
+
     }
 
     let server = UdpServer::with_clients(
@@ -1010,7 +1039,7 @@ async fn lauch_p2p_client(
     curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
     verify_code: Arc<String>,
     cli_sender_map: Arc<Mutex<HashMap<u64, Sender<Vec<u8>>>>>,
-    cli_map: Arc<Mutex<HashMap<u64, (usize, Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>,
+    cli_map: Arc<Mutex<HashMap<u64,(usize,Option<Arc<dyn IUdpClient>>)>>>,
     relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
 )
 {
@@ -1033,6 +1062,7 @@ async fn lauch_p2p_client(
             DefParser::new(),
             msg_queue.clone()
         ));
+        P2PPlug::attached_client_ex(cli_map.clone(),key,client.clone());
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
         let sender = Arc::new(DefUdpSender::New(sock.clone(),addr));
@@ -1069,7 +1099,7 @@ async fn lauch_p2p_client_relay(
     curr_sender: Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>,
     verify_code: Arc<String>,
     cli_sender_map: Arc<Mutex<HashMap<u64, Sender<Vec<u8>>>>>,
-    cli_map: Arc<Mutex<HashMap<u64, (usize, Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>)>>>,
+    cli_map: Arc<Mutex<HashMap<u64,(usize,Option<Arc<dyn IUdpClient>>)>>>,
     relay_map: Arc<Mutex<HashMap<SocketAddr,usize>>>
 )
 {
@@ -1092,6 +1122,7 @@ async fn lauch_p2p_client_relay(
             DefParser::new(),
             msg_queue.clone()
         ));
+        P2PPlug::attached_client_ex(cli_map.clone(),key,client.clone());
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
         let sender = Arc::new(AttchedUdpSender::new(curr_sender,

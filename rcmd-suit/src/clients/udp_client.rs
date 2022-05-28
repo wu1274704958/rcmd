@@ -1,4 +1,4 @@
-
+use async_trait::async_trait;
 use std::{collections::VecDeque, io, net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs}, sync::{Arc}, time::{Duration, SystemTime}};
 use std::vec::Vec;
 use tokio::{io::AsyncWriteExt, net::{UdpSocket}, time::sleep};
@@ -29,10 +29,20 @@ impl From<std::io::Error> for UdpClientErr {
         UdpClientErr::UsError(e.into())
     }
 }
+#[async_trait]
+pub trait IUdpClient : std::marker::Send + std::marker::Sync{
+    async fn get_local_addr(&self) -> Option<SocketAddr>;
+    async fn send(&self,data: Vec<u8>,ext:u32);
+    async fn stop(&self);
+    async fn still_runing(&self)->bool;
+    async fn build_session(&self)-> Result<(),UdpClientErr>;
+    async fn close_session(&self)-> Result<(),UdpClientErr>;
+}
 
 pub struct UdpClient<T,A,SE>
-    where T:Handle,
-    SE : UdpSender + Send + std::marker::Sync
+    where T:Handle + Send + Sync,
+    SE : UdpSender + Send + std::marker::Sync,
+    A : Send + Sync
 {
     msg_queue:Arc<Mutex<VecDeque<(Vec<u8>,u32)>>>,
     runing:Arc<Mutex<bool>>,
@@ -82,10 +92,64 @@ macro_rules! StopNoPlug {
         return Err($E.into());
     };
 }
+#[async_trait]
+impl<'a,T,A,SE> IUdpClient for  UdpClient<T,A,SE>
+    where T:Handle + std::marker::Sync + std::marker::Send,
+          A : Agreement + std::marker::Sync + std::marker::Send,
+          SE : UdpSender + Send + std::marker::Sync + 'static,
+{
+    async fn get_local_addr(&self) -> Option<SocketAddr> {
+        let mut addr = self.local_addr.lock().await;
+        *addr
+    }
+
+    async fn send(&self,data: Vec<u8>,ext:u32) {
+        let mut a = self.msg_queue.lock().await;
+        {
+            a.push_back((data,ext));
+        }
+    }
+
+    async fn stop(&self)
+    {
+        let mut b = self.runing.lock().await;
+        *b = false;
+    }
+
+    async fn still_runing(&self)->bool
+    {
+        let b = self.runing.lock().await;
+        *b
+    }
+
+    async fn build_session(&self)-> Result<(),UdpClientErr>
+    {
+        let sender = self.sender.lock().await;
+        if let Some(se) = (*sender).clone()
+        {
+            se.build_session().await?
+        }else{
+            return Err(UdpClientErr::NoUdpSender);
+        }
+        Ok(())
+    }
+
+    async fn close_session(&self)-> Result<(),UdpClientErr>
+    {
+        let sender = self.sender.lock().await;
+        if let Some(se) = (*sender).clone()
+        {
+            se.close_session().await?
+        }else{
+            return Err(UdpClientErr::NoUdpSender);
+        }
+        Ok(())
+    }
+}
 
 impl <'a,T,A,SE> UdpClient<T,A,SE>
-    where T:Handle + std::marker::Sync,
-          A : Agreement,
+    where T:Handle + std::marker::Sync + Send,
+          A : Agreement + Send + Sync,
           SE : UdpSender + Send + std::marker::Sync + 'static,
 {
     pub fn new(bind_addr:impl ToSocketAddrs,handler:Arc<T>,parser:A)-> Self
@@ -155,54 +219,6 @@ impl <'a,T,A,SE> UdpClient<T,A,SE>
             local_addr: Arc::new(Mutex::new(None)),
             sender : Arc::new(Mutex::new(None))
         }
-    }
-
-    pub async fn get_local_addr(&self,data: Vec<u8>,ext:u32) -> Option<SocketAddr> {
-        let mut addr = self.local_addr.lock().await;
-        *addr
-    }
-
-    pub async fn send(&self,data: Vec<u8>,ext:u32) {
-        let mut a = self.msg_queue.lock().await;
-        {
-            a.push_back((data,ext));
-        }
-    }
-
-    pub async fn stop(&self)
-    {
-        let mut b = self.runing.lock().await;
-        *b = false;
-    }
-
-    pub async fn still_runing(&self)->bool
-    {
-        let b = self.runing.lock().await;
-        *b
-    }
-
-    pub async fn build_session(&self)-> Result<(),UdpClientErr>
-    {
-        let sender = self.sender.lock().await;
-        if let Some(se) = (*sender).clone()
-        {
-            se.build_session().await?
-        }else{
-            return Err(UdpClientErr::NoUdpSender);
-        }
-        Ok(())
-    }
-
-    pub async fn close_session(&self)-> Result<(),UdpClientErr>
-    {
-        let sender = self.sender.lock().await;
-        if let Some(se) = (*sender).clone()
-        {
-            se.close_session().await?
-        }else{
-            return Err(UdpClientErr::NoUdpSender);
-        }
-        Ok(())
     }
 
     async fn pop_msg(&self)->Option<(Vec<u8>,u32)>

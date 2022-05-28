@@ -11,7 +11,7 @@ use std::str::FromStr;
 use crate::extc::*;
 use async_trait::async_trait;
 use std::any::{TypeId, Any};
-use rcmd_suit::clients::udp_client::UdpClient;
+use rcmd_suit::clients::udp_client::{UdpClient, IUdpClient};
 use rcmd_suit::client_handler::DefHandler;
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::utils::udp_sender::DefUdpSender;

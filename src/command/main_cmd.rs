@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use crate::command::remote_cmd::RemoteCmd;
 use std::any::{TypeId, Any};
 use crate::command::p2p_cmd::P2PCmd;
-use rcmd_suit::clients::udp_client::{UdpClient, UdpClientErr};
+use rcmd_suit::clients::udp_client::{UdpClient, UdpClientErr, IUdpClient};
 use rcmd_suit::utils::udp_sender::DefUdpSender;
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::client_handler::DefHandler;
