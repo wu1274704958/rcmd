@@ -13,19 +13,17 @@ pub enum State
     Wait,
     Busy,
     Dead,
-    WaitKill
+    WaitKill,
+    ReqClose,
+    Closed
 }
 
 impl State {
     pub fn is_wait_kill(&self) -> bool
     {
         match *self{
-            State::Ready|
-            State::Alive|
-            State::Wait |
-            State::Busy |
-            State::Dead => false,
             State::WaitKill => true,
+            _ => false
         }
     }
 }

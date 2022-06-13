@@ -324,6 +324,15 @@ pub async fn run_in<LID,ABC,P,SH,H,PL,PLM,F,SE>
                     clean(dead_plugs_cp.clone(),logic_id.clone(),clients.clone(),conf.clone(),lid.clone(),on_ret).await;
                     return;
                 }
+                Some(State::ReqClose) => {
+                    if let Err(e) = sender.close_session().await
+                    {
+                        eprintln!("Server req close got err {:?}",e);
+                        set_client_st_ex(&clients,logic_id.clone(),State::WaitKill).await;
+                    }else{
+                        set_client_st_ex(&clients,logic_id.clone(),State::Closed).await;
+                    }
+                }
                 _ => {}
             };
         }
