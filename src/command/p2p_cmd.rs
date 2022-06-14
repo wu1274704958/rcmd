@@ -123,6 +123,10 @@ impl CmdHandler for P2PCmd{
                 self.p2p_plug.send_msg(self.cp,d,EXT_DEFAULT).await;
                 CmdRet::None
             }
+            "disconn" => {
+                dbg!(self.p2p_plug.req_close(self.cp).await);
+                CmdRet::PoPSelf
+            }
             _ => {
                 CmdRet::None
             }

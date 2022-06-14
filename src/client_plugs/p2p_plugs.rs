@@ -1106,7 +1106,7 @@ async fn lauch_p2p_client(
             DefParser::new(),
             msg_queue.clone()
         ));
-        P2PPlug::attached_client_ex(cli_map.clone(),key,client.clone());
+        P2PPlug::attached_client_ex(cli_map.clone(),key,client.clone()).await;
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
         let sender = Arc::new(DefUdpSender::New(sock.clone(),addr));
@@ -1166,7 +1166,7 @@ async fn lauch_p2p_client_relay(
             DefParser::new(),
             msg_queue.clone()
         ));
-        P2PPlug::attached_client_ex(cli_map.clone(),key,client.clone());
+        P2PPlug::attached_client_ex(cli_map.clone(),key,client.clone()).await;
         lazy_static::initialize(&comm::IGNORE_EXT);
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
         let sender = Arc::new(AttchedUdpSender::new(curr_sender,

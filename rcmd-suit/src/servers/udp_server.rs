@@ -205,9 +205,7 @@ pub async fn set_client_st_ex<LID,ABC>(clients:&Arc<Mutex<HashMap<LID,Box<ABC>>>
     let mut abs = clients.lock().await;
     if let Some(a) = abs.get_mut(&id)
     {
-        if !a.state().is_wait_kill(){
-            a.set_state(s)
-        }
+        a.set_state(s)
     }
 }
 

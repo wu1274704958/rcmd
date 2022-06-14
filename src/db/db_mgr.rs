@@ -2,6 +2,7 @@ use std::env::args;
 use mysql::{Pool, Value, PooledConn};
 use mysql::prelude::Queryable;
 use std::ffi::CStr;
+use std::str::FromStr;
 
 pub struct DBMgr{
     pool:Pool
@@ -11,15 +12,23 @@ impl DBMgr{
     pub fn new()->Option<DBMgr>
     {
         let mut pwd = "as147258369".to_string();
-
+        let mut prot = 3306;
         args().enumerate().for_each(|it|{
-            if it.0 == 3{
-                pwd = it.1;
+            match it.0{
+                3 => {
+                    pwd = it.1;
+                }
+                4 => {
+                     if let Ok(v) = i32::from_str( it.1.as_str())
+                     {
+                         prot = v;
+                     }
+                }
+                _=>{}
             }
         });
 
-        let url = format!("mysql://root:{}@localhost:3306/sql_test",pwd);
-
+        let url = format!("mysql://root:{}@localhost:{}/sql_test",pwd,prot);
         let pool = match Pool::new(url){
             Ok(p) => {
                 p

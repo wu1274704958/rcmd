@@ -26,6 +26,14 @@ impl State {
             _ => false
         }
     }
+    pub fn is_close(&self) -> bool
+    {
+        match *self{
+            State::ReqClose|
+            State::Closed=> true,
+            _ => false
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -125,7 +133,20 @@ impl ABClient for AbClient
     }
 
     fn set_state(&mut self, s: State) {
-        self.state = s;
+        match self.state.clone() {
+            State::Ready => { self.state = s; }
+            State::Alive => { self.state = s; }
+            State::Wait => { self.state = s; }
+            State::Busy => { self.state = s; }
+            State::Dead => { }
+            State::WaitKill => { }
+            State::ReqClose => {
+                if s.is_close(){
+                    self.state = s;
+                }
+            }
+            State::Closed => {}
+        }
     }
 }
 
