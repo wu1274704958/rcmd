@@ -14,6 +14,7 @@ use crate::client_plug::client_plug::{ClientPlug,ClientPluCollect};
 use std::io::Write;
 use async_std::channel::{Receiver, RecvError};
 
+#[derive(Debug)]
 pub enum UdpClientErr{
     UsError(USErr),
     NoUdpSender

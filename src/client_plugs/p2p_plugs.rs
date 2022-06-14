@@ -17,7 +17,7 @@ use rcmd_suit::plug::PlugMgr;
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
 use ahash::{RandomState, CallHasher};
 use std::panic::resume_unwind;
-use rcmd_suit::clients::udp_client::{UdpClient, IUdpClient};
+use rcmd_suit::clients::udp_client::{UdpClient, IUdpClient, UdpClientErr};
 use std::hash::BuildHasher;
 use crate::client_plugs::p2p_dead_plug::P2PVerifyClientHandler;
 use std::time::Duration;
@@ -27,6 +27,7 @@ use crate::client_plugs::udp_server_channel::run_udp_server_with_channel;
 use crate::client_plugs::p2p_plugs::LocalEntity::Client;
 use crate::client_plugs::p2p_event::P2PEvent;
 use crate::p2p_client_handler::upload_file::UploadHandler;
+use rcmd_suit::ab_client::{ABClient, State};
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -56,18 +57,25 @@ pub enum P2PErr {
     NoLink,
     NotKnow,
     NotAttachedClient,
-    Wrap((i32,String))
+    Wrap((i32,String)),
+    UdpClientErr(UdpClientErr)
 }
 
 impl From<std::io::Error> for P2PErr
 {
     fn from(e: std::io::Error) -> Self {
         let code = match e.raw_os_error() {
-            None => {-3}
+            None => {-99999}
             Some(v) => {v}
         };
         let str = format!("{}",e);
         P2PErr::Wrap((code,str))
+    }
+}
+
+impl From<UdpClientErr> for P2PErr{
+    fn from(e: UdpClientErr) -> Self {
+        P2PErr::UdpClientErr(e)
     }
 }
 #[allow(dead_code)]
@@ -370,6 +378,42 @@ impl P2PPlug
         self.send_data(d, EXT_REQ_HELP_LINK_P2P_CS).await;
 
         Ok(())
+    }
+
+    pub async fn req_close(&self,cpid:usize) -> Result<(),P2PErr>
+    {
+        let d = self.data.lock().await;
+        if let Some(link) = d.link_map.get(&cpid)
+        {
+            return match link.local_entity {
+                LocalEntity::Ser(id) => {
+                    let mut scs =  self.ser_clients.lock().await;
+                    if let Some(c) = scs.get_mut(&id)
+                    {
+                        c.set_state(State::ReqClose);
+                    }else{
+                        return Err(P2PErr::NotKnow);
+                    }
+                    Ok(())
+                }
+                Client(id) => {
+                    let mut cs = self.cli_map.lock().await;
+                    if let Some(c) = cs.get_mut(&id)
+                    {
+                        if let Some(cli) = c.1.clone(){
+                            cli.close_session().await?;
+                        }else{
+                            return Err(P2PErr::NotAttachedClient);
+                        }
+                    }else{
+                        return Err(P2PErr::NotKnow);
+                    }
+                    Ok(())
+                }
+                LocalEntity::None => { return Err(P2PErr::NoEntity); }
+            }
+        }
+        Err(P2PErr::NoLink)
     }
 
     pub async fn accept_p2p(&self,cpid:usize,accept:bool) -> Result<(),P2PErr>
