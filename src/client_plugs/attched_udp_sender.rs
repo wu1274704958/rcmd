@@ -485,7 +485,7 @@ impl AttchedUdpSender {
         **expect_id
     }
 
-    fn next_expect_ex(expect_id:&mut MutexGuard<CycleRange<usize>>)->usize
+    fn next_expect_ex(expect_id:&mut MutexGuard<CycleCount<usize>>)->usize
     {
         **expect_id += 1;
         ***expect_id
