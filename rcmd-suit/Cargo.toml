@@ -38,3 +38,7 @@ winapi = "0.3.9"
 
 [dependencies.pm_gen]
 path = "pm_gen"
+
+
+[dependencies.misc_gen]
+path = "misc_gen"
