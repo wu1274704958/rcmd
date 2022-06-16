@@ -23,6 +23,7 @@ use std::convert::TryFrom;
 use std::thread::sleep;
 use crate::utils::data_current_limiter::DataCurrentLimiter;
 use futures::future::err;
+use crate::utils::cycle_count::CycleCount;
 
 #[async_trait]
 pub trait UdpSender : std::marker::Send + std::marker::Sync{
@@ -82,6 +83,8 @@ impl SessionState{
     }
 }
 
+pub const CycleRange:usize = 1000;
+
 pub struct DefUdpSender{
     sock: Arc<UdpSocket>,
     max_len: u16,
@@ -89,11 +92,11 @@ pub struct DefUdpSender{
     cache_size:Arc<Mutex<u16>>,
     min_cache_size:u16,
     max_cache_size:u16,
-    mid: Arc<Mutex<usize>>,
+    mid: Arc<Mutex<CycleCount<usize>>>,
     queue: Arc<Mutex<VecDeque<(usize,Option<u32>)>>>,
     msg_map: Arc<Mutex<HashMap<usize,(Vec<u8>,SystemTime,u16)>>>,
     recv_cache: Arc<Mutex<HashMap<usize,(Vec<u8>,u32,u8,Option<Vec<u8>>)>>>,
-    expect_id: Arc<Mutex<usize>>,
+    expect_id: Arc<Mutex<CycleCount<usize>>>,
     addr:SocketAddr,
     subpacker: Arc<Mutex<UdpSubpackage>>,
     timeout: Duration,
@@ -255,10 +258,10 @@ impl DefUdpSender
             max_cache_size,
             min_cache_size:1,
             cache_size: Arc::new(Mutex::new(1)),
-            mid: Arc::new(Mutex::new(usize::zero())),
+            mid: Arc::new(Mutex::new(CycleCount::new(usize::MAX,CycleRange))),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             msg_map: Arc::new(Mutex::new(HashMap::new())),
-            expect_id: Arc::new(Mutex::new(1)),
+            expect_id: Arc::new(Mutex::new(CycleCount::new(usize::zero(),CycleRange))),
             recv_cache: Arc::new(Mutex::new(HashMap::new())),
             subpacker: Arc::new(Mutex::new(UdpSubpackage::new())),
             timeout: Duration::from_millis(400),
@@ -274,13 +277,8 @@ impl DefUdpSender
     async fn get_mid(&self)->usize
     {
         let mut mid = self.mid.lock().await;
-        if *mid == usize::max_value()
-        {
-            *mid = usize::one();
-        }else{
-            *mid += usize::one();
-        }
-        *mid
+        *mid += 1;
+        **mid
     }
     async fn check_err(&self)->Result<(),USErr>
     {
@@ -426,8 +424,9 @@ impl DefUdpSender
                     //print!(" step6 id {} \n",id);
                     self.send_recv(id).await?;
                     //println!("recv msg {}",id);
+                    let curr_id = CycleCount::new(id,CycleRange);
                     let mut except = self.expect_id.lock().await;
-                    if id == *except {
+                    if curr_id == *except {
                         Self::next_expect_ex(&mut except);
                         let mut msg_split = self.msg_split.lock().await;
                         if msg_split.need_merge(tag){
@@ -438,7 +437,7 @@ impl DefUdpSender
                         }else{
                             return Ok(msg.to_vec());
                         }
-                    }else if id > *except
+                    }else if curr_id > *except
                     {
                         let mut recv_cache = self.recv_cache.lock().await;
                         recv_cache.insert(id, (msg.to_vec(), ext,tag,if sub_head.len() == 0 { None }else { Some(sub_head.to_vec()) } ));
@@ -491,10 +490,11 @@ impl DefUdpSender
                 SpecialExt::skip_message => {
                     println!("op send skip message id = {}",id);
                     self.send_recv(id).await?;
+                    let curr_id = CycleCount::new(id,CycleRange);
                     let mut expect_id = self.expect_id.lock().await;
-                    if *expect_id == id{
+                    if *expect_id == curr_id{
                         Self::next_expect_ex(&mut expect_id);
-                    }else if id > *expect_id{
+                    }else if curr_id > *expect_id{
                         let mut recv_cache = self.recv_cache.lock().await;
                         recv_cache.insert(id, (Vec::new(), ext,tag,None));
                     }
@@ -737,30 +737,20 @@ impl DefUdpSender
     async fn next_expect(&self)->usize
     {
         let mut expect_id = self.expect_id.lock().await;
-        if *expect_id == usize::max_value()
-        {
-            *expect_id = usize::one();
-        }else{
-            *expect_id += usize::one();
-        }
-        *expect_id
+        *expect_id += 1;
+        **expect_id
     }
 
-    fn next_expect_ex(expect_id:&mut MutexGuard<usize>)->usize
+    fn next_expect_ex(expect_id:&mut MutexGuard<CycleCount<usize>>)->usize
     {
-        if **expect_id == usize::max_value()
-        {
-            **expect_id = usize::one();
-        }else{
-            **expect_id += usize::one();
-        }
-        **expect_id
+        **expect_id+=1;
+        ***expect_id
     }
 
     async fn get_expect(&self)->usize
     {
         let mut expect_id = self.expect_id.lock().await;
-        *expect_id
+        **expect_id
     }
 
     async fn send_recv(&self,id:usize) -> Result<usize,USErr>

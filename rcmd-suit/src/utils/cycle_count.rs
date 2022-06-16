@@ -13,10 +13,12 @@ pub trait CycleNum
     fn in_min_range(&self,v:Self,r:Self) -> bool;
     fn in_max_range(&self,v:Self,r:Self) -> bool;
 }
- gen_cycle_num!{u32}
- gen_cycle_num!{u64}
- gen_cycle_num!{usize}
- gen_cycle_num!{u128}
+gen_cycle_num!{u8}
+gen_cycle_num!{u16}
+gen_cycle_num!{u32}
+gen_cycle_num!{u64}
+gen_cycle_num!{usize}
+gen_cycle_num!{u128}
 
 #[derive(Copy,Clone)]
 pub struct CycleCount<T>

@@ -6,6 +6,7 @@ use crate::ext_code::*;
 use std::time::SystemTime;
 use crate::utils::stream_parser::{Stream,StreamParse};
 use std::process::abort;
+use crate::utils::cycle_count::{CycleNum, CycleCount};
 
 pub trait MsgSplit{
     fn open(&self) ->bool { false }
@@ -204,7 +205,7 @@ pub struct DefUdpMsgSplit
 {
     msg_cache:HashMap<u32,(Vec<u8>,u32,u128)>,
     last_pop_logic_id:Option<u32>,
-    logic_id:u32,
+    logic_id:CycleCount<u32>,
     max_unit_size:usize,
     min_unit_size:usize,
     unit_size:usize,
@@ -221,11 +222,8 @@ impl DefUdpMsgSplit{
 
     pub fn get_id(&mut self)->u32
     {
-        if self.logic_id == u32::max_value(){
-            self.logic_id = 0
-        }
         self.logic_id += 1;
-        self.logic_id
+        *self.logic_id
     }
 
     fn remove_front(&mut self) -> bool
@@ -312,7 +310,7 @@ impl UdpMsgSplit for DefUdpMsgSplit {
     fn with_max_unit_size(max_unit_size: usize, min_unit_size: usize) -> Self {
         DefUdpMsgSplit{
             msg_cache:HashMap::new(),
-            logic_id:0,
+            logic_id:CycleCount::new(u32::MAX,1000u32),
             max_unit_size,
             min_unit_size,
             unit_size:(max_unit_size+min_unit_size)/2,
