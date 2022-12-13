@@ -9,7 +9,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 jni = { version="*", default-features = false}
-
+async-trait = "0.1.42"
+static_init = "1.0.3"
 
 [dependencies.rcmd-suit]
 path = "../rcmd-suit"
