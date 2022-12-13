@@ -2,6 +2,9 @@ AdDir="RemoteCamAd"
 jniDir="$AdDir/app/libs"
 RsDir="remote_cam"
 BinDir="debug"
+if [ $# -ge 1 ] && [ $1 == '-r' ]; then
+	BinDir="release"
+fi
 if [ ! -d "$jniDir" ]; then
         mkdir "$jniDir"
 fi
