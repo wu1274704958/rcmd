@@ -1,6 +1,6 @@
 package com.wws.remotecamad;
 
-public class HelloWorld {
+public class RemoteCamAgent {
     static {
         System.loadLibrary("remote_cam");
     }
