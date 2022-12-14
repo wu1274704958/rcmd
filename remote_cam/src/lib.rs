@@ -17,10 +17,7 @@ pub extern "system" fn Java_com_wws_remotecamad_RemoteCamAgent_registe_1low(
     if let Ok(mut c) = GLOB_CXT.lock()
     {
         c.reg(env,cxt,_class);
-        let log = env.new_string("Registe success!!!")
-            .expect("Couldn't create java string!");
-        let op = 1 as jint;
-        unsafe {c.call_agent_method("toast","(Ljava/lang/String;I)V",&[log.into(),op.into()])};
+        c.toast("Registe success!!!",1).unwrap();
         c.log(LogLevel::Info,"launch thread","@v@").unwrap();
     }
     let test = std::thread::spawn(test);
@@ -31,6 +28,7 @@ pub fn test()
     thread::sleep(Duration::from_secs(2));
     if let Ok(c) = GLOB_CXT.lock(){
         c.log(LogLevel::Error,"Log in thread","@v@");
+        c.toast("toast in thread",0).unwrap();
     }
 }
 

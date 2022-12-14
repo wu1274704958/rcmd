@@ -1,6 +1,6 @@
 ﻿use std::sync::{Arc, Mutex};
 use jni::{AttachGuard, JNIEnv, sys};
-use jni::objects::{JClass, JValue};
+use jni::objects::{JClass, JValue, GlobalRef, JObject};
 use jni::sys::{JavaVM, jclass};
 use static_init::{dynamic};
 
@@ -40,9 +40,8 @@ pub enum LogLevel{
 
 pub struct Context{
     jvm:Option<jni::JavaVM>,
-    env:Ptr,
-    cxt:Ptr,
-    agent:Ptr,
+    cxt:Option<GlobalRef>,
+    agent:Option<GlobalRef>,
     main_thread_id:std::thread::ThreadId
 }
 
@@ -51,9 +50,8 @@ impl Context {
     {
         Context{
             jvm:None,
-            env:Ptr(0),
-            cxt:Ptr(0),
-            agent:Ptr(0),
+            cxt:None,
+            agent:None,
             main_thread_id:std::thread::current().id()
         }
     }
@@ -61,25 +59,26 @@ impl Context {
     {
         let jvm = env.get_java_vm().unwrap();
         self.jvm = Some(jvm);   
-        self.env = env.get_native_interface().into();
-        self.cxt = cxt.into_raw().into();
-        self.agent = agent.into_raw().into();
+        if let Ok(c) = env.new_global_ref(cxt){
+            self.cxt = Some(c);
+        }
+        if let Ok(c) = env.new_global_ref(agent){
+            self.agent = Some(c);
+        }
         self.main_thread_id = std::thread::current().id();
     }
     pub fn unreg(&mut self)
     {
-        self.env = Ptr(0);
-        self.cxt = Ptr(0);
-        self.agent = Ptr(0);
+        self.jvm = None;
+        self.cxt = None;
+        self.agent = None;
         self.main_thread_id = std::thread::current().id();
     }
-    pub unsafe fn call_method(&self,o:jclass,name:&str,sign:&str,args:&[JValue]) -> jni::errors::Result<JValue>
+    pub unsafe fn call_method<'a>(&'a self,o:&'a GlobalRef,name:&str,sign:&str,args:&[JValue]) -> jni::errors::Result<JValue>
     {
-        if o.is_null() {return Err(jni::errors::Error::NullPtr("object is null"));}
         let jvm = self.get_jvm()?;
         let env = jvm.attach_current_thread()?;
-        let obj = JClass::from_raw(o);
-        env.call_method(obj,name,sign,args)
+        env.call_method(o.as_obj(),name,sign,args)
     }
     pub unsafe fn call_static_method(&self,cls:&str,name:&str,sign:&str,args:&[JValue]) -> jni::errors::Result<JValue>
     {
@@ -90,7 +89,27 @@ impl Context {
     }
     pub unsafe fn call_agent_method(&self,name:&str,sign:&str,args:&[JValue]) -> jni::errors::Result<JValue>
     {
-        self.call_method(self.agent.addr_mut(),name,sign,args)
+        if let Some(ref a) = self.agent{
+            self.call_method(a,name,sign,args)
+        }else { 
+            Err(jni::errors::Error::NullPtr("May not registe!!!"))
+        }
+    }
+    pub fn get_agent(&self) -> jni::errors::Result<JObject>
+    {
+        if let Some(ref a) = self.agent{
+            Ok(a.as_obj())
+        }else {
+            Err(jni::errors::Error::NullPtr("May not registe!!!"))
+        }
+    }
+    pub fn get_cxt(&self) -> jni::errors::Result<JObject>
+    {
+        if let Some(ref a) = self.cxt{
+            Ok(a.as_obj())
+        }else {
+            Err(jni::errors::Error::NullPtr("May not registe!!!"))
+        }
     }
     pub fn get_jvm(&self) -> jni::errors::Result<&jni::JavaVM>
     {
@@ -120,6 +139,15 @@ impl Context {
         let msg = env.new_string(str)?;
         let t = env.new_string(tag)?;
         unsafe { self.call_static_method("android/util/Log", name, "(Ljava/lang/String;Ljava/lang/String;)I", &[t.into(), msg.into()])?; }
+        Ok(())
+    }
+    pub fn toast(&self,str:&str,op:i32) -> jni::errors::Result<()>
+    {
+        let jvm = self.get_jvm()?;
+        let env = jvm.attach_current_thread()?;
+        let log = env.new_string(str)?;
+        let op = op as jni::sys::jint;
+        unsafe {self.call_agent_method("toast","(Ljava/lang/String;I)V",&[log.into(),op.into()])};
         Ok(())
     }
 }
