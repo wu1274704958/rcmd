@@ -147,7 +147,15 @@ impl Context {
         let env = jvm.attach_current_thread()?;
         let log = env.new_string(str)?;
         let op = op as jni::sys::jint;
-        unsafe {self.call_agent_method("toast","(Ljava/lang/String;I)V",&[log.into(),op.into()])};
+        unsafe {self.call_agent_method("toast","(Ljava/lang/String;I)V",&[log.into(),op.into()])?};
+        Ok(())
+    }
+    pub fn on_err(&self,err:u32) -> jni::errors::Result<()>
+    {
+        let jvm = self.get_jvm()?;
+        let env = jvm.attach_current_thread()?;
+        let e = err as jni::sys::jint;
+        unsafe {self.call_agent_method("get_error","(I)V",&[e.into()])?};
         Ok(())
     }
 }

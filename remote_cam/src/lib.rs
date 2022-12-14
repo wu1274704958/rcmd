@@ -1,5 +1,6 @@
 mod context;
 mod client;
+mod model;
 use jni::JNIEnv;
 use jni::objects::{GlobalRef, JClass, JObject, JString};
 use jni::sys::{jbyteArray, jint, jlong, jstring};
@@ -29,6 +30,10 @@ pub fn test()
     if let Ok(c) = GLOB_CXT.lock(){
         c.log(LogLevel::Error,"Log in thread","@v@");
         c.toast("toast in thread",0).unwrap();
+    }
+    thread::sleep(Duration::from_secs(2));
+    if let Ok(c) = GLOB_CXT.lock(){
+        c.on_err(0);
     }
 }
 

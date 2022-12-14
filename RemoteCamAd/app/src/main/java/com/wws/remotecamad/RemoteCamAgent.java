@@ -42,7 +42,8 @@ public class RemoteCamAgent {
         RunUIThread(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(context, str, op).show();
+                ((MainActivity)context).log(str);
+                //Toast.makeText(context, str, op).show();
             }
         });
     }
