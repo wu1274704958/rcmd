@@ -1,12 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/black"
+    android:orientation="vertical"
     tools:context=".MainActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_weight="14"
+        android:orientation="horizontal">
+        <EditText
+            android:id="@+id/et"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:textAlignment="textStart"
+            android:textColor="@color/white"
+            android:text="XXX"
+            />
+        <Button
+            android:id="@+id/btn"
+            android:textColor="@color/white"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:text="执行"
+            android:layout_weight="8" />
+    </LinearLayout>
     <ScrollView
+        android:layout_weight="1"
         android:id="@+id/scroll"
         android:layout_width="match_parent"
         android:layout_height="match_parent">
@@ -23,4 +48,4 @@
             app:layout_constraintRight_toRightOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
     </ScrollView>
-</androidx.constraintlayout.widget.ConstraintLayout>
+</LinearLayout>

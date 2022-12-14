@@ -7,6 +7,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -19,6 +21,8 @@ public class MainActivity extends AppCompatActivity {
     private MyHandle myHandle;
     private ScrollView m_Scroll;
     private TextView m_logTx;
+    private EditText m_edit;
+    private Button m_btn;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,6 +48,8 @@ public class MainActivity extends AppCompatActivity {
     private void init() {
         m_Scroll = (ScrollView)findViewById(R.id.scroll);
         m_logTx = (TextView)findViewById(R.id.log_tx);
+        m_edit = (EditText)findViewById(R.id.et);
+        m_btn = (Button) findViewById(R.id.btn);
     }
     public void log(String str)
     {
