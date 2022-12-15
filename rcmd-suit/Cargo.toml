@@ -2,7 +2,7 @@
 name = "rcmd-suit"
 version = "0.1.0"
 authors = ["wu1274704958 <1274704958@qq.com>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,25 +10,25 @@ edition = "2018"
 
 
 [dependencies]
-tokio = { version="0.3.5", features = ["full"]}
-async-std = "1.8.0"
-rsa = "0.3.0"
-rand = { version = "0.7.0", default-features = false }
+tokio = { version="1.23.0", features = ["full"]}
+async-std = "1.12.0"
+rsa = "0.7.2"
+rand = { version = "0.8.5", default-features = false }
 flate2 = { version = "1.0.19", features = ["zlib"], default-features = false }
 terminal = { version = "0.2" , features = ["crossterm-backend"] }
-serde = { version = "1.0.61",features=["serde_derive"]}
-serde_json = "1.0.61"
+serde = { version = "1.0.150",features=["serde_derive"]}
+serde_json = "1.0.89"
 regex = "1.4.2"
 args = "2.2.0"
 getopts = "0.2.21"
-subprocess = "0.2.6"
-encoding_rs = "0.8.26"
-futures = "*"
-num-traits = "0.2.14"
-async-trait = "0.1.42"
+subprocess = "0.2.9"
+encoding_rs = "0.8.31"
+futures = "0.3.25"
+num-traits = "0.2.15"
+async-trait = "0.1.59"
 ahash = "0.6.3"
-uuid = { version = "0.8", features = [ "v4"] }
-num_enum = "0.5.1"
+uuid = { version = "1.2.2", features = [ "v4"] }
+num_enum = "0.5.7"
 
 
 [target.'cfg(target_os = "windows")'.dependencies]

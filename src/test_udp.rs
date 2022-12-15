@@ -13,7 +13,6 @@ mod p2p_handler;
 use p2p_handler::p2p_handler::{P2PLinkData,P2PHandlerSer};
 use p2p_handler::p2p_plugs;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::prelude::*;
 use std::sync::{Arc};
 use tokio::sync::Mutex;
 use std::cell::RefCell;

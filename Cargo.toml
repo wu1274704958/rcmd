@@ -10,26 +10,26 @@ edition = "2018"
 default = ["mysql"]
 
 [dependencies]
-tokio = { version="0.3.5", features = ["full"]}
-async-trait = "0.1.42"
+tokio = { version="1.23.0", features = ["full"]}
+async-std = "1.12.0"
+rsa = "0.7.2"
+async-trait = "0.1.59"
 getopts = "0.2.21"
 regex = "1.4.2"
 terminal = { version = "0.2" , features = ["crossterm-backend"] }
-serde = { version = "1.0.61",features=["serde_derive"]}
-serde_json = "1.0.61"
+serde = { version = "1.0.150",features=["serde_derive"]}
+serde_json = "1.0.89"
 lazy_static = "1.4.0"
 ahash = "0.6.3"
-futures = "*"
+futures = "0.3.25"
 flate2 = "*"
 get_if_addrs = "0.5.3"
 args = "2.2.0"
 encoding_rs = "0.8.26"
 subprocess = "0.2.6"
-rsa = "0.3.0"
-rand = { version = "0.7.0", default-features = false }
-num_enum = "0.5"
-async-std = "1.8.0"
-num-traits = "0.2.14"
+rand = { version = "0.8.5", default-features = false }
+num_enum = "0.5.7"
+num-traits = "0.2.15"
 
 [dependencies.rcmd-suit]
 path = "rcmd-suit"

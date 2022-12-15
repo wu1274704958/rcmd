@@ -8,7 +8,6 @@ use serde::{
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use tokio::io::Error;
-use tokio::stream::StreamExt;
 use std::fs::OpenOptions;
 use subprocess::{Exec, Redirection};
 use encoding_rs::GBK;

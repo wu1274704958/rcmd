@@ -5,7 +5,7 @@
 // ext 20 .. 40  asymmetric cryptographic err
 // ext 40 41      upload file
 
-use rsa::{PublicKey, RSAPrivateKey, PaddingScheme, RSAPublicKey, PublicKeyParts, BigUint};
+use rsa::{PublicKey, RsaPrivateKey, PaddingScheme, RsaPublicKey, PublicKeyParts, BigUint};
 use crate::tools::*;
 use std::collections::HashSet;
 use crate::ext_code::*;
@@ -29,10 +29,10 @@ pub trait AsyCry{
         Err(20) // 20 not impl
     }
 
-    async fn real_build_pub_key(bit_size:usize) -> Result<(Vec<u8>,Option<RSAPrivateKey>),u32> { Err(20) }
+    async fn real_build_pub_key(bit_size:usize) -> Result<(Vec<u8>,Option<RsaPrivateKey>),u32> { Err(20) }
 
 
-    fn pub_key_from(&self,d:&[u8],ext:u32) ->Result<RSAPublicKey,u32>
+    fn pub_key_from(&self,d:&[u8],ext:u32) ->Result<RsaPublicKey,u32>
     {
         Err(20)
     }
@@ -56,8 +56,8 @@ pub trait AsyCry{
 }
 
 pub struct DefAsyCry{
-    pri_key: Option<RSAPrivateKey>,
-    pub_key: Option<RSAPublicKey>,
+    pri_key: Option<RsaPrivateKey>,
+    pub_key: Option<RsaPublicKey>,
     ignore_map: HashSet<u32>,
     oth_ready: bool,
     state:u32,
@@ -129,16 +129,16 @@ impl AsyCry for DefAsyCry{
         }
     }
 
-    async fn real_build_pub_key(bit_size:usize) -> Result<(Vec<u8>,Option<RSAPrivateKey>),u32>
+    async fn real_build_pub_key(bit_size:usize) -> Result<(Vec<u8>,Option<RsaPrivateKey>),u32>
     {
-        let mut rng = rand::rngs::OsRng;
-        let priv_key = RSAPrivateKey::new(&mut rng, bit_size);
+        let mut rng = rand::thread_rng();
+        let priv_key = RsaPrivateKey::new(&mut rng, bit_size);
         if priv_key.is_err()
         {
             return Err(21); //21 gen private key failed
         }
         let pri_key = priv_key.ok();
-        let pk = RSAPublicKey::from(pri_key.as_ref().unwrap());
+        let pk = RsaPublicKey::from(pri_key.as_ref().unwrap());
         let mut n_bs = pk.n().to_bytes_be();
         let mut l_bs = pk.e().to_bytes_be();
 
@@ -157,7 +157,7 @@ impl AsyCry for DefAsyCry{
         Ok((res,pri_key))
     }
 
-    fn pub_key_from(&self, d: &[u8], ext: u32) -> Result<RSAPublicKey, u32> {
+    fn pub_key_from(&self, d: &[u8], ext: u32) -> Result<RsaPublicKey, u32> {
         let n_l = u32_form_bytes(&d[0..4]);
         if n_l == 0 {
             return Err(22); //22 bad public key msg
@@ -180,7 +180,7 @@ impl AsyCry for DefAsyCry{
         let n = BigUint::from_bytes_be(&d[4usize..(n_l as usize + 4)]);
         let e = BigUint::from_bytes_be(&d[(eb as usize +4)..]);
 
-        let pub_key = RSAPublicKey::new(n,e);
+        let pub_key = RsaPublicKey::new(n,e);
         if pub_key.is_err()
         {
             return Err(23); //22 bad public key
@@ -281,7 +281,7 @@ impl AsyCry for DefAsyCry{
             EncryptRes::NotChange
         }else{
             if let Some(ref k) = self.pub_key{
-                let mut rng = rand::rngs::OsRng;
+                let mut rng = rand::thread_rng();
                 let enc_data = k.encrypt(&mut rng, PaddingScheme::new_pkcs1v15_encrypt(),
                                          d);
                 match enc_data {

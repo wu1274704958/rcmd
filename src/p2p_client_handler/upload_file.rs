@@ -8,7 +8,7 @@ use rcmd_suit::tools::{TOKEN_BEGIN, TOKEN_END};
 use tokio::fs::{File, OpenOptions};
 use std::io::Write;
 use async_trait::async_trait;
-use tokio::prelude::io::AsyncWriteExt;
+use tokio::io::AsyncWriteExt;
 use std::sync::Arc;
 use rcmd_suit::client_handler;
 use rcmd_suit::utils::stream_parser::Stream;

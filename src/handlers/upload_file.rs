@@ -10,7 +10,7 @@ use tokio::fs::{File, OpenOptions};
 use std::io::Write;
 use crate::model::user;
 use async_trait::async_trait;
-use tokio::prelude::io::AsyncWriteExt;
+use tokio::io::AsyncWriteExt;
 use std::sync::Arc;
 
 pub struct UploadHandler
