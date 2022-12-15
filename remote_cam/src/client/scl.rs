@@ -1,19 +1,24 @@
-use std::{sync::{Arc, Mutex}, time::Duration, io};
+use std::net::{SocketAddr, IpAddr};
+use std::{time::Duration, io};
 use std::time::SystemTime;
 use std::collections::VecDeque;
-use std::fs::{OpenOptions};
-use std::io::*;
+use std::sync::Arc;
 use super::extc::*;
 use super::super::model;
 use super::handlers;
 use super::comm;
 use rcmd_suit::client_handler::{SubHandle, DefHandler, Handle};
-use rcmd_suit::clients::tcp_client::TcpClient;
+use rcmd_suit::client_plug::client_plug::ClientPluCollect;
 use rcmd_suit::agreement::DefParser;
-use rcmd_suit::tools;
+use rcmd_suit::tools::{self, platform_handle};
+use tokio::net::UdpSocket;
 use tokio::{ time::{ sleep}};
+use tokio::sync::{Mutex};
 use async_trait::async_trait;
+use rcmd_suit::clients::udp_client::UdpClient;
+use rcmd_suit::utils::udp_sender::DefUdpSender;
 use crate::GLOB_CXT;
+use crate::client_plugs::p2p_plugs::P2PPlug;
 
 struct AutoLogin{
     acc:String,
@@ -36,16 +41,16 @@ impl AutoLogin{
 impl SubHandle for AutoLogin{
     async fn handle(&self, _data: &[u8], _len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         if ext == EXT_ERR_ALREADY_LOGIN {
-            let mut last = self.last.lock().unwrap();
+            let mut last = self.last.lock().await;
             if let Ok(dur) = SystemTime::now().duration_since(*last)
             {
                 if dur < self.dur
                 {
-                    std::thread::sleep(self.dur - dur);
+                    sleep(self.dur - dur).await;
                 }
                 let user = model::user::MinUser { acc: self.acc.clone(), pwd: self.pwd.clone() };
                 let s = serde_json::to_string(&user).unwrap();
-                send(&self.msg_queue, s.into_bytes(), EXT_LOGIN);
+                send(&self.msg_queue, s.into_bytes(), EXT_LOGIN).await;
                 *last = SystemTime::now();
             }
         }
@@ -70,7 +75,7 @@ async fn run(cmd:&String) -> io::Result<()>
     if args.acc.is_some(){
         let user = model::user::MinUser{ acc: args.acc.as_ref().unwrap().clone(),pwd:args.pwd.as_ref().unwrap().clone()};
         let s = serde_json::to_string(&user).unwrap();
-        send(&msg_queue,s.into_bytes(),EXT_LOGIN);
+        send(&msg_queue,s.into_bytes(),EXT_LOGIN).await;
     }
     
     let mut handler = DefHandler::new();
@@ -83,38 +88,44 @@ async fn run(cmd:&String) -> io::Result<()>
             msg_queue.clone(),Duration::from_secs(2))));
         }
     }
-    
-    let handler = Arc::new(handler);
-    loop{
-        println!("runing.....");
-        let client = TcpClient::with_msg_queue(handler.clone(),
-        DefParser::new(),
-            msg_queue.clone()
-        );
+    let is_runing = Arc::new(Mutex::new(true));
+    let plugs = ClientPluCollect::<P2PPlug>::new();
+
+    let client_plug_ptr = Arc::new(plugs);
+    {
+        let msg_queue = msg_queue.clone();
+        let client = Arc::new( UdpClient::<_,_,DefUdpSender>::with_msg_queue_runing(
+            (args.ip, args.bind_port),
+            Arc::new(handler),
+            DefParser::new(),
+            msg_queue.clone(),
+            is_runing
+        ));
+
         let msg_split_ignore:Option<&Vec<u32>> = Some(&comm::IGNORE_EXT);
-        client.run(args.ip, args.port,msg_split_ignore,msg_split_ignore).await;
-        println!("next times...");
-        if let Ok(mut mq) = msg_queue.lock(){
-            mq.clear();
-        }
-        if args.acc.is_some(){
-            let user = model::user::MinUser{ acc: args.acc.as_ref().unwrap().clone(),pwd:args.pwd.as_ref().unwrap().clone()};
-            let s = serde_json::to_string(&user).unwrap();
-            send(&msg_queue,s.into_bytes(),EXT_LOGIN);
-        }
-        sleep(Duration::from_secs(3)).await;
+        let sock = Arc::new( UdpSocket::bind(client.bind_addr).await? );
+        platform_handle(sock.as_ref());
+        let addr = SocketAddr::new(IpAddr::V4(args.ip), args.port);
+        let sender = Arc::new(DefUdpSender::New(sock.clone(),addr));
+        let run = client.run::<P2PPlug,_>(
+            sock,addr,
+            msg_split_ignore,msg_split_ignore,
+            client_plug_ptr,sender,async{});
+
+        run.await;
     }
+    Ok(())
     
 }
 
-fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
-    let mut a = queue.lock().unwrap();
+async fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>,ext:u32) {
+    let mut a = queue.lock().await;
     {
         a.push_back((data,ext));
     }
 }
 fn log(str:&str) {
     if let Ok(c) = GLOB_CXT.lock(){
-        c.toast(str,0);
+        c.toast(str,0).unwrap();
     }
 }

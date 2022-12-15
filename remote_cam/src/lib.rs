@@ -1,6 +1,7 @@
 mod context;
 mod client;
 mod model;
+mod client_plugs;
 use jni::JNIEnv;
 use jni::objects::{GlobalRef, JClass, JObject, JString};
 use jni::sys::{jbyteArray, jint, jlong, jstring};
