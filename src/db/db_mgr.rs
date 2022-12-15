@@ -28,13 +28,13 @@ impl DBMgr{
             }
         });
 
-        let url = format!("mysql://root:{}@localhost:{}/sql_test",pwd,prot);
-        let pool = match Pool::new(url){
+        let url = format!("mysql://root:{}@localhost:{}/sql_test","",prot);
+        let pool = match Pool::new(url.clone()){
             Ok(p) => {
                 p
             }
             Err(e) => {
-                dbg!(e);
+                println!("url = {} err = {:?}",url,e);
                 return None;
             }
         };

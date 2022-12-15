@@ -23,3 +23,7 @@ get_if_addrs = "0.5.3"
 [dependencies.rcmd-suit]
 path = "../rcmd-suit"
 default-features = false
+
+[[example]]
+name = "test"
+path="src/test.rs"

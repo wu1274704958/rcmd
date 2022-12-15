@@ -3,7 +3,7 @@ use super::comm;
 use super::extc::*;
 use super::handlers;
 use crate::client_plugs::p2p_plugs::P2PPlug;
-use crate::GLOB_CXT;
+use crate::context::GLOB_CXT;
 use async_trait::async_trait;
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::client_handler::{DefHandler, Handle, SubHandle};
