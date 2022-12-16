@@ -1,4 +1,5 @@
 ﻿use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
 use jni::{AttachGuard, JNIEnv, sys};
 use jni::objects::{JClass, JValue, GlobalRef, JObject};
 use jni::sys::{JavaVM, jclass};
@@ -42,7 +43,7 @@ pub struct Context{
     jvm:Option<jni::JavaVM>,
     cxt:Option<GlobalRef>,
     agent:Option<GlobalRef>,
-    main_thread_id:std::thread::ThreadId
+    main_thread_id:Option<std::thread::ThreadId>
 }
 
 impl Context {
@@ -52,7 +53,7 @@ impl Context {
             jvm:None,
             cxt:None,
             agent:None,
-            main_thread_id:std::thread::current().id()
+            main_thread_id:None
         }
     }
     pub fn reg(&mut self,env:JNIEnv,cxt:JClass,agent:JClass)
@@ -65,14 +66,14 @@ impl Context {
         if let Ok(c) = env.new_global_ref(agent){
             self.agent = Some(c);
         }
-        self.main_thread_id = std::thread::current().id();
+        self.main_thread_id = Some(std::thread::current().id());
     }
     pub fn unreg(&mut self)
     {
         self.jvm = None;
         self.cxt = None;
         self.agent = None;
-        self.main_thread_id = std::thread::current().id();
+        self.main_thread_id = Some(std::thread::current().id());
     }
     pub unsafe fn call_method<'a>(&'a self,o:&'a GlobalRef,name:&str,sign:&str,args:&[JValue]) -> jni::errors::Result<JValue>
     {
@@ -122,7 +123,11 @@ impl Context {
     }
     pub fn is_reg_thread(&self) -> bool
     {
-        std::thread::current().id() == self.main_thread_id
+        if let Some(id) = self.main_thread_id
+        {
+            return std::thread::current().id() == id;
+        }
+        return false;
     }
     pub fn log(&self,lvl:LogLevel,str:&str,tag:&str) -> jni::errors::Result<()>
     {
