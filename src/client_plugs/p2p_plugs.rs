@@ -16,7 +16,6 @@ use rcmd_suit::plug::PlugMgr;
 
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
 use ahash::{RandomState, CallHasher};
-use std::panic::resume_unwind;
 use rcmd_suit::clients::udp_client::{UdpClient, IUdpClient, UdpClientErr};
 use std::hash::BuildHasher;
 use crate::client_plugs::p2p_dead_plug::P2PVerifyClientHandler;

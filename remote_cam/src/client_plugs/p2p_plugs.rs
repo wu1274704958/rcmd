@@ -1,18 +1,17 @@
 use async_std::channel::{Receiver, Sender, unbounded};
-use rcmd_suit::{ab_client::AbClient, agreement::DefParser, client_plug::client_plug::ClientPlug, config_build::ConfigBuilder, handler::{DefHandler, TestHandler}, plug::DefPlugMgr, plugs::heart_beat::HeartBeat, servers::udp_server::{UdpServer}, utils::stream_parser::{Stream, StreamParse}, client_handler};
-use std::{cell::Cell, collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}, usize};
-use tokio::{net::UdpSocket, runtime::{self, Runtime}, sync::MutexGuard};
-use rcmd_suit::utils::udp_sender::{USErr, DefUdpSender, UdpSender};
+use rcmd_suit::{ab_client::AbClient, agreement::DefParser, client_plug::client_plug::ClientPlug, config_build::ConfigBuilder, handler::{DefHandler, TestHandler}, plug::{DefPlugMgr, PlugMgr}, plugs::heart_beat::HeartBeat, servers::udp_server::{UdpServer}, utils::stream_parser::{Stream, StreamParse}, client_handler};
+use std::{ collections::{HashMap, VecDeque}, net::{Ipv4Addr}, sync::{Arc,Weak}, usize};
+use tokio::{net::UdpSocket, runtime::{self, Runtime} };
+use rcmd_suit::utils::udp_sender::{USErr, DefUdpSender };
 use async_trait::async_trait;
 use std::net::{SocketAddr, IpAddr};
 use tokio::sync::Mutex;
 use num_enum::TryFromPrimitive;
-use crate::client::{comm, handlers};
+use crate::client::{comm };
 use crate::client::extc::*;
 use std::mem::size_of;
 use std::convert::TryFrom;
-use rcmd_suit::handler::Handle;
-use rcmd_suit::plug::PlugMgr;
+use local_ip_address::list_afinet_netifas;
 
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
 use ahash::{RandomState, CallHasher};
@@ -332,12 +331,14 @@ impl P2PPlug
     pub fn get_local_ip() -> Vec<Ipv4Addr>
     {
         let mut res = Vec::new();
-        for iface in get_if_addrs::get_if_addrs().unwrap() {
-            if !iface.addr.is_loopback() {
-                if let std::net::IpAddr::V4(ip) = iface.addr.ip(){
-                    res.push(ip);
+        let network_interfaces = list_afinet_netifas().unwrap();
+        for (name, ip) in network_interfaces.iter() {
+            if !ip.is_loopback() {
+                if let std::net::IpAddr::V4(ip) = ip{
+                    res.push(ip.clone());
                 }
             }
+            println!("ip ---> {}:\t{:?}", name, ip);
         }
         res
     }
