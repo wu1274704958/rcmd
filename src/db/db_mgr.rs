@@ -11,7 +11,7 @@ pub struct DBMgr{
 impl DBMgr{
     pub fn new()->Option<DBMgr>
     {
-        let mut pwd = "as147258369".to_string();
+        let mut pwd = "".to_string();
         let mut prot = 3306;
         args().enumerate().for_each(|it|{
             match it.0{
@@ -28,7 +28,7 @@ impl DBMgr{
             }
         });
 
-        let url = format!("mysql://root:{}@localhost:{}/sql_test","",prot);
+        let url = format!("mysql://root:{}@localhost:{}/sql_test",pwd,prot);
         let pool = match Pool::new(url.clone()){
             Ok(p) => {
                 p

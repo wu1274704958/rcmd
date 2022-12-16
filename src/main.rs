@@ -10,7 +10,6 @@ extern crate rcmd_suit;
 extern crate lazy_static;
 
 use tokio::net::{TcpListener, TcpStream};
-use tokio::prelude::*;
 use std::thread::{ThreadId, Thread};
 use tokio::runtime;
 use std::sync::{Arc};

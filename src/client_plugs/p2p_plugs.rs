@@ -28,6 +28,7 @@ use crate::client_plugs::p2p_plugs::LocalEntity::Client;
 use crate::client_plugs::p2p_event::P2PEvent;
 use crate::p2p_client_handler::upload_file::UploadHandler;
 use rcmd_suit::ab_client::{ABClient, State};
+use local_ip_address::list_afinet_netifas;
 
 #[repr(u16)]
 #[derive(TryFromPrimitive)]
@@ -333,12 +334,14 @@ impl P2PPlug
     pub fn get_local_ip() -> Vec<Ipv4Addr>
     {
         let mut res = Vec::new();
-        for iface in get_if_addrs::get_if_addrs().unwrap() {
-            if !iface.addr.is_loopback() {
-                if let std::net::IpAddr::V4(ip) = iface.addr.ip(){
-                    res.push(ip);
+        let network_interfaces = list_afinet_netifas().unwrap();
+        for (name, ip) in network_interfaces.iter() {
+            if !ip.is_loopback() {
+                if let std::net::IpAddr::V4(ip) = ip{
+                    res.push(ip.clone());
                 }
             }
+            println!("ip ---> {}:\t{:?}", name, ip);
         }
         res
     }

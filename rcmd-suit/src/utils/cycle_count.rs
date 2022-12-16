@@ -2,7 +2,6 @@ use num_traits::{Num};
 use std::cmp::Ordering;
 use std::ops::{AddAssign, Deref};
 use  misc_gen::gen_cycle_num;
-use std::fmt::Debug;
 use std::num::Wrapping;
 
 pub trait CycleNum
@@ -100,7 +99,7 @@ mod Test{
         for _ in 0..99999999999u64 {
             a += 2;
             b += 2;
-            assert!(a < b,format!("test failed {} {}",a.val,b.val));
+            assert!(a < b,"{}", format!("test failed {} {}",a.val,b.val));
         }
     }
 }

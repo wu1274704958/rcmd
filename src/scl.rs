@@ -16,7 +16,7 @@ use rcmd_suit::client_handler::{SubHandle, DefHandler, Handle};
 use rcmd_suit::clients::tcp_client::TcpClient;
 use rcmd_suit::agreement::DefParser;
 use rcmd_suit::tools;
-
+use async_trait::{async_trait};
 
 struct AutoLogin{
     acc:String,
@@ -35,9 +35,9 @@ impl AutoLogin{
         AutoLogin{acc,pwd,msg_queue,dur,last:Arc::new(Mutex::new(SystemTime::now()))}
     }
 }
-
+#[async_trait]
 impl SubHandle for AutoLogin{
-    fn handle(&self, _data: &[u8], _len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
+    async fn handle(&self, _data: &[u8], _len: u32, ext: u32) -> Option<(Vec<u8>, u32)> {
         if ext == EXT_ERR_ALREADY_LOGIN {
             let mut last = self.last.lock().unwrap();
             if let Ok(dur) = SystemTime::now().duration_since(*last)
