@@ -142,8 +142,13 @@ async fn send(queue: &Arc<Mutex<VecDeque<(Vec<u8>, u32)>>>, data: Vec<u8>, ext: 
         a.push_back((data, ext));
     }
 }
+#[cfg(target_os="android")]
 fn log(str: &str) {
     if let Ok(c) = GLOB_CXT.lock() {
         c.toast(str, 0).unwrap();
     }
+}
+#[cfg(target_os="windows")]
+fn log(str: &str) {
+    println!("{}",str);
 }
