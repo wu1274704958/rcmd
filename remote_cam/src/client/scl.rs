@@ -62,7 +62,7 @@ impl SubHandle for AutoLogin {
 }
 
 #[allow(unused_must_use)]
-async fn run(cmd: &String, is_runing: Arc<Mutex<bool>>) -> io::Result<()> {
+pub async fn run(cmd: &String, is_runing: Arc<Mutex<bool>>) -> io::Result<()> {
     let args: Vec<_> = cmd.split(" ").collect();
     let args = match tools::parse_c_args_ex(args) {
         Ok(a) => a,
