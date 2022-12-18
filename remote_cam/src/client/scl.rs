@@ -127,7 +127,10 @@ pub async fn run(cmd: String, cxt:Arc<Mutex<NetContext>>) -> io::Result<()> {
             handler.add_handler(auto_login_handler.clone());
         }
     }
-    let plugs = ClientPluCollect::<P2PPlug>::new();
+    let mut plugs = ClientPluCollect::<P2PPlug>::new();
+    {
+        plugs.add_plug(Arc::new(P2PPlug::new(msg_queue.clone(), None)));
+    }
     let handler_ptr = Arc::new(handler);
     let client_plug_ptr = Arc::new(plugs);
 
