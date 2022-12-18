@@ -20,7 +20,7 @@
             android:layout_weight="1"
             android:textAlignment="textStart"
             android:textColor="@color/white"
-            android:text="XXX"
+            android:text="-i 127.0.0.1  -b 8081 -p 8080 -a wws -s 31726"
             />
         <Button
             android:id="@+id/btn"

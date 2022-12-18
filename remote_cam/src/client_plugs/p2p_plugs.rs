@@ -11,6 +11,7 @@ use crate::client::{comm };
 use crate::client::extc::*;
 use std::mem::size_of;
 use std::convert::TryFrom;
+#[cfg(not(target_os="android"))]
 use local_ip_address::list_afinet_netifas;
 
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
@@ -327,7 +328,7 @@ impl P2PPlug
         }
         Err(P2PErr::NoLink)
     }
-
+    #[cfg(not(target_os="android"))]
     pub fn get_local_ip() -> Vec<Ipv4Addr>
     {
         let mut res = Vec::new();
@@ -340,6 +341,12 @@ impl P2PPlug
             }
             println!("ip ---> {}:\t{:?}", name, ip);
         }
+        res
+    }
+    #[cfg(target_os="android")]
+    pub fn get_local_ip() -> Vec<Ipv4Addr>
+    {
+        let mut res = Vec::new();
         res
     }
 

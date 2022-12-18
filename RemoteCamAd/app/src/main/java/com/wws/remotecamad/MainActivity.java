@@ -3,6 +3,7 @@ package com.wws.remotecamad;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -17,6 +18,7 @@ import java.lang.ref.WeakReference;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String CMD_SAVE_TAG = "CMD_S_T";
     private RemoteCamAgent agent;
     private MyHandle myHandle;
     private ScrollView m_Scroll;
@@ -43,6 +45,30 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         agent.registe();
+        m_edit.setText(GetSavedCmd(m_edit.getText().toString()));
+        m_btn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                agent.toast("local ip = " + agent.getIPAddress(),0);
+                String cmd = m_edit.getText().toString();
+                agent.launch(cmd);
+                SaveCmd(cmd);
+            }
+        });
+    }
+    
+    private String GetSavedCmd(String def)
+    {
+        SharedPreferences a = getSharedPreferences(CMD_SAVE_TAG,MODE_PRIVATE);
+        return a.getString("cmd",def);
+    }
+
+    private void SaveCmd(String cmd)
+    {
+        SharedPreferences a = getSharedPreferences(CMD_SAVE_TAG,MODE_PRIVATE);
+        SharedPreferences.Editor ed = a.edit();
+        ed.putString("cmd",cmd);
+        ed.apply();
     }
 
     private void init() {
