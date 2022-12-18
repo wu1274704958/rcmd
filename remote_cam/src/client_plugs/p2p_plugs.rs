@@ -13,6 +13,8 @@ use std::mem::size_of;
 use std::convert::TryFrom;
 #[cfg(not(target_os="android"))]
 use local_ip_address::list_afinet_netifas;
+#[cfg(target_os="android")]
+use crate::context::get_local_ip;
 
 use super::p2p_dead_plug::{P2POnDeadPlugClientSer, P2PVerifyHandler};
 use ahash::{RandomState, CallHasher};
@@ -347,6 +349,9 @@ impl P2PPlug
     pub fn get_local_ip() -> Vec<Ipv4Addr>
     {
         let mut res = Vec::new();
+        if let Ok(ip) = get_local_ip(){
+            res.push(ip);
+        }
         res
     }
 

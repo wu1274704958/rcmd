@@ -4,6 +4,8 @@ use jni::{AttachGuard, JNIEnv, sys};
 use jni::objects::{JClass, JValue, GlobalRef, JObject};
 use jni::sys::{JavaVM, jclass};
 use static_init::{dynamic};
+#[cfg(target_os="android")]
+use std::str::FromStr;
 
 #[dynamic]
 pub static GLOB_CXT: Arc<Mutex<Context>> = Arc::new(Mutex::new(Context::new()));
@@ -163,4 +165,27 @@ impl Context {
         unsafe {self.call_agent_method("get_error","(I)V",&[e.into()])?};
         Ok(())
     }
+}
+
+#[cfg(target_os="android")]
+pub fn get_local_ip() -> jni::errors::Result<std::net::Ipv4Addr>
+{
+    if let Ok(c) = GLOB_CXT.lock()
+    {
+        let jvm = c.get_jvm()?;
+        let env = jvm.attach_current_thread()?;
+        return if let Ok(res) = unsafe {c.call_agent_method("getIPAddress","()Ljava/lang/String;",&[])}
+        {
+            return if let jni::objects::JValue::Object(obj) = res {
+                let jstr = obj.into();
+                let ip:String = env.get_string(jstr)?.into();
+                Ok(std::net::Ipv4Addr::from_str(ip.as_str()).unwrap())
+            }else{
+                Err(jni::errors::Error::JniCall(jni::errors::JniError::Unknown))
+            }
+        }else{
+            Err(jni::errors::Error::JniCall(jni::errors::JniError::Unknown))
+        }
+    }
+    return Err(jni::errors::Error::NullPtr("no jvm"));
 }

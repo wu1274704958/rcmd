@@ -8,11 +8,13 @@ use tokio::runtime::Runtime;
 use std::sync::Arc;
 use std::{ thread, time::Duration};
 use context::GLOB_CXT;
-use crate::context::LogLevel;
 use client::scl::NetContext;
 use client::scl;
+#[cfg(target_os="android")]
+use context::get_local_ip;
 
 // This keeps rust from "mangling" the name and making it unique for this crate.
+
 #[no_mangle]
 pub extern "system" fn Java_com_wws_remotecamad_RemoteCamAgent_registe_1low(
     env: JNIEnv,
@@ -26,9 +28,11 @@ pub extern "system" fn Java_com_wws_remotecamad_RemoteCamAgent_registe_1low(
     }
 }
 
+#[cfg(target_os="android")]
 pub fn launch(args:String)
 {
     toast( format!("launch {}",args),0);
+    toast(format!("scl local ip = {:?}",get_local_ip()), 0);
     let runtime = Runtime::new().unwrap();
     let cxt = Arc::new(tokio::sync::Mutex::new(NetContext::new()));
     let res = runtime.spawn(launch_real(args,cxt));
@@ -55,14 +59,14 @@ pub extern "system" fn Java_com_wws_remotecamad_RemoteCamAgent_unregiste_1low(
         c.unreg();
     }
 }
-
+#[cfg(target_os="android")]
 #[no_mangle]
 pub extern "system" fn Java_com_wws_remotecamad_RemoteCamAgent_launch(
     _env: JNIEnv,
     _class: JClass,
     args: JString
 ){
-    if let Ok(mut c) = GLOB_CXT.lock()
+    if let Ok(c) = GLOB_CXT.lock()
     {
         let jvm = c.get_jvm().unwrap();
         let env = jvm.attach_current_thread().unwrap();
@@ -73,8 +77,9 @@ pub extern "system" fn Java_com_wws_remotecamad_RemoteCamAgent_launch(
 
 fn toast(s:String,p:i32)
 {
-    if let Ok(mut c) = GLOB_CXT.lock()
+    if let Ok(c) = GLOB_CXT.lock()
     {
         c.toast(s.as_str(), p).unwrap();
     }
 }
+
