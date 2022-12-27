@@ -1,5 +1,5 @@
-AdDir="RemoteCamAd"
-jniDir="$AdDir/app/libs"
+AdDir="yasea"
+jniDir="$AdDir/library/src/main/jniLibs"
 RsDir="remote_cam"
 BinDir="debug"
 if [ $# -ge 1 ] && [ $1 == '-r' ]; then

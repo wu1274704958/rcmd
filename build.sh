@@ -1,4 +1,4 @@
-BinDir = ""
+BinDir=""
 if [ $# -ge 1 ] && [ $1 == '-r' ]; then
 	BinDir="--release"
 fi
