@@ -1,6 +1,6 @@
 use std::{ mem::size_of};
 
-use crate::client::extc;
+use crate::{client::extc, context::Context};
 use rcmd_suit::client_handler::SubHandle;
 use async_trait::async_trait;
 use crate::context::GLOB_CXT;
@@ -67,7 +67,7 @@ impl AgentExecuor {
                     Some((self.new_data_with(lid, d.into_bytes()),extc::EXT_AGENT_RET_DATA_CS))
                 }
                 Err(e) =>{
-                    toast(format!("call get_agent_data err = {:?}",e),-1);
+                    toast(&c,format!("call get_agent_data err = {:?}",e),-1);
                     Some((self.new_data(lid),extc::EXT_ERR_CALL_AGENT_METHOD_CS))
                 }
             }
@@ -82,10 +82,11 @@ impl AgentExecuor {
             let cmd = String::from_utf8_lossy(cmd).to_string();
             match c.exec_cmd(&cmd){
                 Ok(_) => {
+                    drop(c);
                     self.send_agent_data(lid)
                 }
                 Err(e) =>{
-                    toast(format!("call exec_cmd err = {:?}",e),-1);
+                    toast(&c,format!("call exec_cmd err = {:?}",e),-1);
                     Some((self.new_data(lid),extc::EXT_ERR_CALL_AGENT_METHOD_CS))
                 }
             }
@@ -103,11 +104,12 @@ impl AgentExecuor {
             loop {
                 if i >= cmds.len() {break;}
                 if let Err(e) = c.set_agent_data(cmds[i], cmds[i+1]) {
-                    toast(format!("call set_agent_data err = {:?}",e),-1);
+                    toast(&c,format!("call set_agent_data err = {:?}",e),-1);
                     return Some((self.new_data(lid),extc::EXT_ERR_CALL_AGENT_METHOD_CS));
                 } 
                 i += 2;
             }
+            drop(c);
             self.send_agent_data(lid)
         }else {
             Some((self.new_data(lid),extc::EXT_ERR_LOSE_AGENT_CONTEXT_CS))
@@ -115,10 +117,7 @@ impl AgentExecuor {
     }
 }
 
-fn toast(s:String,p:i32)
+fn toast(c:&std::sync::MutexGuard<Context>,s:String,p:i32)
 {
-    if let Ok(c) = GLOB_CXT.lock()
-    {
-        c.toast(s.as_str(), p).unwrap();
-    }
+    c.toast(s.as_str(), p);
 }
