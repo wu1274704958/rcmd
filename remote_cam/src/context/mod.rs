@@ -98,6 +98,14 @@ impl Context {
             Err(jni::errors::Error::NullPtr("May not registe!!!"))
         }
     }
+    pub unsafe fn call_cxt_method(&self,name:&str,sign:&str,args:&[JValue]) -> jni::errors::Result<JValue>
+    {
+        if let Some(ref a) = self.cxt{
+            self.call_method(a,name,sign,args)
+        }else { 
+            Err(jni::errors::Error::NullPtr("May not registe!!!"))
+        }
+    }
     pub fn get_agent(&self) -> jni::errors::Result<JObject>
     {
         if let Some(ref a) = self.agent{
@@ -163,6 +171,36 @@ impl Context {
         let env = jvm.attach_current_thread()?;
         let e = err as jni::sys::jint;
         unsafe {self.call_agent_method("get_error","(I)V",&[e.into()])?};
+        Ok(())
+    }
+    pub fn get_agent_data(&self) -> jni::errors::Result<String>
+    {
+        let jvm = self.get_jvm()?;
+        let env = jvm.attach_current_thread()?;
+        let res = unsafe {self.call_cxt_method("GetAgentData","()Ljava/lang/String;",&[])}?;
+        return if let jni::objects::JValue::Object(obj) = res {
+            let jstr = obj.into();
+            let s:String = env.get_string(jstr)?.into();
+            Ok(s)
+        }else{
+            Err(jni::errors::Error::JniCall(jni::errors::JniError::Unknown))
+        }
+    }
+    pub fn exec_cmd(&self,cmd:&String) -> jni::errors::Result<()>
+    {
+        let jvm = self.get_jvm()?;
+        let env = jvm.attach_current_thread()?;
+        let cmd = env.new_string(cmd)?;
+        unsafe {self.call_cxt_method("exec_cmd","(Ljava/lang/String;)V",&[cmd.into()])}?;
+        Ok(())
+    }
+    pub fn set_agent_data(&self,key:&str,val:&str) -> jni::errors::Result<()>
+    {
+        let jvm = self.get_jvm()?;
+        let env = jvm.attach_current_thread()?;
+        let key = env.new_string(key)?;
+        let val = env.new_string(val)?;
+        unsafe {self.call_cxt_method("exec_cmd","(Ljava/lang/String;Ljava/lang/String;)V",&[key.into(),val.into()])}?;
         Ok(())
     }
 }

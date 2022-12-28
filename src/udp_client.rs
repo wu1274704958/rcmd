@@ -72,6 +72,7 @@ async fn main() -> io::Result<()>
         handler.add_handler(Arc::new(client_handlers::send_file::SendFile::new()));
         handler.add_handler(Arc::new(client_handlers::save_file::SaveFile::with_observer(Box::new(on_save_file))));
         handler.add_handler(Arc::new(client_handlers::pull_file_ret::PullFileRet::new()));
+        handler.add_handler(Arc::new(client_handlers::agent_cmd_res::AgentCmdRes{}));
     }
 
     let p2p_plug_clone = Arc::new(Mutex::new(None));

@@ -1,6 +1,4 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use std::collections::VecDeque;
 use crate::client_plugs::p2p_plugs::P2PPlug;
 use crate::utils::command_mgr::{CmdHandler, CmdRet};
 use tokio::fs::OpenOptions;
@@ -46,11 +44,11 @@ impl CmdHandler for MainCmd{
         println!("再见！(*^_^*)");
     }
 
-    async fn on_one_key(&mut self, b: u8) -> CmdRet {
+    async fn on_one_key(&mut self, _b: u8) -> CmdRet {
         CmdRet::None
     }
 
-    async fn on_line(&mut self, cmds: Vec<&str>,str:&str) -> CmdRet {
+    async fn on_line(&mut self, cmds: Vec<&str>,_str:&str) -> CmdRet {
         match cmds[0] {
             "-" => {
                 return CmdRet::PoPSelf;
@@ -178,6 +176,17 @@ impl CmdHandler for MainCmd{
                     println!("Not find this entity!");
                 }
                 return CmdRet::None;
+            }
+            "ag" => {
+                if cmds.len() < 2 { return CmdRet::None; }
+                let lid = match usize::from_str(cmds[1].trim()) {
+                    Ok(v) => { v }
+                    Err(e) => {
+                        dbg!(e);
+                        return CmdRet::None;
+                    }
+                };
+                return CmdRet::Push(Box::new(super::agent_cmd::AgentCmd::new(self.client.clone(),lid)));
             }
             _ => {
                 let help = r"

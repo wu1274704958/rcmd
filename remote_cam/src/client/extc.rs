@@ -54,6 +54,16 @@ pub const EXT_P2P_NOTIFY_RELAY_SC:u32 = 80;
 pub const EXT_P2P_NOTIFY_RELAY_CS:u32 = 81;
 pub const EXT_P2P_RELAY_MSG_SC:u32 = 82;
 pub const EXT_P2P_RELAY_MSG_CS:u32 = 83;
+// 代理命令
+pub const EXT_AGENT_GET_DATA:u32 = 84;
+pub const EXT_AGENT_RET_DATA:u32 = 85;
+pub const EXT_AGENT_EXEC_CMD:u32 = 86;
+pub const EXT_AGENT_SET_DATA:u32 = 87;
+
+pub const EXT_AGENT_GET_DATA_CS:u32 = 88;
+pub const EXT_AGENT_RET_DATA_CS:u32 = 89;
+pub const EXT_AGENT_EXEC_CMD_CS:u32 = 90;
+pub const EXT_AGENT_SET_DATA_CS:u32 = 91;
 
 
 pub const EXT_DEFAULT_ERR_CODE:u32 = 50000;
@@ -85,6 +95,12 @@ pub const EXT_ERR_SAVE_FILE_RET_EXT:u32 = 50025;
 pub const EXT_ERR_PULL_FILE_RET_EXT:u32 = 50026;
 pub const EXT_ERR_BAD_FILE_PATH:u32 = 50027;
 pub const EXT_ERR_OPEN_FILE:u32 = 50028;
+//代理命令 错误码
+pub const EXT_ERR_LOSE_AGENT_CONTEXT:u32 = 50029;
+pub const EXT_ERR_CALL_AGENT_METHOD:u32 = 50030;
+
+pub const EXT_ERR_LOSE_AGENT_CONTEXT_CS:u32 = 50031;
+pub const EXT_ERR_CALL_AGENT_METHOD_CS:u32 = 50032;
 
 //p2p 相关错误码
 pub const EXT_ERR_LINK_DATA_ALREADY_EXIST:u32 = 50029;
@@ -99,3 +115,4 @@ pub const EXT_ERR_P2P_WAIT_ACCEPT_TIMEOUT:u32 = 50036;
 //p2p Client
 pub const EXT_P2P_CLIENT_VERIFY_CS:u32 = 70000;
 pub const EXT_P2P_CLIENT_VERIFY_SC:u32 = 70001;
+

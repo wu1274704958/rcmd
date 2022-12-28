@@ -80,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         handler.add_handler(Arc::new(handlers::send_file::SendFile::new(user_map.clone(),temp_permission.clone())));
         handler.add_handler(Arc::new(handlers::pull_file::PullFile::new(user_map.clone(),temp_permission.clone())));
         handler.add_handler(Arc::new(P2PHandlerSer::new(p2p_data.clone())));
+        handler.add_handler(Arc::new(handlers::agent_cmd_forward::AgentCmdForward::new(user_map.clone())));
 
         plugs.add_plug(Arc::new(HeartBeat{}));
         plugs.add_plug(Arc::new(p2p_plugs::P2PPlug::new(p2p_data.clone())));

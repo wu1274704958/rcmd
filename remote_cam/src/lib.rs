@@ -82,4 +82,3 @@ fn toast(s:String,p:i32)
         c.toast(s.as_str(), p).unwrap();
     }
 }
-
