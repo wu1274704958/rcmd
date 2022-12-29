@@ -70,6 +70,9 @@ impl CmdHandler for AgentCmd{
                 let mut args = String::new();
                 for c in 1..cmds.len(){
                     args.push_str(cmds[c]);
+                    if c < cmds.len() - 1{
+                        args.push(' ');
+                    }
                 }
                 
                 self.send(self.new_data_with(args.into_bytes()), EXT_AGENT_SET_DATA_CS).await;

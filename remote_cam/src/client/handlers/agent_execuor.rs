@@ -100,9 +100,10 @@ impl AgentExecuor {
         {
             let cmd = String::from_utf8_lossy(cmd).to_string();
             let cmds: Vec<&str> = cmd.split(" ").map(|it| { it.trim() }).collect();
+            toast(&c,format!("{:?}",cmds),0);
             let mut i = 0;
             loop {
-                if i >= cmds.len() {break;}
+                if i >= cmds.len() || i + 1 >= cmds.len() {break;}
                 if let Err(e) = c.set_agent_data(cmds[i], cmds[i+1]) {
                     toast(&c,format!("call set_agent_data err = {:?}",e),-1);
                     return Some((self.new_data(lid),extc::EXT_ERR_CALL_AGENT_METHOD_CS));

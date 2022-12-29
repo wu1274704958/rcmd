@@ -200,7 +200,7 @@ impl Context {
         let env = jvm.attach_current_thread()?;
         let key = env.new_string(key)?;
         let val = env.new_string(val)?;
-        unsafe {self.call_cxt_method("exec_cmd","(Ljava/lang/String;Ljava/lang/String;)V",&[key.into(),val.into()])}?;
+        unsafe {self.call_cxt_method("set_agent_data","(Ljava/lang/String;Ljava/lang/String;)V",&[key.into(),val.into()])}?;
         Ok(())
     }
 }
